@@ -1,0 +1,32 @@
+MetalERP v3.0 — Versión completa
+
+MÓDULOS COMPLETADOS EN ESTA REVISIÓN:
+  • Procesos/Productos:
+    - Filtro de catálogo por cliente (dropdown en la parte superior)
+    - Botón "Clientes" por producto → vincula/desvincula clientes
+    - Edición de operaciones sin eliminarlas (botón Editar por op.)
+    - Validación: alerta si el N° de orden ya está en uso en ese proceso
+  • Inventario:
+    - Nueva pestaña "Productos terminados" separada por cliente
+    - Stock generado automáticamente al completar última operación
+  • Órdenes de trabajo:
+    - Botón "Detalle" por OT → modal con dos pestañas:
+      · Operaciones: desglose por renglón con sector, máquina, tiempos,
+        cantidad requerida vs producida, % avance por operación
+      · Materias primas: listado con requerido vs asignado vs stock,
+        botón "Asignar" que descuenta del inventario en tiempo real
+  • Control de producción:
+    - Novedades con rendimiento automático vs estándar
+    - Descuento de MP al declarar novedad
+    - Alta de PT en inventario al completar última op.
+  • Recursos Humanos: nómina, operadores directos, grupos de máquinas
+  • Pedidos de clientes: OC recibidas con carga masiva
+  • Módulo de compras: SC → cotizaciones comparativas → OC con aprobación
+    por monto ($50.000) → recepción → stock
+  • MRP: consolidación de pedidos → generación automática de OTs,
+    carga de trabajo por sector productivo
+
+INSTALACIÓN: igual que versiones anteriores.
+Doble clic en INICIAR_SERVIDOR.bat
+
+Usuarios: admin/admin123 | operario1/op123 | vendedor1/vend123 | almacen1/alm123
