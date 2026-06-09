@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL, password TEXT NOT NULL,
     nombre TEXT NOT NULL,
-    rol TEXT NOT NULL CHECK(rol IN ('admin','operario','vendedor','almacen')),
+    rol TEXT NOT NULL CHECK(rol IN ('admin','operario','vendedor','almacen','produccion')),
     activo INTEGER DEFAULT 1,
     creado TEXT DEFAULT (datetime('now','localtime')));
 
@@ -1386,7 +1386,7 @@ def get_ordenes():
     return jsonify([dict(r) for r in rows])
 
 @app.route("/api/ordenes", methods=["POST"])
-@login_required(roles=["admin","operario","vendedor"])
+@login_required(roles=["admin","operario","vendedor","produccion"])
 def create_orden():
     d = request.json
     if not d.get("producto_id"): return jsonify({"error":"Producto requerido"}), 400
@@ -1560,7 +1560,7 @@ def populate_orden_operaciones(oid):
     return jsonify({"ok":True,"ops_created":len(ops)})
 
 @app.route("/api/orden_operaciones/<int:ooid>", methods=["PUT"])
-@login_required(roles=["admin","operario"])
+@login_required(roles=["admin","operario","produccion"])
 def update_orden_operacion(ooid):
     d = request.json
     execute("UPDATE orden_operaciones SET estado=?,qty_producida=? WHERE id=?",
@@ -1569,7 +1569,7 @@ def update_orden_operacion(ooid):
 
 # ── CRUD completo para operaciones de OT ─────────────────────────────────────
 @app.route("/api/ordenes/<int:oid>/operaciones/<int:opid>", methods=["PUT"])
-@login_required(roles=["admin","operario"])
+@login_required(roles=["admin","operario","produccion"])
 def update_ot_operacion(oid, opid):
     d = request.json
     execute("""UPDATE orden_operaciones SET
@@ -1585,13 +1585,13 @@ def update_ot_operacion(oid, opid):
     return jsonify({"ok": True})
 
 @app.route("/api/ordenes/<int:oid>/operaciones/<int:opid>", methods=["DELETE"])
-@login_required(roles=["admin","operario"])
+@login_required(roles=["admin","operario","produccion"])
 def delete_ot_operacion(oid, opid):
     execute("DELETE FROM orden_operaciones WHERE id=? AND orden_id=?", (opid, oid))
     return jsonify({"ok": True})
 
 @app.route("/api/ordenes/<int:oid>/operaciones", methods=["POST"])
-@login_required(roles=["admin","operario"])
+@login_required(roles=["admin","operario","produccion"])
 def add_ot_operacion(oid):
     d = request.json
     if not d.get("nombre"): return jsonify({"error":"Nombre requerido"}), 400
@@ -1695,7 +1695,7 @@ def get_ott(oid):
     return jsonify(dict(r))
 
 @app.route("/api/ott", methods=["POST"])
-@login_required(roles=["admin","operario"])
+@login_required(roles=["admin","operario","produccion"])
 def create_ott():
     d = request.json
     if not d.get("proveedor_id"):
@@ -1716,7 +1716,7 @@ def create_ott():
     return jsonify({"ok": True, "id": lid, "numero": numero}), 201
 
 @app.route("/api/ott/<int:oid>", methods=["PUT"])
-@login_required(roles=["admin","operario"])
+@login_required(roles=["admin","operario","produccion"])
 def update_ott(oid):
     d = request.json
     execute("""UPDATE ordenes_tercerizado SET estado=?,proveedor_id=?,precio_acordado=?,
@@ -1726,7 +1726,7 @@ def update_ott(oid):
     return jsonify({"ok": True})
 
 @app.route("/api/ott/<int:oid>/emitir_remito", methods=["POST"])
-@login_required(roles=["admin","operario"])
+@login_required(roles=["admin","operario","produccion"])
 def ott_emitir_remito(oid):
     """Genera remito de traslado: piezas salen del taller hacia el proveedor."""
     ott = query("SELECT * FROM ordenes_tercerizado WHERE id=?", (oid,), one=True)
@@ -1830,7 +1830,7 @@ def ott_registrar_retorno(oid):
     return jsonify(resultado), 201
 
 @app.route("/api/ott/<int:oid>/completar", methods=["POST"])
-@login_required(roles=["admin","operario"])
+@login_required(roles=["admin","operario","produccion"])
 def ott_completar(oid):
     execute("UPDATE ordenes_tercerizado SET estado='Completado' WHERE id=?", (oid,))
     return jsonify({"ok": True})
@@ -1919,7 +1919,7 @@ def get_herramientas(opid):
     return jsonify([dict(r) for r in rows])
 
 @app.route("/api/operaciones/<int:opid>/herramientas", methods=["POST"])
-@login_required(roles=["admin","operario"])
+@login_required(roles=["admin","operario","produccion"])
 def add_herramienta(opid):
     d = request.json
     if not d.get("nombre"):
@@ -1932,7 +1932,7 @@ def add_herramienta(opid):
     return jsonify({"ok": True, "id": lid}), 201
 
 @app.route("/api/operaciones/<int:opid>/herramientas/<int:hid>", methods=["PUT"])
-@login_required(roles=["admin","operario"])
+@login_required(roles=["admin","operario","produccion"])
 def update_herramienta(opid, hid):
     d = request.json
     execute("""UPDATE herramientas_operacion SET orden=?,nombre=?,descripcion=?,
@@ -1943,7 +1943,7 @@ def update_herramienta(opid, hid):
     return jsonify({"ok": True})
 
 @app.route("/api/operaciones/<int:opid>/herramientas/<int:hid>", methods=["DELETE"])
-@login_required(roles=["admin","operario"])
+@login_required(roles=["admin","operario","produccion"])
 def delete_herramienta(opid, hid):
     execute("DELETE FROM herramientas_operacion WHERE id=? AND operacion_id=?", (hid, opid))
     return jsonify({"ok": True})
@@ -2494,7 +2494,7 @@ def get_novedades():
     return jsonify([dict(r) for r in rows])
 
 @app.route("/api/novedades", methods=["POST"])
-@login_required(roles=["admin","operario"])
+@login_required(roles=["admin","operario","produccion"])
 def create_novedad():
     d = request.json
     if not d.get("orden_id") or not d.get("orden_operacion_id"):
@@ -2646,7 +2646,7 @@ def get_novedad(nid):
     return jsonify(dict(row))
 
 @app.route("/api/novedades/<int:nid>", methods=["PUT"])
-@login_required(roles=["admin","operario"])
+@login_required(roles=["admin","operario","produccion"])
 def update_novedad(nid):
     """Edita una novedad y ajusta stocks/consumos por diferencia."""
     d = request.json
@@ -4105,3 +4105,4 @@ if __name__ == "__main__":
     print(f"  Red:     http://{ip}:5000")
     print(f"\n  Usuario: admin  |  Contraseña: admin123\n")
     app.run(host="0.0.0.0", port=5000, debug=False)
+    
