@@ -1,0 +1,84 @@
+====================================================
+   MetalERP v3 — Entregable Final React
+====================================================
+
+CONTENIDO DEL ZIP:
+  - metalerp_v3/server.py         Backend Flask (134 endpoints)
+  - metalerp_v3/templates/*.html  Frontend legacy (compatibilidad)
+  - metalerp_v3/static/dist/      Frontend React compilado
+  - metalerp_v3/ACTUALIZAR.bat    Script para actualizar instalacion existente
+  - metalerp_v3/INICIAR_SERVIDOR.bat  Iniciar el servidor
+  - metalerp_react/               Codigo fuente TypeScript del frontend React
+
+24 MODULOS MIGRADOS A REACT/TYPESCRIPT:
+
+  PRINCIPAL
+  - Dashboard Produccion (con stats, OTs, rendimiento semanal)
+  - Dashboard Economico (facturacion, top clientes, pipeline)
+
+  PRODUCCION
+  - Ordenes de trabajo
+  - Procesos / Productos
+  - Control de produccion
+  - Novedades por OT
+  - Planificacion MRP
+  - OTT - Terceros
+
+  RECURSOS
+  - Maquinas
+  - Recursos humanos
+  - Rendimiento operarios
+
+  DEPOSITO
+  - Inventario
+  - Movimientos
+  - Lotes
+  - Remitir a cliente
+
+  VENTAS
+  - Presupuestos
+  - Clientes
+  - Pedidos de clientes
+
+  COMPRAS
+  - Solicitudes de compra
+  - Proveedores
+
+  CALIDAD
+  - Liberacion de lotes
+
+  SISTEMA
+  - Configuracion
+  - Carga masiva (link a version anterior)
+  - Usuarios
+
+PRIMERA INSTALACION:
+  1. Descomprimir el ZIP
+  2. Asegurarse de tener Python 3.10+ y Flask instalados
+  3. Ejecutar INICIAR_SERVIDOR.bat
+  4. Abrir http://localhost:5000/app
+
+ACTUALIZAR INSTALACION EXISTENTE:
+  1. Descomprimir el ZIP en cualquier carpeta
+  2. Ejecutar ACTUALIZAR.bat
+  3. Ingresar la ruta de tu instalacion (ej: C:\MetalERP\metalerp_v3)
+  4. Reiniciar INICIAR_SERVIDOR.bat
+  5. La base de datos NO se modifica - las migraciones se aplican automaticamente
+
+ACCESO:
+  - Version React:    http://localhost:5000/app
+  - Version legacy:   http://localhost:5000
+
+DESARROLLO (opcional):
+  Si queres modificar el frontend React:
+  1. Instalar Node.js 20+
+  2. cd metalerp_react
+  3. npm install
+  4. npm run dev      (hot reload en localhost:5173)
+  5. npm run build    (compila a metalerp_v3/static/dist)
+
+CREDENCIALES POR DEFECTO:
+  Usuario:    admin
+  Password:   admin
+
+(Cambialas desde el modulo Usuarios)

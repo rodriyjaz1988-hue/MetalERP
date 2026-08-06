@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MetalERP — Ingresar</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f4f4f2;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.card{background:#fff;border:1px solid #e0e0d8;border-radius:12px;padding:40px 36px;width:360px;box-shadow:0 2px 12px rgba(0,0,0,.06)}
+.logo{text-align:center;margin-bottom:28px}
+.logo h1{font-size:22px;font-weight:600;color:#1a1a1a;letter-spacing:-.3px}
+.logo p{font-size:13px;color:#888;margin-top:3px}
+label{display:block;font-size:12px;font-weight:500;color:#555;margin-bottom:5px;margin-top:16px}
+input{width:100%;padding:9px 12px;font-size:14px;border:1px solid #ddd;border-radius:7px;outline:none;transition:border .15s;background:#fff}
+input:focus{border-color:#378ADD}
+.btn{width:100%;margin-top:22px;padding:10px;background:#378ADD;color:#fff;border:none;border-radius:7px;font-size:14px;font-weight:500;cursor:pointer;transition:background .15s}
+.btn:hover{background:#185FA5}
+.error{background:#FCEBEB;color:#A32D2D;border:1px solid #F7C1C1;border-radius:7px;padding:9px 12px;font-size:13px;margin-top:14px;text-align:center}
+.footer{text-align:center;font-size:11px;color:#aaa;margin-top:20px}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <h1>MetalERP</h1>
+    <p>Sistema de gestión del taller</p>
+  </div>
+  <form id="form">
+    <label>Usuario</label>
+    <input type="text" id="username" name="username" placeholder="usuario" autocomplete="username" required>
+    <label>Contraseña</label>
+    <input type="password" id="password" name="password" placeholder="••••••••" autocomplete="current-password" required>
+    <button type="submit" class="btn">Ingresar</button>
+    <div class="error" id="err" style="display:none"></div>
+  </form>
+  <div class="footer">MetalERP v3.100 · Red local del taller</div>
+</div>
+<script>
+document.getElementById('form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const btn = e.target.querySelector('button');
+  btn.textContent = 'Ingresando...'; btn.disabled = true;
+  const res = await fetch('/login', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      username: document.getElementById('username').value,
+      password: document.getElementById('password').value
+    })
+  });
+  const data = await res.json();
+  if(data.ok) { window.location.href = '/'; }
+  else {
+    const err = document.getElementById('err');
+    err.textContent = data.error || 'Error al ingresar';
+    err.style.display = 'block';
+    btn.textContent = 'Ingresar'; btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
