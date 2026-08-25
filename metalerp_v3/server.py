@@ -1055,6 +1055,31 @@ CREATE TABLE IF NOT EXISTS pronostico_item_ots (
     ot_id INTEGER NOT NULL REFERENCES ordenes(id),
     UNIQUE(item_id, ot_id));
 
+CREATE TABLE IF NOT EXISTS requerimientos_productivos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    numero TEXT NOT NULL,
+    cliente_id INTEGER REFERENCES clientes(id),
+    codigo TEXT,
+    material_proceso TEXT,
+    provision TEXT,
+    cantidad_pedida REAL NOT NULL DEFAULT 0,
+    unidad TEXT,
+    proveedor_id INTEGER REFERENCES proveedores(id),
+    nro_oc_remito TEXT,
+    f_pedido TEXT, f_necesidad TEXT, f_estimada TEXT, f_entrega TEXT,
+    estado TEXT DEFAULT 'PROXIMO',
+    cantidad_entregada REAL,
+    remito TEXT,
+    nro_factura TEXT,
+    cumple_fecha INTEGER,
+    cumple_cantidad INTEGER,
+    cumple_calidad INTEGER,
+    nro_icp TEXT,
+    cant_no_conforme REAL,
+    ubicacion_remito TEXT,
+    obs TEXT,
+    creado TEXT DEFAULT (datetime('now','localtime')));
+
 """
 
 # ── Seed data ─────────────────────────────────────────────────────────────────
@@ -1163,6 +1188,20 @@ def init_db():
         db.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_materiales_producto_categoria
             ON materiales(producto_id, categoria) WHERE producto_id IS NOT NULL
+        """)
+    except Exception: pass
+
+    # Backfill: materiales.codigo es una copia denormalizada del código del
+    # producto vinculado (producto_id). Si el código del producto se editó
+    # después de vincularlo, el material de inventario quedaba con el código
+    # viejo. Se sincroniza una vez al arrancar para corregir datos existentes.
+    try:
+        db.execute("""
+            UPDATE materiales SET codigo = (
+                SELECT p.codigo FROM productos p WHERE p.id = materiales.producto_id
+            )
+            WHERE producto_id IS NOT NULL
+              AND codigo != (SELECT p.codigo FROM productos p WHERE p.id = materiales.producto_id)
         """)
     except Exception: pass
 
@@ -1385,6 +1424,74 @@ def init_db():
     except Exception: pass
     try:
         db.execute("ALTER TABLE ordenes_tercerizado ADD COLUMN cantidad_recibida REAL DEFAULT 0")
+    except Exception: pass
+    try:
+        # Acumulado de piezas rechazadas (clasificadas en Lotes) que ya se
+        # devolvieron físicamente al proveedor vía el botón "Devolver" (ver
+        # ott_devolver_rechazo). Sirve para no devolver dos veces lo mismo
+        # cuando se clasifica el lote de a partes y para saber cuánto de lo
+        # recibido sigue "afuera" (rechazado y ya devuelto) vs. lo que
+        # todavía está físicamente en el taller esperando clasificación.
+        db.execute("ALTER TABLE ordenes_tercerizado ADD COLUMN cantidad_rechazada_devuelta REAL DEFAULT 0")
+    except Exception: pass
+    try:
+        db.execute("ALTER TABLE ordenes_tercerizado ADD COLUMN remito_devolucion_id INTEGER REFERENCES remitos(id)")
+    except Exception: pass
+    try:
+        # Vínculo directo ítem de OC -> lote que ese ítem generó al emitirse la
+        # OC (ver create_oc). Antes el lote solo se ubicaba por
+        # referencia_proveedor+material_id; guardarlo acá evita ambigüedad
+        # cuando una misma OC tiene dos ítems del mismo material, y es lo que
+        # usa devolver_rechazo_oc para saber qué lote mirar por ítem.
+        db.execute("ALTER TABLE ordenes_compra_items ADD COLUMN lote_id INTEGER REFERENCES lotes(id)")
+    except Exception: pass
+    try:
+        # Igual que ordenes_tercerizado.cantidad_rechazada_devuelta: acumulado
+        # de piezas rechazadas de ESTE ítem ya devueltas al proveedor, para no
+        # devolver dos veces lo mismo si el lote se clasifica de a partes.
+        db.execute("ALTER TABLE ordenes_compra_items ADD COLUMN cantidad_rechazada_devuelta REAL DEFAULT 0")
+    except Exception: pass
+    try:
+        # Acumulado de lo YA reingresado al lote (vía recibir_oc) de piezas
+        # que se habían devuelto por rechazo — evita reingresar dos veces al
+        # recibir el reemplazo en varias entregas parciales (ver recibir_oc).
+        db.execute("ALTER TABLE ordenes_compra_items ADD COLUMN cantidad_rechazada_reingresada REAL DEFAULT 0")
+    except Exception: pass
+    try:
+        db.execute("ALTER TABLE ordenes_compra ADD COLUMN remito_devolucion_id INTEGER REFERENCES remitos(id)")
+    except Exception: pass
+    try:
+        db.execute("ALTER TABLE remitos ADD COLUMN oc_id INTEGER REFERENCES ordenes_compra(id)")
+    except Exception: pass
+    try:
+        # Backfill: materiales.descripcion es una copia denormalizada de
+        # productos.nombre para el material "espejo" de cada producto
+        # terminado (ver update_producto). Hasta ahora update_producto solo
+        # sincronizaba el código, así que cualquier producto renombrado antes
+        # de este fix dejó su material con el nombre viejo (se veía, por
+        # ejemplo, en "Lotes asignados" de la OT). Se corrige una sola vez acá.
+        db.execute("""UPDATE materiales SET descripcion=(SELECT p.nombre FROM productos p WHERE p.id=materiales.producto_id),
+            actualizado=datetime('now','localtime')
+            WHERE producto_id IS NOT NULL
+            AND descripcion != (SELECT p.nombre FROM productos p WHERE p.id=materiales.producto_id)""")
+    except Exception: pass
+    try:
+        # Backfill: antes, cantidad_original de un lote generado por retorno
+        # de OTT (ver ott_registrar_retorno) se iba SUMANDO en cada recepción
+        # parcial, sin bajar nunca al devolver piezas rechazadas — un ciclo
+        # de rechazo → devolución → reingreso del reemplazo terminaba
+        # inflando el original más allá de lo realmente enviado (ver fix en
+        # ott_registrar_retorno). Se corrige una sola vez: para todo lote de
+        # retorno de OTT cuyo original quedó por encima de lo enviado, se
+        # baja a cantidad_enviada.
+        db.execute("""UPDATE lotes SET cantidad_original=(
+                SELECT ott.cantidad_enviada FROM ordenes_tercerizado ott WHERE ott.lote_retorno_id=lotes.id
+            )
+            WHERE id IN (
+                SELECT ott.lote_retorno_id FROM ordenes_tercerizado ott
+                WHERE ott.lote_retorno_id IS NOT NULL AND COALESCE(ott.cantidad_enviada,0) > 0
+                  AND (SELECT l2.cantidad_original FROM lotes l2 WHERE l2.id=ott.lote_retorno_id) > ott.cantidad_enviada
+            )""")
     except Exception: pass
 
     # ── Herramientas por operación ───────────────────────────────────────────
@@ -2667,12 +2774,20 @@ def update_producto(pid):
         dup = query("SELECT id FROM productos WHERE codigo=? AND id!=?", (d["codigo"], pid), one=True)
         if dup:
             return jsonify({"error": f"El código '{d['codigo']}' ya está en uso por otro producto"}), 409
-    prod_actual = query("SELECT codigo FROM productos WHERE id=?", (pid,), one=True)
+    prod_actual = query("SELECT codigo,nombre FROM productos WHERE id=?", (pid,), one=True)
     if not prod_actual:
         return jsonify({"error": "Producto no encontrado"}), 404
     nuevo_codigo = d.get("codigo") or prod_actual["codigo"]
     execute("UPDATE productos SET codigo=?,nombre=?,descripcion=?,categoria_id=?,unidad=?,tiempo_total_hs=?,costo_mat=?,costo_mo=?,precio_venta=?,peso_kg=?,cliente_id=?,obs=?,activo=?,capacidad_cajon=? WHERE id=?",
         (nuevo_codigo,d["nombre"],d.get("descripcion"),d.get("categoria_id"),d.get("unidad","unid"),d.get("tiempo_total_hs",0),d.get("costo_mat",0),d.get("costo_mo",0),d.get("precio_venta",0),d.get("peso_kg",0),d.get("cliente_id") or None,d.get("obs"),1 if d.get("activo",True) else 0,d.get("capacidad_cajon") or None,pid))
+    # El material "espejo" del producto terminado en inventario (materiales.codigo
+    # y materiales.descripcion) es una copia denormalizada del producto — si
+    # cambiaron, hay que sincronizarlos o el inventario (p.ej. "Lotes
+    # asignados" en la OT, que muestra materiales.descripcion) queda
+    # mostrando el código/nombre viejo del producto.
+    if nuevo_codigo != prod_actual["codigo"] or d["nombre"] != prod_actual["nombre"]:
+        execute("UPDATE materiales SET codigo=?,descripcion=?,actualizado=datetime('now','localtime') WHERE producto_id=?",
+            (nuevo_codigo, d["nombre"], pid))
     return jsonify({"ok":True})
 
 @app.route("/api/operaciones", methods=["POST"])
@@ -2826,6 +2941,152 @@ def update_cliente(cid):
         (d["razon"],d["cuit"],d.get("iva"),d.get("rubro"),d.get("localidad"),d.get("direccion"),d["contacto"],d.get("cargo"),d.get("telefono"),d.get("email"),d.get("categoria","Regular"),d.get("plazo_pago"),d.get("trabajos"),d.get("obs"),cid))
     return jsonify({"ok":True})
 
+# ── Requerimientos productivos ─────────────────────────────────────────────────
+def _calc_estado_req(f_estimada, f_entrega, estado_actual=None):
+    """Replica la fórmula del Excel de origen:
+    - Con f_entrega cargada -> ENTREGADO.
+    - Sin f_entrega y hoy > f_estimada -> VENCIDO.
+    - Sin f_entrega y no vencido -> PROXIMO.
+    ANULADO es un estado manual (no lo calcula la fórmula): si el registro
+    ya está anulado y no se cargó entrega, se respeta esa marca manual.
+    """
+    if estado_actual == "ANULADO" and not f_entrega:
+        return "ANULADO"
+    if f_entrega:
+        return "ENTREGADO"
+    if f_estimada:
+        try:
+            fe = datetime.strptime(str(f_estimada)[:10], "%Y-%m-%d").date()
+            if date.today() > fe:
+                return "VENCIDO"
+        except (ValueError, TypeError):
+            pass
+    return "PROXIMO"
+
+def _calc_cumplimientos_req(f_estimada, f_entrega, cantidad_pedida, cantidad_entregada, cant_no_conforme):
+    """Calcula cumple_fecha / cumple_cantidad / cumple_calidad a partir de los
+    datos de entrega. Devuelve (cumple_fecha, cumple_cantidad, cumple_calidad),
+    cada uno 0/1, o None si todavía no hay entrega registrada (nada que evaluar)."""
+    if not f_entrega:
+        return None, None, None
+    cumple_fecha = None
+    if f_estimada:
+        try:
+            fe = datetime.strptime(str(f_estimada)[:10], "%Y-%m-%d").date()
+            fg = datetime.strptime(str(f_entrega)[:10], "%Y-%m-%d").date()
+            cumple_fecha = 1 if fg <= fe else 0
+        except (ValueError, TypeError):
+            cumple_fecha = None
+    cant_ent = cantidad_entregada or 0
+    cant_ped = cantidad_pedida or 0
+    cumple_cantidad = 1 if (cant_ped > 0 and cant_ent >= 0.9 * cant_ped) else 0
+    nc = cant_no_conforme or 0
+    cumple_calidad = 1 if nc == 0 else 0
+    return cumple_fecha, cumple_cantidad, cumple_calidad
+
+def _req_row_out(r):
+    d = dict(r)
+    d["estado"] = _calc_estado_req(d.get("f_estimada"), d.get("f_entrega"), d.get("estado"))
+    return d
+
+@app.route("/api/requerimientos_productivos", methods=["GET"])
+@login_required()
+def get_requerimientos_productivos():
+    sql = """SELECT rp.*, c.razon cliente_nombre, p.razon proveedor_nombre
+        FROM requerimientos_productivos rp
+        LEFT JOIN clientes c ON c.id=rp.cliente_id
+        LEFT JOIN proveedores p ON p.id=rp.proveedor_id
+        WHERE 1=1"""
+    params = []
+    cliente_id = request.args.get("cliente_id")
+    proveedor_id = request.args.get("proveedor_id")
+    if cliente_id:
+        sql += " AND rp.cliente_id=?"; params.append(cliente_id)
+    if proveedor_id:
+        sql += " AND rp.proveedor_id=?"; params.append(proveedor_id)
+    sql += " ORDER BY rp.id DESC"
+    rows = [_req_row_out(r) for r in query(sql, tuple(params))]
+    estado = request.args.get("estado")
+    if estado:
+        rows = [r for r in rows if r["estado"] == estado]
+    return jsonify(rows)
+
+@app.route("/api/requerimientos_productivos", methods=["POST"])
+@login_required(roles=["admin","almacen","vendedor"])
+def create_requerimiento_productivo():
+    d = request.json or {}
+    if not d.get("numero"): return jsonify({"error":"Número requerido"}), 400
+    if not d.get("cantidad_pedida"): return jsonify({"error":"Cantidad pedida requerida"}), 400
+    estado = _calc_estado_req(d.get("f_estimada"), d.get("f_entrega"), d.get("estado"))
+    cumple_fecha, cumple_cantidad, cumple_calidad = _calc_cumplimientos_req(
+        d.get("f_estimada"), d.get("f_entrega"), d.get("cantidad_pedida"),
+        d.get("cantidad_entregada"), d.get("cant_no_conforme"))
+    rid = execute("""INSERT INTO requerimientos_productivos
+        (numero,cliente_id,codigo,material_proceso,provision,cantidad_pedida,unidad,
+         proveedor_id,nro_oc_remito,f_pedido,f_necesidad,f_estimada,f_entrega,estado,
+         cantidad_entregada,remito,nro_factura,cumple_fecha,cumple_cantidad,cumple_calidad,
+         nro_icp,cant_no_conforme,ubicacion_remito,obs)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (d["numero"], d.get("cliente_id") or None, d.get("codigo"), d.get("material_proceso"),
+         d.get("provision"), d["cantidad_pedida"], d.get("unidad"),
+         d.get("proveedor_id") or None, d.get("nro_oc_remito"), d.get("f_pedido"),
+         d.get("f_necesidad"), d.get("f_estimada"), d.get("f_entrega"), estado,
+         d.get("cantidad_entregada"), d.get("remito"), d.get("nro_factura"),
+         cumple_fecha, cumple_cantidad, cumple_calidad,
+         d.get("nro_icp"), d.get("cant_no_conforme"), d.get("ubicacion_remito"), d.get("obs")))
+    return jsonify({"ok":True,"id":rid}), 201
+
+@app.route("/api/requerimientos_productivos/<int:rid>", methods=["PUT"])
+@login_required(roles=["admin","almacen","vendedor"])
+def update_requerimiento_productivo(rid):
+    d = request.json or {}
+    if not d.get("numero"): return jsonify({"error":"Número requerido"}), 400
+    if not d.get("cantidad_pedida"): return jsonify({"error":"Cantidad pedida requerida"}), 400
+    estado = _calc_estado_req(d.get("f_estimada"), d.get("f_entrega"), d.get("estado"))
+    cumple_fecha, cumple_cantidad, cumple_calidad = _calc_cumplimientos_req(
+        d.get("f_estimada"), d.get("f_entrega"), d.get("cantidad_pedida"),
+        d.get("cantidad_entregada"), d.get("cant_no_conforme"))
+    execute("""UPDATE requerimientos_productivos SET
+        numero=?,cliente_id=?,codigo=?,material_proceso=?,provision=?,cantidad_pedida=?,unidad=?,
+        proveedor_id=?,nro_oc_remito=?,f_pedido=?,f_necesidad=?,f_estimada=?,f_entrega=?,estado=?,
+        cantidad_entregada=?,remito=?,nro_factura=?,cumple_fecha=?,cumple_cantidad=?,cumple_calidad=?,
+        nro_icp=?,cant_no_conforme=?,ubicacion_remito=?,obs=? WHERE id=?""",
+        (d["numero"], d.get("cliente_id") or None, d.get("codigo"), d.get("material_proceso"),
+         d.get("provision"), d["cantidad_pedida"], d.get("unidad"),
+         d.get("proveedor_id") or None, d.get("nro_oc_remito"), d.get("f_pedido"),
+         d.get("f_necesidad"), d.get("f_estimada"), d.get("f_entrega"), estado,
+         d.get("cantidad_entregada"), d.get("remito"), d.get("nro_factura"),
+         cumple_fecha, cumple_cantidad, cumple_calidad,
+         d.get("nro_icp"), d.get("cant_no_conforme"), d.get("ubicacion_remito"), d.get("obs"), rid))
+    return jsonify({"ok":True})
+
+@app.route("/api/requerimientos_productivos/<int:rid>/entrega", methods=["PUT"])
+@login_required(roles=["admin","almacen","vendedor"])
+def registrar_entrega_requerimiento(rid):
+    """Registra los datos de recepción de un requerimiento y recalcula
+    automáticamente el estado y los 3 indicadores de cumplimiento."""
+    r = query("SELECT * FROM requerimientos_productivos WHERE id=?", (rid,), one=True)
+    if not r: return jsonify({"error":"Requerimiento no encontrado"}), 404
+    d = request.json or {}
+    if not d.get("f_entrega"): return jsonify({"error":"Fecha de entrega requerida"}), 400
+    cantidad_entregada = d.get("cantidad_entregada")
+    cant_no_conforme = d.get("cant_no_conforme")
+    estado = _calc_estado_req(r["f_estimada"], d.get("f_entrega"))
+    cumple_fecha, cumple_cantidad, cumple_calidad = _calc_cumplimientos_req(
+        r["f_estimada"], d.get("f_entrega"), r["cantidad_pedida"], cantidad_entregada, cant_no_conforme)
+    execute("""UPDATE requerimientos_productivos SET
+        f_entrega=?,cantidad_entregada=?,remito=?,nro_factura=?,cant_no_conforme=?,
+        estado=?,cumple_fecha=?,cumple_cantidad=?,cumple_calidad=? WHERE id=?""",
+        (d.get("f_entrega"), cantidad_entregada, d.get("remito"), d.get("nro_factura"),
+         cant_no_conforme, estado, cumple_fecha, cumple_cantidad, cumple_calidad, rid))
+    return jsonify({"ok":True})
+
+@app.route("/api/requerimientos_productivos/<int:rid>", methods=["DELETE"])
+@login_required(roles=["admin"])
+def delete_requerimiento_productivo(rid):
+    execute("DELETE FROM requerimientos_productivos WHERE id=?", (rid,))
+    return jsonify({"ok":True})
+
 # ── Ordenes ───────────────────────────────────────────────────────────────────
 @app.route("/api/ordenes", methods=["GET"])
 @login_required()
@@ -2845,7 +3106,8 @@ def get_ordenes():
         (SELECT COUNT(*) FROM orden_operaciones oo3 WHERE oo3.orden_id=o.id) ops_count,
         (SELECT COUNT(*) FROM orden_operaciones oo4 WHERE oo4.orden_id=o.id
          AND (oo4.estado!='Completada' OR oo4.qty_producida<oo4.qty_requerida)) ops_pendientes,
-        (SELECT COALESCE(SUM(ot.precio_acordado),0) FROM ordenes_tercerizado ot
+        (SELECT COALESCE(SUM(ot.precio_acordado * COALESCE(oo_ot.qty_requerida,1)),0)
+         FROM ordenes_tercerizado ot LEFT JOIN orden_operaciones oo_ot ON oo_ot.id=ot.operacion_id
          WHERE ot.ot_origen_id=o.id AND ot.estado!='Cancelado') costo_terciarizado
         FROM ordenes o LEFT JOIN clientes c ON c.id=o.cliente_id LEFT JOIN productos p ON p.id=o.producto_id"""
     rows = query(sql+" WHERE o.estado=? ORDER BY o.id DESC",(estado,)) if estado else query(sql+" ORDER BY o.id DESC")
@@ -3637,7 +3899,26 @@ def get_orden_operaciones(oid):
         LEFT JOIN proveedores p ON p.id=oo.proveedor_id
         LEFT JOIN ordenes_tercerizado ott ON ott.operacion_id=oo.id
         WHERE oo.orden_id=? ORDER BY CAST(oo.orden AS INTEGER), oo.orden""", (oid,))
-    return jsonify([dict(r) for r in rows])
+    out = [dict(r) for r in rows]
+    # Una operación queda bloqueada para revertir su estado (una vez
+    # Completada) si depende de una tercerización previa en la misma OT
+    # (ver _tiene_terc_previa) — el resto se puede revertir libremente.
+    for r in out:
+        try:
+            orden_num = int(r["orden"])
+        except Exception:
+            orden_num = None
+        r["depende_terc_previa"] = orden_num is not None and any(
+            o.get("es_tercerizada") for o in out
+            if o is not r and _orden_int(o.get("orden")) is not None and _orden_int(o.get("orden")) < orden_num
+        )
+    return jsonify(out)
+
+def _orden_int(v):
+    try:
+        return int(v)
+    except Exception:
+        return None
 
 def _populate_orden_operaciones(oid):
     """Borra y regenera orden_operaciones a partir del producto actual de la OT.
@@ -3706,14 +3987,34 @@ def populate_orden_operaciones(oid):
     if n is None: return jsonify({"error":"La OT no tiene producto asignado"}), 400
     return jsonify({"ok":True,"ops_created":n})
 
+def _tiene_terc_previa(orden_id, orden_num):
+    """True si existe alguna operación tercerizada ANTERIOR (orden menor) en
+    la misma OT, sin importar su estado. Se usa para restringir la reversión
+    de estado 'Completada': solo las operaciones que consumen o dependen de
+    una tercerización previa quedan bloqueadas una vez completadas; el resto
+    de las operaciones se puede revertir libremente."""
+    try:
+        orden_num_int = int(orden_num)
+    except Exception:
+        return False
+    row = query("""SELECT 1 FROM orden_operaciones
+        WHERE orden_id=? AND es_tercerizada=1
+          AND CAST(orden AS INTEGER) < ?
+        LIMIT 1""", (orden_id, orden_num_int), one=True)
+    return row is not None
+
+
 @app.route("/api/orden_operaciones/<int:ooid>", methods=["PUT"])
 @login_required(roles=["admin","operario"])
 def update_orden_operacion(ooid):
     d = request.json
     nuevo_estado = d.get("estado","Pendiente")
+    oo = query("SELECT orden_id, orden, estado, es_tercerizada FROM orden_operaciones WHERE id=?", (ooid,), one=True)
+    if not oo: return jsonify({"error":"Operación no encontrada"}), 404
+    if oo["estado"] == "Completada" and nuevo_estado != "Completada" and _tiene_terc_previa(oo["orden_id"], oo["orden"]):
+        return jsonify({"error": "Esta operación depende de una tercerización previa y ya está "
+            "Completada: no se puede revertir a un estado anterior."}), 400
     if nuevo_estado != "Pendiente":
-        oo = query("SELECT orden_id, orden, estado, es_tercerizada FROM orden_operaciones WHERE id=?", (ooid,), one=True)
-        if not oo: return jsonify({"error":"Operación no encontrada"}), 404
         if nuevo_estado in ("En proceso","Completada"):
             if oo["es_tercerizada"]:
                 return jsonify({"error": "Esta operación es tercerizada: se completa sola cuando vuelve "
@@ -3764,9 +4065,12 @@ def update_ot_operacion(oid, opid):
     fields = {k: v for k, v in d.items() if k in allowed}
     if not fields:
         return jsonify({"ok": True, "noop": True})
-    if fields.get("estado") and fields["estado"] != "Pendiente":
+    if fields.get("estado"):
         oo = query("SELECT orden, estado, es_tercerizada FROM orden_operaciones WHERE id=? AND orden_id=?", (opid, oid), one=True)
         if not oo: return jsonify({"error":"Operación no encontrada"}), 404
+        if oo["estado"] == "Completada" and fields["estado"] != "Completada" and _tiene_terc_previa(oid, oo["orden"]):
+            return jsonify({"error": "Esta operación depende de una tercerización previa y ya está "
+                "Completada: no se puede revertir a un estado anterior."}), 400
         if fields["estado"] in ("En proceso","Completada"):
             if oo["es_tercerizada"]:
                 return jsonify({"error": "Esta operación es tercerizada: se completa sola cuando vuelve "
@@ -3775,6 +4079,19 @@ def update_ot_operacion(oid, opid):
             if bloqueo:
                 return jsonify({"error": f"OT pausada: la operación tercerizada \"{bloqueo['nombre']}\" "
                     f"(orden {bloqueo['orden']}) todavía no fue recibida/aprobada."}), 400
+            # Si esta operación es la que debe consumir el semielaborado
+            # devuelto por una OTT anterior, no se puede completar a mano
+            # desde este select: hay que declarar la Novedad de producción
+            # con la cantidad, que es lo único que descuenta/libera el lote
+            # de la OTT (ver _materiales_ott_pendientes_por_operacion). Si
+            # se permitiera acá, el lote queda "pegado" con cantidad
+            # aprobada y reservada para siempre (bug reportado).
+            pendientes_ott = _materiales_ott_pendientes_por_operacion(oid, opid)
+            if pendientes_ott:
+                return jsonify({"error": "Esta operación consume el semielaborado devuelto por una "
+                    "tercerización anterior: no se puede completar cambiando el estado a mano. "
+                    "Cargá una Novedad de producción con la cantidad para que el lote de la OTT "
+                    "se descuente correctamente."}), 400
     # Si se está por cambiar qty_requerida, necesitamos el proceso_op_id ANTES
     # del UPDATE para saber qué materiales de esta operación recalcular después.
     proceso_op_id = None
@@ -3871,7 +4188,13 @@ def get_orden_materiales(oid):
 def populate_orden_materiales(oid):
     n = _populate_orden_materiales(oid)
     if n is None: return jsonify({"error":"OT sin producto"}), 400
-    return jsonify({"ok":True,"mats":n})
+    # Si algún material requerido es un Producto Terminado (no se puede
+    # comprar en Compras) y no hay stock suficiente para cubrir esta OT, se
+    # genera automáticamente una OT auxiliar por el faltante — misma lógica
+    # que ya se usaba al consolidar pedidos de cliente/pronóstico, ahora
+    # también al crear/editar una OT manualmente desde Órdenes de trabajo.
+    solicitudes_creadas, ots_auxiliares = _gap_analysis_materiales_multipass()
+    return jsonify({"ok":True,"mats":n,"ots_auxiliares":ots_auxiliares,"solicitudes_compra":solicitudes_creadas})
 
 @app.route("/api/ordenes/<int:oid>/materiales/<int:mid>/asignar", methods=["POST"])
 @login_required(roles=["admin","almacen"])
@@ -3899,7 +4222,10 @@ def get_ott_list():
     sql = """SELECT ott.*,
         o.numero ot_numero, o.estado ot_estado, p.razon proveedor_nombre,
         po.nombre op_nombre, po.orden op_orden,
-        pr.nombre producto_nombre, pr.codigo producto_codigo
+        pr.nombre producto_nombre, pr.codigo producto_codigo,
+        COALESCE((SELECT l.cantidad_rechazada FROM lotes l WHERE l.id=ott.lote_retorno_id), 0)
+            - COALESCE(ott.cantidad_rechazada_devuelta,0) AS rechazado_pendiente_devolver,
+        (SELECT l.estado FROM lotes l WHERE l.id=ott.lote_retorno_id) AS lote_retorno_estado
         FROM ordenes_tercerizado ott
         LEFT JOIN ordenes o ON o.id=ott.ot_origen_id
         LEFT JOIN proveedores p ON p.id=ott.proveedor_id
@@ -3921,18 +4247,24 @@ def get_ott(oid):
         o.numero ot_numero, p.razon proveedor_nombre, p.telefono proveedor_tel,
         p.email proveedor_email, po.nombre op_nombre, po.orden op_orden,
         pr.nombre producto_nombre, pr.codigo producto_codigo,
-        rem.numero remito_numero, oo.qty_requerida oo_qty_requerida,
-        oo.orden_id oo_orden_id, oo.orden oo_orden
+        rem.numero remito_numero, remdev.numero remito_devolucion_numero,
+        oo.qty_requerida oo_qty_requerida,
+        oo.orden_id oo_orden_id, oo.orden oo_orden,
+        l.cantidad_rechazada lote_cantidad_rechazada
         FROM ordenes_tercerizado ott
         LEFT JOIN ordenes o ON o.id=ott.ot_origen_id
         LEFT JOIN proveedores p ON p.id=ott.proveedor_id
         LEFT JOIN proceso_operaciones po ON po.id=ott.proceso_op_id
         LEFT JOIN productos pr ON pr.id=po.producto_id
         LEFT JOIN remitos rem ON rem.id=ott.remito_traslado_id
+        LEFT JOIN remitos remdev ON remdev.id=ott.remito_devolucion_id
         LEFT JOIN orden_operaciones oo ON oo.id=ott.operacion_id
+        LEFT JOIN lotes l ON l.id=ott.lote_retorno_id
         WHERE ott.id=?""", (oid,), one=True)
     if not r: return jsonify({"error":"OTT no encontrada"}), 404
     r = dict(r)
+    r["rechazado_pendiente_devolver"] = round(
+        float(r.get("lote_cantidad_rechazada") or 0) - float(r.get("cantidad_rechazada_devuelta") or 0), 6)
     # Cantidad disponible para remitir. Prioridad:
     # 1) Si hay una operación ANTERIOR dentro de la misma OT (misma
     #    secuencia de proceso), lo disponible es lo que esa operación
@@ -4180,9 +4512,12 @@ def ott_registrar_retorno(oid):
     Igual que "Recibir" en OC emitidas: se puede recibir en distintas
     ocasiones (recepciones parciales) mientras el proveedor va entregando.
     Todo lo recibido para una misma OTT va SIEMPRE al mismo lote (se
-    amplía cantidad_original/cantidad_disponible en vez de crear uno
-    nuevo por cada recepción parcial), para no fragmentar la trazabilidad
-    de calidad de una misma tanda de piezas tercerizadas."""
+    amplía cantidad_disponible en vez de crear uno nuevo por cada
+    recepción parcial, para no fragmentar la trazabilidad de calidad de
+    una misma tanda de piezas tercerizadas). cantidad_original del lote se
+    fija en cantidad_enviada de la OTT (no se va acumulando con cada
+    recepción) para que un ciclo de rechazo → devolución → reingreso de
+    reemplazo no la infle más allá de lo realmente enviado."""
     ott = query("""SELECT ott.*,po.producto_id,pr.codigo prod_codigo,pr.nombre prod_nombre,
         pr.unidad prod_unidad,o.numero ot_numero
         FROM ordenes_tercerizado ott
@@ -4323,11 +4658,31 @@ def ott_registrar_retorno(oid):
         # aparecer en la cola de Calidad como pendiente de clasificar. Si
         # ya estaba "Ingresado" (quedaba algo pendiente de antes), no hace
         # falta tocar el estado.
-        execute("""UPDATE lotes SET cantidad_original=cantidad_original+?,
-            cantidad_disponible=cantidad_disponible+?,
-            estado=CASE WHEN estado IN ('Aprobado','Rechazado') THEN 'Ingresado' ELSE estado END
-            WHERE id=?""",
-            (cantidad, cantidad, lote_id))
+        #
+        # cantidad_original NO se va sumando con cada recepción parcial: se
+        # fija en cantidad_enviada de la OTT (el tamaño total acordado del
+        # envío), igual que en los lotes que genera una OC (cantidad_original
+        # = cantidad pedida). Si en cambio se fuera acumulando cantidad +
+        # cantidad en cada recepción, un ciclo de rechazo → devolución →
+        # reingreso del reemplazo (que vuelve a pasar por este mismo camino,
+        # ver ott_devolver_rechazo) infla el original más allá de lo
+        # realmente enviado (ej. recibo 90, rechazo y devuelvo esas 90,
+        # reingresan 80 de reemplazo → el original terminaba en 90+80=170 en
+        # vez de quedarse en los 100 que se enviaron en total). Si la OTT no
+        # tiene cantidad_enviada cargada (caso legado), se sigue acumulando
+        # como antes por no tener un techo de referencia.
+        if cantidad_enviada > 0:
+            execute("""UPDATE lotes SET cantidad_original=MAX(cantidad_original,?),
+                cantidad_disponible=cantidad_disponible+?,
+                estado=CASE WHEN estado IN ('Aprobado','Rechazado') THEN 'Ingresado' ELSE estado END
+                WHERE id=?""",
+                (cantidad_enviada, cantidad, lote_id))
+        else:
+            execute("""UPDATE lotes SET cantidad_original=cantidad_original+?,
+                cantidad_disponible=cantidad_disponible+?,
+                estado=CASE WHEN estado IN ('Aprobado','Rechazado') THEN 'Ingresado' ELSE estado END
+                WHERE id=?""",
+                (cantidad, cantidad, lote_id))
     else:
         last_l = query("""SELECT numero FROM lotes WHERE numero LIKE 'Lote-OTT-%'
             ORDER BY id DESC LIMIT 1""", one=True)
@@ -4344,11 +4699,16 @@ def ott_registrar_retorno(oid):
             nl += 1
             num_lote = f"Lote-OTT-{nl:03d}"
 
+        # cantidad_original arranca en cantidad_enviada (el total acordado
+        # del envío), no en lo recibido en esta primera entrega — ver
+        # comentario arriba en la rama de ampliación. Si no hay
+        # cantidad_enviada cargada, se usa lo recibido como antes.
+        cantidad_original_inicial = cantidad_enviada if cantidad_enviada > 0 else cantidad
         lote_id = execute("""INSERT INTO lotes
             (numero,material_id,cantidad_original,cantidad_disponible,cantidad_activa,
              proveedor_id,estado,obs,creado_por)
             VALUES (?,?,?,?,0,?,?,?,?)""",
-            (num_lote, mat_id, cantidad, cantidad, ott["proveedor_id"], "Ingresado",
+            (num_lote, mat_id, cantidad_original_inicial, cantidad, ott["proveedor_id"], "Ingresado",
              f"Retorno OTT {ott['numero']} — OT {ott['ot_numero'] or '—'} — pendiente de aprobación en Lotes",
              session["user_id"]))
 
@@ -4427,10 +4787,128 @@ def ott_registrar_retorno(oid):
     }
     return jsonify(resultado), 201
 
+@app.route("/api/ott/<int:oid>/devolver_rechazo", methods=["POST"])
+@login_required(roles=["admin","operario","almacen"])
+def ott_devolver_rechazo(oid):
+    """Devuelve al proveedor las piezas que Calidad rechazó del lote de
+    retorno de esta OTT (paso intermedio — solo aplica a OTTs con
+    lote_retorno_id, ver update_lote/_sync_ott_retorno_a_operacion).
+
+    La cantidad a devolver es SIEMPRE la que ya está clasificada como
+    Rechazada en el lote y que todavía no se devolvió antes (lote.cantidad_rechazada
+    menos lo ya acumulado en ordenes_tercerizado.cantidad_rechazada_devuelta) —
+    no se tipea a mano, para que coincida exactamente con lo que Calidad
+    clasificó. Si el lote se clasifica de a partes (ej. se rechaza más
+    después de una devolución previa), este endpoint se puede volver a
+    llamar y solo devuelve el excedente nuevo.
+
+    Efectos:
+    1) Se descuenta del lote lo devuelto: cantidad_rechazada y
+       cantidad_disponible bajan en esa medida (las piezas ya no están
+       físicamente en el taller, dejan de contar en la partición del lote).
+       cantidad_activa (aprobado) no se toca.
+    2) cantidad_recibida de la OTT baja en la misma medida — así el
+       proveedor queda "debiendo" esa cantidad otra vez: pendiente de
+       recibir (cantidad_enviada - cantidad_recibida) vuelve a ser mayor a
+       0 y el botón "Recibir" reaparece para cargar el reemplazo, que entra
+       al MISMO lote (ott.lote_retorno_id no se toca).
+    3) cantidad_rechazada_devuelta acumula lo devuelto, para trazabilidad y
+       para no devolver dos veces lo mismo.
+    4) Se emite un remito de devolución (tipo 'devolucion_ott') vinculado a
+       la OTT, igual que el remito de traslado que se emite al enviar.
+    """
+    ott = query("""SELECT ott.* FROM ordenes_tercerizado ott WHERE ott.id=?""", (oid,), one=True)
+    if not ott: return jsonify({"error":"OTT no encontrada"}), 404
+    if not ott["lote_retorno_id"]:
+        return jsonify({"error":"Esta OTT todavía no recibió ningún lote — no hay nada para devolver"}), 400
+    if ott["es_ultimo_nivel"]:
+        return jsonify({"error":"Las OTT de último nivel (PT → cliente) no generan lote clasificable "
+            "por Calidad, no aplica devolución de rechazo acá"}), 400
+
+    lote = query("SELECT * FROM lotes WHERE id=?", (ott["lote_retorno_id"],), one=True)
+    if not lote: return jsonify({"error":"Lote de retorno no encontrado"}), 404
+
+    ya_devuelto = float(ott["cantidad_rechazada_devuelta"] or 0)
+    rechazado_actual = float(lote["cantidad_rechazada"] or 0)
+    cantidad = round(rechazado_actual - ya_devuelto, 6)
+    if cantidad <= 0.0001:
+        return jsonify({"error":"No hay piezas rechazadas pendientes de devolver para esta OTT"}), 400
+
+    d = request.json or {}
+
+    # 1) Descontar del lote lo devuelto (sale físicamente del taller)
+    execute("""UPDATE lotes SET
+            cantidad_disponible=MAX(0, cantidad_disponible-?),
+            cantidad_rechazada=MAX(0, cantidad_rechazada-?)
+        WHERE id=?""", (cantidad, cantidad, lote["id"]))
+    execute("""INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id)
+        VALUES (?,?,'salida',?,?,?)""",
+        (lote["material_id"], lote["id"], cantidad,
+         f"Devolución a proveedor de piezas rechazadas — OTT {ott['numero']} (Lote {lote['numero']})",
+         session["user_id"]))
+
+    # 2) La OTT queda "debiendo" esa cantidad de nuevo del lado del proveedor
+    cantidad_recibida_previa = float(ott["cantidad_recibida"] or 0)
+    cantidad_recibida_nueva = max(0.0, cantidad_recibida_previa - cantidad)
+    cantidad_enviada = float(ott["cantidad_enviada"] or 0)
+    nuevo_estado = ott["estado"]
+    if ott["estado"] != "Completado":
+        nuevo_estado = "En proceso" if cantidad_recibida_nueva > 0 else (
+            "Remito emitido" if cantidad_enviada > 0 else ott["estado"])
+
+    # 3) Remito de devolución al proveedor
+    last_rem = query("SELECT numero FROM remitos ORDER BY id DESC LIMIT 1", one=True)
+    try: nr = int(last_rem["numero"].split("-")[1])+1 if last_rem else 1
+    except: nr = 1
+    num_rem = f"REM-{nr:04d}"
+    rid = execute("""INSERT INTO remitos (numero,cliente_id,fecha,estado,obs,creado_por,tipo,ott_id)
+        VALUES (?,NULL,date('now','localtime'),'Emitido',?,?,?,?)""",
+        (num_rem, d.get("obs", f"Devolución a proveedor — piezas rechazadas OTT {ott['numero']} "
+                               f"(Lote {lote['numero']})"),
+         session["user_id"], "devolucion_ott", oid))
+
+    execute("""UPDATE ordenes_tercerizado SET
+            estado=?, cantidad_recibida=?, cantidad_rechazada_devuelta=?,
+            remito_devolucion_id=?
+        WHERE id=?""",
+        (nuevo_estado, cantidad_recibida_nueva, ya_devuelto + cantidad, rid, oid))
+
+    return jsonify({"ok": True, "cantidad_devuelta": cantidad, "remito_numero": num_rem,
+        "remito_id": rid, "cantidad_recibida": cantidad_recibida_nueva,
+        "cantidad_rechazada_devuelta": ya_devuelto + cantidad, "estado": nuevo_estado})
+
 @app.route("/api/ott/<int:oid>/completar", methods=["POST"])
 @login_required(roles=["admin","operario"])
 def ott_completar(oid):
+    """Confirmación MANUAL de cierre de la OTT (botón "Completar"). Aprobar o
+    rechazar piezas del lote de retorno (ver update_lote/
+    _sync_ott_retorno_a_operacion) solo va actualizando qty_producida de la
+    operación de forma incremental — nunca marca nada como Completada por sí
+    solo. Acá, y solo acá, es donde el usuario decide dar la OTT por
+    cerrada, y recién en ese momento se marca Completada tanto la OTT como
+    la operación de la OT asociada (con lo aprobado hasta este momento como
+    qty_producida final)."""
+    ott = query("""SELECT ott.*, oo.id oo_id, oo.estado oo_estado
+        FROM ordenes_tercerizado ott
+        LEFT JOIN orden_operaciones oo ON oo.id=ott.operacion_id
+        WHERE ott.id=?""", (oid,), one=True)
+    if not ott: return jsonify({"error": "OTT no encontrada"}), 404
+    if ott["estado"] == "Completado":
+        return jsonify({"ok": True})  # ya estaba completada, idempotente
+
+    aprobado = None
+    if ott["lote_retorno_id"]:
+        lote = query("SELECT cantidad_activa FROM lotes WHERE id=?", (ott["lote_retorno_id"],), one=True)
+        if lote:
+            aprobado = float(lote["cantidad_activa"] or 0)
+
     execute("UPDATE ordenes_tercerizado SET estado='Completado' WHERE id=?", (oid,))
+    if ott["oo_id"] and ott["oo_estado"] != "Completada":
+        if aprobado is not None:
+            execute("UPDATE orden_operaciones SET estado='Completada',qty_producida=? WHERE id=?",
+                (aprobado, ott["oo_id"]))
+        else:
+            execute("UPDATE orden_operaciones SET estado='Completada' WHERE id=?", (ott["oo_id"],))
     return jsonify({"ok": True})
 
 # ── Materiales/PT requeridos por una operación de OT + lotes disponibles ──────
@@ -5087,15 +5565,15 @@ def explotar_multinivel(prod_id, qty, cliente_id, fecha_entrega_padre, oc_numero
                     sub_prod["id"], cant, cliente_id, fecha_ot,
                     oc_numero, nivel + 1, _ots, _visitados)
             else:
-                # PT sin proceso propio (se compra hecho, no se fabrica en
-                # planta: p.ej. un tubo que es insumo de una cupla). No hay
-                # OT hija posible porque no hay proceso que ejecutar — en
-                # este caso el faltante se resuelve por compra, no por
-                # producción: se dispara/actualiza la SC igual que con un
-                # material común.
-                auto_generar_sc_bajo_stock(
-                    mat["material_id"],
-                    f"explosión OC {oc_numero} → OT {numero_ot} (PT comprado, sin proceso propio)")
+                # PT sin proceso propio definido: no se puede fabricar (no
+                # hay ruta que ejecutar) y tampoco se puede comprar en
+                # Compras (regla del sistema: "Producto terminado" nunca es
+                # comprable). Esto es un problema de configuración del
+                # producto (le falta el proceso) — no se genera SC ni OT acá;
+                # queda como faltante visible en la OT para resolverlo a mano
+                # (definir el proceso del producto, o asignar/vincular un
+                # lote existente desde "Lotes asignados").
+                pass
         else:
             # Material real (no sub-producto de categoría "Producto
             # terminado"): puede tratarse igual de un producto fabricado en
@@ -5207,6 +5685,20 @@ def _ots_vinculadas_item(item_id):
     cubierto = sum(float(r["ot_cantidad"] or 0) for r in ots)
     return ots, cubierto
 
+def _pct_entrega_oc(ocid):
+    """Avance real de entrega de una OC (lo remitido sobre lo pedido),
+    misma lógica que en el listado de OCs. Se usa para bloquear
+    vincular/desvincular OTs una vez que la OC llegó al 100%."""
+    total_req = float(query("SELECT COALESCE(SUM(cantidad),0) s FROM ordenes_cliente_items WHERE orden_cliente_id=?",
+        (ocid,), one=True)["s"])
+    total_ent = float(query("""SELECT COALESCE(SUM(ri.cantidad),0) total
+        FROM remito_items ri
+        JOIN remitos rem ON rem.id=ri.remito_id
+        JOIN ordenes_cliente_items oci ON oci.id=ri.orden_cliente_item_id
+        WHERE oci.orden_cliente_id=? AND rem.estado!='Anulado'""",
+        (ocid,), one=True)["total"])
+    return min(100, round(total_ent/total_req*100)) if total_req else 0
+
 @app.route("/api/ordenes/vinculables", methods=["GET"])
 @login_required(roles=["admin","vendedor","operario"])
 def get_ordenes_vinculables():
@@ -5252,6 +5744,8 @@ def vincular_ot_item(item_id):
     if not ot_id: return jsonify({"error":"OT requerida"}), 400
     item = query("SELECT * FROM ordenes_cliente_items WHERE id=?", (item_id,), one=True)
     if not item: return jsonify({"error":"Ítem de OC no encontrado"}), 404
+    if _pct_entrega_oc(item["orden_cliente_id"]) >= 100:
+        return jsonify({"error":"La OC ya está 100% entregada: no se pueden vincular más OTs"}), 409
     ot = query("SELECT * FROM ordenes WHERE id=?", (ot_id,), one=True)
     if not ot: return jsonify({"error":"OT no encontrada"}), 404
     if ot["producto_id"] and item["producto_id"] and ot["producto_id"] != item["producto_id"]:
@@ -5273,6 +5767,8 @@ def desvincular_ot_item(item_id, ot_id):
     """Quita el vínculo entre una OT y un ítem de OC de cliente."""
     item = query("SELECT * FROM ordenes_cliente_items WHERE id=?", (item_id,), one=True)
     if not item: return jsonify({"error":"Ítem de OC no encontrado"}), 404
+    if _pct_entrega_oc(item["orden_cliente_id"]) >= 100:
+        return jsonify({"error":"La OC ya está 100% entregada: no se pueden desvincular OTs"}), 409
     execute("DELETE FROM orden_cliente_item_ots WHERE item_id=? AND ot_id=?", (item_id, ot_id))
     if item["ot_id"] == ot_id:
         otra = query("SELECT ot_id FROM orden_cliente_item_ots WHERE item_id=? ORDER BY id LIMIT 1", (item_id,), one=True)
@@ -5319,7 +5815,12 @@ def _generar_sc_materiales_faltantes(oid, numero_ot, motivo=""):
         FROM orden_materiales om JOIN materiales m ON m.id=om.material_id
         WHERE om.orden_id=?""", (oid,))
     for mat in mats:
-        if mat["categoria"] not in ("Material", "Insumo", "Herramienta", "Producto terminado"):
+        if mat["categoria"] not in ("Material", "Insumo", "Herramienta"):
+            # "Producto terminado" nunca genera Solicitud de Compra: no se
+            # compra en Compras. Si hace falta más de lo que hay en stock, se
+            # resuelve fabricándolo (OT auxiliar) — eso lo cubre
+            # _gap_analysis_materiales, que vuelve a correr sobre esta OT
+            # recién creada (ver _gap_analysis_materiales_multipass).
             continue
         requerido = float(mat["cantidad_requerida"] or 0)
         # Igual que en el gap analysis del MRP: si el material tiene
@@ -5360,7 +5861,7 @@ def _generar_sc_materiales_faltantes(oid, numero_ot, motivo=""):
             continue
 
         sc_num = next_numero_sc()
-        tipo_sc = "Productiva" if mat["categoria"] in ("Material", "Producto terminado") else "Indirecta"
+        tipo_sc = "Productiva" if mat["categoria"] == "Material" else "Indirecta"
         execute("""INSERT INTO solicitudes_compra
             (numero,tipo,descripcion,material_id,cantidad,unidad,urgencia,estado,obs)
             VALUES (?,?,?,?,?,?,?,?,?)""",
@@ -5441,8 +5942,31 @@ def mrp_consolidar():
         ots_creadas.append({"numero":numero,"producto":item["producto_nombre"],"cantidad":item["total_qty"]})
     execute(f"UPDATE ordenes_cliente SET estado='En proceso' WHERE id IN ({placeholders})", oc_ids)
 
-    solicitudes_creadas, ots_auxiliares = _gap_analysis_materiales()
+    solicitudes_creadas, ots_auxiliares = _gap_analysis_materiales_multipass()
     return jsonify({"ok":True,"ots":ots_creadas,"ots_auxiliares":ots_auxiliares,"solicitudes_compra":solicitudes_creadas})
+
+
+def _gap_analysis_materiales_multipass(max_passes=5):
+    """Corre _gap_analysis_materiales() repetidas veces: si una pasada genera
+    una OT auxiliar nueva (fabricación de un Producto Terminado faltante),
+    esa OT auxiliar trae sus propios materiales, que a su vez pueden incluir
+    OTRO Producto Terminado faltante (BOM multinivel) — eso recién queda
+    visible para el análisis en la pasada siguiente, porque la pasada actual
+    ya leyó orden_materiales antes de insertar la nueva OT. Se repite hasta
+    que una pasada no genere nada nuevo, con un tope de pasadas para no
+    entrar en loop infinito si hay una referencia circular entre productos.
+    Devuelve (solicitudes_creadas, ots_auxiliares) acumuladas de todas las pasadas."""
+    solicitudes_tot, ots_tot = [], []
+    for _ in range(max_passes):
+        solicitudes, ots_aux = _gap_analysis_materiales()
+        solicitudes_tot.extend(solicitudes)
+        ots_tot.extend(ots_aux)
+        # Si esta pasada no creó ninguna OT auxiliar NUEVA (las "actualizada"
+        # son sobre una OT que ya existía de una pasada anterior a este
+        # llamado), no hay nada más que una pasada nueva pueda destapar.
+        if not any(not o.get("actualizada") for o in ots_aux):
+            break
+    return solicitudes_tot, ots_tot
 
 
 def _gap_analysis_materiales():
@@ -5700,7 +6224,7 @@ def mrp_consolidar_pronostico():
 
         ots_creadas.append({"numero": numero, "producto": item["producto_nombre"], "cantidad": item["total_qty"], "mes": item["mes"]})
 
-    solicitudes_creadas, ots_auxiliares = _gap_analysis_materiales()
+    solicitudes_creadas, ots_auxiliares = _gap_analysis_materiales_multipass()
     return jsonify({"ok":True,"ots":ots_creadas,"ots_auxiliares":ots_auxiliares,"solicitudes_compra":solicitudes_creadas})
 
 
@@ -5868,20 +6392,32 @@ def _bloqueo_terc_previo(orden_id, orden_num):
 
 def _tope_terc_previa(orden_id, orden_num):
     """Devuelve la operación tercerizada ANTERIOR (orden menor) más cercana
-    en la misma OT, si todavía no está Completada, junto con lo que ya
-    aprobó/produjo hasta el momento (qty_producida) — o None si no hay
-    ninguna pendiente. A diferencia de _bloqueo_terc_previo (que bloquea
-    TODO hasta que la tercerizada esté 100% completa), esto se usa para
-    permitir cargar novedades en la operación siguiente de forma incremental,
+    en la misma OT junto con lo que ya aprobó/produjo hasta el momento
+    (qty_producida) — o None si no hay ninguna. Esto se usa para permitir
+    cargar novedades en la operación siguiente de forma incremental,
     topeadas a lo que la tercerizada ya entregó/aprobó hasta ahora (ver
     _sync_ott_retorno_a_operacion: si de 100 llegaron y se aprobaron 50, acá
-    se puede cargar hasta 50, no hay que esperar a que vuelva/apruebe todo)."""
+    se puede cargar hasta 50, no hay que esperar a que vuelva/apruebe todo).
+
+    IMPORTANTE: a diferencia de _bloqueo_terc_previo (que deja de bloquear
+    en cuanto la tercerizada llega a 'Completada'), este tope NO filtra por
+    estado. Tiene que seguir aplicando incluso después de que la tercerizada
+    quede Completada, porque sigue siendo el límite físico real de lo que
+    volvió aprobado del proveedor: si ya se cargaron 50 acá (mientras la
+    tercerizada estaba en 50/100) y después se aprueban en OTRO lote las 50
+    rechazadas restantes (tercerizada ahora en 100/100, Completada), lo
+    disponible para seguir cargando esta operación es 100 (total aprobado)
+    MENOS lo ya cargado (50) = 50, no 100 de nuevo. Si acá se dejara de
+    aplicar el tope al completarse la tercerizada, se perdía esa resta y se
+    podía volver a cargar hasta el total (100) ignorando lo ya declarado —
+    ese era el bug: quedaba limitado únicamente por el estado de la
+    operación tercerizada en vez de por la cantidad real ya aprobada."""
     try:
         orden_num_int = int(orden_num)
     except Exception:
         return None
     return query("""SELECT id, nombre, orden, qty_producida FROM orden_operaciones
-        WHERE orden_id=? AND es_tercerizada=1 AND estado!='Completada'
+        WHERE orden_id=? AND es_tercerizada=1
           AND CAST(orden AS INTEGER) < ?
         ORDER BY CAST(orden AS INTEGER) DESC LIMIT 1""",
         (orden_id, orden_num_int), one=True)
@@ -6948,17 +7484,20 @@ def _sync_ott_retorno_a_operacion(lote_id):
     aunque el lote todavía tenga piezas pendientes de recibir del proveedor
     o pendientes de clasificar.
 
-    La operación y la OTT solo se dan por Completadas cuando lo YA APROBADO
-    alcanza la cantidad TOTAL que requiere la operación (qty_requerida) —
-    NO simplemente porque la tanda recibida hasta ahora ya se terminó de
-    clasificar. Antes se cerraba la OTT apenas la porción recibida en una
-    entrega quedaba 100% aprobada/rechazada, aunque esa entrega fuera
-    parcial respecto de lo que en total hace falta — eso bloqueaba poder
-    seguir emitiendo/recibiendo remitos para completar el resto (ver
-    ott_emitir_remito/ott_registrar_retorno, que no aceptan estado
-    'Completado'). Con este criterio, mientras falte aprobar cantidad para
-    llegar a qty_requerida, la OTT queda abierta y se puede seguir
-    enviando/recibiendo semielaborado contra el mismo lote. Es idempotente."""
+    IMPORTANTE: esta función NUNCA marca la operación ni la OTT como
+    Completada por sí sola, aunque lo aprobado ya alcance la cantidad
+    requerida — eso quedó a propósito como un paso MANUAL: el usuario tiene
+    que confirmarlo desde OTT con el botón "Completar" (ver ott_completar).
+    Antes esto se auto-completaba apenas se llegaba a la cantidad requerida,
+    lo cual traía dos problemas: 1) no daba lugar a que alguien revise/decida
+    antes de cerrar (ej. dar la OTT por completada con menos de lo pedido si
+    el faltante se da de baja), y 2) al recalcularse qty_producida en cada
+    aprobación, una OTT que ya se había dejado abierta a propósito podía
+    terminar "completándose sola" en un aprobado posterior sin que nadie lo
+    pidiera. Acá solo se actualiza qty_producida (lo ya aprobado, para que
+    la operación siguiente pueda ir cargando novedades de forma incremental
+    — ver _tope_terc_previa); el pase a Completada queda 100% en manos del
+    botón "Completar" de OTT. Es idempotente."""
     ott = query("""SELECT ott.*, oo.id oo_id, oo.estado oo_estado, oo.qty_requerida
         FROM ordenes_tercerizado ott
         LEFT JOIN orden_operaciones oo ON oo.id=ott.operacion_id
@@ -6972,17 +7511,12 @@ def _sync_ott_retorno_a_operacion(lote_id):
     if aprobado <= 0:
         return  # todavía no hay nada aprobado
 
-    qty_req = float(ott["qty_requerida"] or 0)
-    completa = qty_req > 0 and aprobado >= qty_req - 0.001
-    nuevo_estado_oo = "Completada" if completa else ott["oo_estado"]
-    execute("UPDATE orden_operaciones SET estado=?,qty_producida=? WHERE id=?",
-        (nuevo_estado_oo, aprobado, ott["oo_id"]))
-    # La OTT en sí sólo se da por Completada cuando lo aprobado ya cubre
-    # toda la cantidad requerida por la operación — antes de eso debe poder
-    # seguir en "Remito emitido"/"En proceso"/"Recibido" para permitir más
-    # envíos/recepciones parciales contra el mismo lote.
-    if completa and ott["estado"] != "Completado":
-        execute("UPDATE ordenes_tercerizado SET estado='Completado' WHERE id=?", (ott["id"],))
+    # Solo actualiza qty_producida (lo ya aprobado hasta ahora), sin tocar
+    # el estado de la operación ni de la OTT — el cierre es manual, ver
+    # ott_completar.
+    if ott["oo_estado"] != "Completada":
+        execute("UPDATE orden_operaciones SET qty_producida=? WHERE id=?",
+            (aprobado, ott["oo_id"]))
 
 
 @app.route("/api/lotes/<int:lid>", methods=["PUT"])
@@ -7193,7 +7727,13 @@ def auto_generar_sc_bajo_stock(material_id, motivo=""):
         return
     mat = query("SELECT id,codigo,descripcion,stock,stock_min,stock_max,unidad,categoria FROM materiales WHERE id=?",
                 (material_id,), one=True)
-    if not mat or mat["categoria"] not in ("Material", "Insumo", "Herramienta", "Producto terminado"):
+    # "Producto terminado" NUNCA es comprable en Compras: si un material de
+    # esta categoría queda bajo stock, el faltante se resuelve fabricándolo
+    # (OT auxiliar vía _gap_analysis_materiales / explotar_multinivel), no
+    # con una Solicitud de Compra. Este chequeo antes decía excluir "Producto
+    # terminado" en el comentario de arriba pero lo dejaba pasar en el código
+    # (bug) — quedaba visible como faltante comprable en Compras.
+    if not mat or mat["categoria"] not in ("Material", "Insumo", "Herramienta"):
         return
     stock_min = float(mat["stock_min"] or 0)
     stock_max = float(mat["stock_max"] or 0)
@@ -7261,7 +7801,7 @@ def auto_generar_sc_bajo_stock(material_id, motivo=""):
     urgencia = "Urgente" if stock <= 0 else "Normal"
     obs = f"Generada automáticamente: stock ({stock}) por debajo del mínimo ({stock_min}). Reposición hasta stock máximo ({objetivo})."
     if motivo: obs += f" Origen: {motivo}."
-    tipo_sc = "Productiva" if mat["categoria"] in ("Material", "Producto terminado") else "Indirecta"
+    tipo_sc = "Productiva" if mat["categoria"] == "Material" else "Indirecta"
     execute("""INSERT INTO solicitudes_compra
         (numero,tipo,material_id,descripcion,cantidad,unidad,urgencia,estado,solicitante_id,obs)
         VALUES (?,?,?,?,?,?,?,?,?,?)""",
@@ -7303,10 +7843,10 @@ def create_solicitud():
     tipo = d.get("tipo", "Productiva")
     if d.get("material_id"):
         mat = query("SELECT categoria FROM materiales WHERE id=?", (d["material_id"],), one=True)
-        if not mat or mat["categoria"] not in ("Material", "Insumo", "Herramienta", "Producto terminado"):
-            return jsonify({"error":"Solo se pueden solicitar materiales, insumos, herramientas o productos terminados"}), 400
-        if tipo == "Productiva" and mat["categoria"] not in ("Material", "Producto terminado"):
-            return jsonify({"error":"Una SC productiva solo puede cargar materiales o productos terminados, no insumos ni herramientas"}), 400
+        if not mat or mat["categoria"] not in ("Material", "Insumo", "Herramienta"):
+            return jsonify({"error":"Solo se pueden solicitar materiales, insumos o herramientas — un producto terminado no se compra, se fabrica (generá o esperá la OT correspondiente)"}), 400
+        if tipo == "Productiva" and mat["categoria"] != "Material":
+            return jsonify({"error":"Una SC productiva solo puede cargar materiales, no insumos ni herramientas"}), 400
         if tipo == "Indirecta" and mat["categoria"] not in ("Insumo", "Herramienta"):
             return jsonify({"error":"Una SC indirecta solo puede cargar insumos o herramientas"}), 400
     elif tipo == "Productiva":
@@ -7345,14 +7885,14 @@ def update_solicitud(sid):
     if "tipo" in d or "material_id" in d:
         if valores.get("material_id"):
             mat = query("SELECT categoria FROM materiales WHERE id=?", (valores["material_id"],), one=True)
-            if not mat or mat["categoria"] not in ("Material", "Insumo", "Herramienta", "Producto terminado"):
-                return jsonify({"error":"Solo se pueden solicitar materiales, insumos, herramientas o productos terminados"}), 400
-            if valores["tipo"] == "Productiva" and mat["categoria"] not in ("Material", "Producto terminado"):
-                return jsonify({"error":"Una SC productiva solo puede cargar materiales o productos terminados, no insumos ni herramientas"}), 400
+            if not mat or mat["categoria"] not in ("Material", "Insumo", "Herramienta"):
+                return jsonify({"error":"Solo se pueden solicitar materiales, insumos o herramientas — un producto terminado no se compra, se fabrica"}), 400
+            if valores["tipo"] == "Productiva" and mat["categoria"] != "Material":
+                return jsonify({"error":"Una SC productiva solo puede cargar materiales, no insumos ni herramientas"}), 400
             if valores["tipo"] == "Indirecta" and mat["categoria"] not in ("Insumo", "Herramienta"):
                 return jsonify({"error":"Una SC indirecta solo puede cargar insumos o herramientas"}), 400
         elif valores["tipo"] == "Productiva" and not (actual["material_id"] is None and (actual["unidad"] or "") == "servicio"):
-            return jsonify({"error":"Una SC productiva debe cargar un material o producto terminado"}), 400
+            return jsonify({"error":"Una SC productiva debe cargar un material"}), 400
     execute("""UPDATE solicitudes_compra SET tipo=?,material_id=?,descripcion=?,cantidad=?,unidad=?,
         urgencia=?,estado=?,ot_origen_id=?,centro_costo=?,obs=? WHERE id=?""",
         (valores["tipo"],valores["material_id"],valores["descripcion"],valores["cantidad"],valores["unidad"],
@@ -7450,11 +7990,19 @@ def get_ocs():
         d = dict(r)
         d["items"] = [dict(x) for x in query("""SELECT i.*,m.descripcion mat_desc,m.codigo mat_codigo,
             s.numero sc_numero,s.tipo sc_tipo,
-            c.condicion_pago cot_condicion_pago,c.plazo_entrega_dias cot_plazo_entrega_dias
+            c.condicion_pago cot_condicion_pago,c.plazo_entrega_dias cot_plazo_entrega_dias,
+            l.cantidad_rechazada lote_cantidad_rechazada
             FROM ordenes_compra_items i LEFT JOIN materiales m ON m.id=i.material_id
             LEFT JOIN solicitudes_compra s ON s.id=i.solicitud_id
             LEFT JOIN cotizaciones_compra c ON c.solicitud_id=i.solicitud_id AND c.seleccionada=1
+            LEFT JOIN lotes l ON l.id=i.lote_id
             WHERE i.oc_id=?""", (r["id"],))]
+        # Total de piezas rechazadas (clasificadas por Calidad en los lotes de
+        # esta OC) que todavía no se devolvieron al proveedor — ver
+        # oc_devolver_rechazo. Se usa para mostrar el botón "Devolver piezas".
+        d["rechazado_pendiente_devolver"] = round(sum(
+            max(0.0, float(i.get("lote_cantidad_rechazada") or 0) - float(i.get("cantidad_rechazada_devuelta") or 0))
+            for i in d["items"]), 6)
         result.append(d)
     return jsonify(result)
 
@@ -7495,6 +8043,10 @@ def create_oc():
     # (ver el loop de abajo), así que aunque se agrupen varias SC en una
     # misma OC, cada una termina con su propio lote independiente. ──────────
     for item in d["items"]:
+        if item.get("material_id"):
+            mat = query("SELECT categoria FROM materiales WHERE id=?", (item["material_id"],), one=True)
+            if mat and mat["categoria"] == "Producto terminado":
+                return jsonify({"error": f"No se puede comprar \"{item.get('descripcion','')}\": es un producto terminado, no se compra, se fabrica (generá la OT correspondiente)."}), 400
         if item.get("solicitud_id"):
             sol = query("SELECT estado FROM solicitudes_compra WHERE id=?", (item["solicitud_id"],), one=True)
             if not sol:
@@ -7552,6 +8104,8 @@ def create_oc():
                      f"OC {numero} emitida — Lote {numero_lote} (pendiente de aprobación de Calidad, no computa a stock)",
                      session["user_id"]))
                 lotes_creados.append(numero_lote)
+                execute("UPDATE ordenes_compra_items SET lote_id=? WHERE oc_id=? AND material_id=? AND lote_id IS NULL",
+                    (lote_id, lid, item["material_id"]))
     return jsonify({"ok":True,"id":lid,"numero":numero,"estado":estado,"total":total,"lotes":lotes_creados}), 201
 
 @app.route("/api/ordenes_compra/<int:ocid>/aprobar", methods=["POST"])
@@ -7616,6 +8170,32 @@ def recibir_oc(ocid):
                             (item["material_id"], lote["id"], "ajuste", delta_exceso,
                              f"Recepción de OC {oc['numero']} superó lo pedido — ampliación de lote {delta_exceso:.2f}",
                              session["user_id"]))
+                # ── Reingreso de piezas devueltas por rechazo: si este ítem
+                # tuvo alguna devolución a proveedor (ver oc_devolver_rechazo),
+                # lo que ahora llega como reemplazo NO forma un lote nuevo:
+                # vuelve al MISMO lote de origen, sumándose a cantidad_disponible
+                # como "Ingresado" (pendiente de que Calidad lo vuelva a
+                # clasificar), igual que si fuera la primera recepción. Se
+                # reingresa como máximo lo que efectivamente se devolvió y aún
+                # no fue repuesto (cantidad_rechazada_devuelta menos lo ya
+                # reingresado en entregas anteriores del reemplazo). ──────────
+                devuelto = float(item["cantidad_rechazada_devuelta"] or 0)
+                reingresado_previo = float(item["cantidad_rechazada_reingresada"] or 0)
+                pendiente_reingreso = max(0.0, devuelto - reingresado_previo)
+                a_reingresar = min(qty, pendiente_reingreso)
+                if a_reingresar > 0.0001 and item["lote_id"]:
+                    execute("""UPDATE lotes SET cantidad_disponible=cantidad_disponible+?,
+                        estado=CASE WHEN estado IN ('Aprobado','Rechazado') THEN 'Ingresado' ELSE estado END
+                        WHERE id=?""", (a_reingresar, item["lote_id"]))
+                    execute("""UPDATE ordenes_compra_items SET
+                        cantidad_rechazada_reingresada=? WHERE id=?""",
+                        (reingresado_previo + a_reingresar, item["id"]))
+                    execute("""INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id)
+                        VALUES (?,?,?,?,?,?)""",
+                        (item["material_id"], item["lote_id"], "ingreso", a_reingresar,
+                         f"OC {oc['numero']} — reingreso al mismo lote de reemplazo por piezas rechazadas "
+                         f"(pendiente de aprobación de Calidad, no computa a stock)",
+                         session["user_id"]))
             else:
                 # Otras categorías (Insumo, Herramienta) no pasan por control
                 # de Calidad ni manejan lote: se suman directo, por la
@@ -7643,6 +8223,101 @@ def recibir_oc(ocid):
     if total_rec >= total_ord: execute("UPDATE ordenes_compra SET estado='Recibida' WHERE id=?", (ocid,))
     elif total_rec > 0: execute("UPDATE ordenes_compra SET estado='Recibida parcial' WHERE id=?", (ocid,))
     return jsonify({"ok":True,"monto_total":nuevo_monto})
+
+@app.route("/api/ordenes_compra/<int:ocid>/devolver_rechazo", methods=["POST"])
+@login_required(roles=["admin","operario","almacen"])
+def oc_devolver_rechazo(ocid):
+    """Misma lógica que ott_devolver_rechazo (ver ese endpoint) pero aplicada
+    a Compras: cada ítem de la OC generó su propio Lote al emitirse la OC
+    (ver create_oc, ordenes_compra_items.lote_id), y ese lote es el que
+    Calidad clasifica al recibir la mercadería. Acá se recorren TODOS los
+    ítems de la OC y se devuelve, de cada uno, lo que esté clasificado como
+    Rechazado en su lote y todavía no se haya devuelto antes.
+
+    Efectos por ítem con rechazo pendiente:
+    1) Se descuenta del lote lo devuelto (cantidad_disponible y
+       cantidad_rechazada bajan); cantidad_activa (aprobado) no se toca.
+    2) cantidad_recibida del ítem baja en la misma medida — el proveedor
+       vuelve a deber esa cantidad (reemplazo), que al recibirse ingresa al
+       MISMO lote (no se crea uno nuevo).
+    3) cantidad_rechazada_devuelta del ítem acumula lo devuelto, para no
+       devolver dos veces lo mismo si el lote se clasifica de a partes.
+
+    Se emite UN solo remito de devolución (tipo 'devolucion_oc') para toda
+    la OC, agrupando lo devuelto de todos sus ítems.
+    """
+    oc = query("SELECT * FROM ordenes_compra WHERE id=?", (ocid,), one=True)
+    if not oc: return jsonify({"error":"OC no encontrada"}), 404
+
+    items = query("""SELECT i.*, l.cantidad_rechazada lote_cantidad_rechazada,
+        m.descripcion mat_desc, m.codigo mat_codigo
+        FROM ordenes_compra_items i
+        LEFT JOIN lotes l ON l.id=i.lote_id
+        LEFT JOIN materiales m ON m.id=i.material_id
+        WHERE i.oc_id=?""", (ocid,))
+
+    total_devuelto = 0.0
+    detalle = []
+    for item in items:
+        if not item["lote_id"]:
+            continue
+        ya_devuelto = float(item["cantidad_rechazada_devuelta"] or 0)
+        rechazado_actual = float(item["lote_cantidad_rechazada"] or 0)
+        cantidad = round(rechazado_actual - ya_devuelto, 6)
+        if cantidad <= 0.0001:
+            continue
+
+        # 1) Descontar del lote lo devuelto (sale físicamente del depósito)
+        execute("""UPDATE lotes SET
+                cantidad_disponible=MAX(0, cantidad_disponible-?),
+                cantidad_rechazada=MAX(0, cantidad_rechazada-?)
+            WHERE id=?""", (cantidad, cantidad, item["lote_id"]))
+        execute("""INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id)
+            VALUES (?,?,'salida',?,?,?)""",
+            (item["material_id"], item["lote_id"], cantidad,
+             f"Devolución a proveedor de piezas rechazadas — OC {oc['numero']} "
+             f"({item['mat_codigo'] or item['descripcion']})",
+             session["user_id"]))
+
+        # 2) El ítem queda "debiendo" esa cantidad de nuevo del lado del proveedor
+        cantidad_recibida_nueva = max(0.0, float(item["cantidad_recibida"] or 0) - cantidad)
+        cantidad_rechazada_devuelta_nueva = ya_devuelto + cantidad
+        execute("""UPDATE ordenes_compra_items SET
+                cantidad_recibida=?, cantidad_rechazada_devuelta=?
+            WHERE id=?""", (cantidad_recibida_nueva, cantidad_rechazada_devuelta_nueva, item["id"]))
+
+        total_devuelto += cantidad
+        detalle.append(f"{cantidad:g} x {item['mat_codigo'] or ''} {item['mat_desc'] or item['descripcion']}".strip())
+
+    if total_devuelto <= 0.0001:
+        return jsonify({"error":"No hay piezas rechazadas pendientes de devolver para esta OC"}), 400
+
+    d = request.json or {}
+
+    # 3) Remito de devolución al proveedor (uno solo para toda la OC)
+    last_rem = query("SELECT numero FROM remitos ORDER BY id DESC LIMIT 1", one=True)
+    try: nr = int(last_rem["numero"].split("-")[1])+1 if last_rem else 1
+    except: nr = 1
+    num_rem = f"REM-{nr:04d}"
+    obs_default = f"Devolución a proveedor — piezas rechazadas OC {oc['numero']}: " + "; ".join(detalle)
+    rid = execute("""INSERT INTO remitos (numero,cliente_id,fecha,estado,obs,creado_por,tipo,oc_id)
+        VALUES (?,NULL,date('now','localtime'),'Emitido',?,?,?,?)""",
+        (num_rem, d.get("obs", obs_default), session["user_id"], "devolucion_oc", ocid))
+
+    # 4) Recalcular estado de la OC (si lo recibido bajó, puede volver a
+    # "Recibida parcial" para reflejar que hace falta el reemplazo)
+    items_post = query("SELECT cantidad,cantidad_recibida FROM ordenes_compra_items WHERE oc_id=?", (ocid,))
+    total_ord = sum(i["cantidad"] for i in items_post)
+    total_rec = sum(i["cantidad_recibida"] for i in items_post)
+    nuevo_estado = oc["estado"]
+    if oc["estado"] not in ("Borrador","Pendiente aprobacion"):
+        nuevo_estado = "Recibida" if total_rec >= total_ord else ("Recibida parcial" if total_rec > 0 else "Aprobada")
+
+    execute("UPDATE ordenes_compra SET estado=?, remito_devolucion_id=? WHERE id=?",
+        (nuevo_estado, rid, ocid))
+
+    return jsonify({"ok": True, "cantidad_devuelta": round(total_devuelto, 6), "remito_numero": num_rem,
+        "remito_id": rid, "estado": nuevo_estado})
 
 @app.route("/api/ordenes_compra/<int:ocid>", methods=["PUT"])
 @login_required(roles=["admin","almacen","vendedor"])
@@ -7802,7 +8477,7 @@ def get_remitos():
         FROM remitos r
         LEFT JOIN clientes c ON c.id=r.cliente_id
         LEFT JOIN ordenes_cliente oc ON oc.id=r.orden_cliente_id"""
-    rows = query(sql+" WHERE r.cliente_id=? ORDER BY r.id DESC",(cliente_id,)) if cliente_id else query(sql+" ORDER BY r.id DESC LIMIT 200")
+    rows = query(sql+" WHERE r.cliente_id=? ORDER BY r.id DESC",(cliente_id,)) if cliente_id else query(sql+" ORDER BY r.id DESC")
     result = []
     for r in rows:
         d = dict(r)
@@ -9330,17 +10005,17 @@ def bulk_import():
                 if val is None or val == "" or val == 0:
                     valid_row[col] = None
                 else:
-                    # Special case: cliente_id given as a client name (razon) instead of an id.
-                    # Resolve by name (case-insensitive), auto-creating the client if needed.
-                    if ref_table == "clientes" and ref_col == "id" and not (
+                    # Special case: cliente_id/proveedor_id given as a razon (name) instead of
+                    # an id. Resolve by name (case-insensitive), auto-creating the record if needed.
+                    if ref_table in ("clientes", "proveedores") and ref_col == "id" and not (
                         isinstance(val, (int, float)) or (isinstance(val, str) and val.strip().isdigit())
                     ):
-                        nombre_cli = str(val).strip()
-                        found = query("SELECT id FROM clientes WHERE lower(razon)=lower(?)",
-                                      (nombre_cli,), one=True)
+                        nombre = str(val).strip()
+                        found = query(f"SELECT id FROM {ref_table} WHERE lower(razon)=lower(?)",
+                                      (nombre,), one=True)
                         if not found:
                             try:
-                                new_id = execute("INSERT INTO clientes (razon) VALUES (?)", (nombre_cli,))
+                                new_id = execute(f"INSERT INTO {ref_table} (razon) VALUES (?)", (nombre,))
                                 valid_row[col] = new_id
                             except Exception:
                                 valid_row[col] = None
