@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """MetalERP v3.0 - Sistema ERP Taller Metalurgico"""
 import os, re, socket, sqlite3, hashlib, secrets, math
+
+# --- Parche compatibilidad Windows Server viejo / OpenSSL sin 'usedforsecurity' ---
+# reportlab moderno llama hashlib.md5(usedforsecurity=False), pero el build de
+# OpenSSL de este Python no soporta ese kwarg. Lo interceptamos y lo descartamos.
+_orig_md5 = hashlib.md5
+def _md5_compat(*args, **kwargs):
+    kwargs.pop('usedforsecurity', None)
+    return _orig_md5(*args)
+hashlib.md5 = _md5_compat
+# --- Fin parche ---
+
 from datetime import datetime, date, timedelta
 from functools import wraps
 from flask import Flask, render_template, request, jsonify, session, redirect, g, send_from_directory
@@ -456,6 +467,10 @@ def execute(sql, params=()):
     db.commit()
     return cur.lastrowid
 
+def get_config_valor(clave, default=""):
+    row = query("SELECT valor FROM configuracion WHERE clave=?", (clave,), one=True)
+    return row["valor"] if row and row["valor"] not in (None, "") else default
+
 def next_numero_sc():
     # Genera el próximo numero de SC (SC-0001, SC-0002, ...) de forma segura
     # ante condiciones de carrera: antes se calculaba con un SELECT MAX+1
@@ -476,6 +491,25 @@ def next_numero_sc():
         try: n = int(last["numero"].split("-")[1]) + 1 if last else 1
         except: n = 1
         return f"SC-{n:04d}"
+    except:
+        db.rollback()
+        raise
+
+def next_numero_oc():
+    # Mismo problema que next_numero_sc: antes se calculaba con un SELECT
+    # MAX(id)+1 suelto (además parseando el numero del último id, sin
+    # filtrar por formato), y dos OC creadas casi al mismo tiempo (o un
+    # doble-click) podían calcular el mismo número -> UNIQUE constraint
+    # failed. BEGIN IMMEDIATE toma el lock de escritura antes de leer.
+    db = get_db()
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        last = db.execute("""SELECT numero FROM ordenes_compra
+            WHERE numero GLOB 'OCP-[0-9][0-9][0-9][0-9]'
+            ORDER BY CAST(SUBSTR(numero,5) AS INTEGER) DESC LIMIT 1""").fetchone()
+        try: n = int(last["numero"].split("-")[1]) + 1 if last else 1
+        except: n = 1
+        return f"OCP-{n:04d}"
     except:
         db.rollback()
         raise
@@ -527,6 +561,83 @@ def get_or_create_pt_material(prod):
         "INSERT INTO materiales (codigo,descripcion,categoria,producto_id,unidad,stock,stock_min) VALUES (?,?,?,?,?,0,0)",
         (candidato, prod["nombre"], "Producto terminado", prod["id"], prod["unidad"]))
     return {"id": new_mid, "stock": 0}
+
+def _firma_insumos_operacion(proceso_op_id):
+    """Firma de lo que se le manda al proveedor en una operación tercerizada.
+
+    Es la identidad del semielaborado que vuelve: mismos insumos = misma
+    pieza. Si en Procesos se le agrega o se le cambia un material a la
+    operación, lo que devuelve el proveedor ya no es lo mismo y necesita su
+    propio código (ver _get_or_create_pse).
+
+    El PROVEEDOR no entra en la firma a propósito: queda trazado por lote
+    (lotes.proveedor_id) y por OTT (ordenes_tercerizado.proveedor_id), que se
+    congelan al momento del envío y no se ven afectados por editar el proceso
+    más tarde.
+    """
+    rows = query("""SELECT material_id, producto_id, cantidad
+        FROM operacion_materiales WHERE operacion_id=?
+        ORDER BY COALESCE(material_id,0), COALESCE(producto_id,0)""",
+        (proceso_op_id,))
+    partes = ["%s:%s:%g" % (r["material_id"] or 0, r["producto_id"] or 0,
+                            float(r["cantidad"] or 0)) for r in rows]
+    return "|".join(partes) if partes else "(sin insumos)"
+
+
+def _get_or_create_pse(proceso_op_id):
+    """Devuelve (creando si hace falta) el id del material 'Semielaborado' de
+    una operación tercerizada intermedia, en su versión VIGENTE.
+
+    Un semielaborado queda definido por la operación MAS sus insumos. Mientras
+    la firma no cambie se reusa el mismo material; apenas cambia se crea una
+    versión nueva con su propio código (-v2, -v3, ...) en vez de mezclar dos
+    piezas distintas bajo el mismo stock y la misma trazabilidad.
+
+    Las OT en curso no se ven afectadas: la OTT congela su semielaborado en
+    material_se_id al crearse, igual que ya congela proveedor y precio.
+
+    Devuelve None si la operación no existe o perdió el vínculo con su
+    producto (proceso_op_id NULL porque se borró la operación del proceso).
+    """
+    if not proceso_op_id:
+        return None
+    op = query("""SELECT po.id, po.nombre, po.producto_id,
+            pr.codigo prod_codigo, pr.nombre prod_nombre, pr.unidad prod_unidad
+        FROM proceso_operaciones po JOIN productos pr ON pr.id=po.producto_id
+        WHERE po.id=?""", (proceso_op_id,), one=True)
+    if not op:
+        return None
+
+    firma = _firma_insumos_operacion(proceso_op_id)
+    vigente = query("""SELECT id FROM materiales
+        WHERE producto_id=? AND operacion_id=? AND categoria='Semielaborado'
+          AND COALESCE(pse_firma,'')=? AND activo=1
+        ORDER BY id DESC LIMIT 1""",
+        (op["producto_id"], proceso_op_id, firma), one=True)
+    if vigente:
+        return vigente["id"]
+
+    # Firma nueva: hace falta otra versión. El código base queda para la
+    # primera; de ahí en más se numeran -v2, -v3...
+    op_nombre = (op["nombre"] or "SE").strip()
+    base = "%s-%s" % (op["prod_codigo"], op_nombre)
+    previas = query("""SELECT COUNT(*) c FROM materiales
+        WHERE producto_id=? AND operacion_id=? AND categoria='Semielaborado'""",
+        (op["producto_id"], proceso_op_id), one=True)["c"]
+    n = int(previas or 0) + 1
+    candidato = base if n == 1 else "%s-v%d" % (base, n)
+    while query("SELECT id FROM materiales WHERE codigo=?", (candidato,), one=True):
+        n += 1
+        candidato = "%s-v%d" % (base, n)
+
+    return execute("""INSERT INTO materiales
+        (codigo,descripcion,categoria,producto_id,operacion_id,pse_firma,
+         unidad,stock,stock_min,precio_unit,activo)
+        VALUES (?,?,?,?,?,?,?,0,0,0,1)""",
+        (candidato, "%s — %s" % (op["prod_nombre"], op_nombre),
+         "Semielaborado", op["producto_id"], proceso_op_id, firma,
+         op["prod_unidad"] or "unid"))
+
 
 def _lotes_vinculados_material(orden_id, material_id):
     """Todos los lotes vinculados a este material en esta OT (vía
@@ -765,7 +876,7 @@ CREATE TABLE IF NOT EXISTS proceso_operaciones (
     categoria_maquina_id INTEGER REFERENCES categorias_maquina(id),
     maquina_id INTEGER REFERENCES maquinas(id),
     tiempo_setup_min INTEGER DEFAULT 0,
-    tiempo_ciclo_min INTEGER DEFAULT 0,
+    tiempo_ciclo_seg REAL DEFAULT 0,
     es_tercerizada INTEGER DEFAULT 0,
     proveedor_id INTEGER REFERENCES proveedores(id),
     precio_tercerizado REAL DEFAULT 0,
@@ -858,6 +969,19 @@ CREATE TABLE IF NOT EXISTS movimientos (
     referencia TEXT, usuario_id INTEGER REFERENCES usuarios(id),
     fecha TEXT DEFAULT (datetime('now','localtime')));
 
+CREATE TABLE IF NOT EXISTS recepciones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    numero TEXT UNIQUE NOT NULL,
+    material_id INTEGER NOT NULL REFERENCES materiales(id),
+    cantidad REAL NOT NULL,
+    proveedor_id INTEGER REFERENCES proveedores(id),
+    remito TEXT,
+    precio_unit REAL,
+    lote_id INTEGER REFERENCES lotes(id),
+    obs TEXT,
+    creado_por INTEGER REFERENCES usuarios(id),
+    fecha TEXT DEFAULT (datetime('now','localtime')));
+
 CREATE TABLE IF NOT EXISTS producto_clientes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     producto_id INTEGER NOT NULL REFERENCES productos(id) ON DELETE CASCADE,
@@ -873,7 +997,7 @@ CREATE TABLE IF NOT EXISTS orden_operaciones (
     categoria_maquina_id INTEGER REFERENCES categorias_maquina(id),
     maquina_id INTEGER REFERENCES maquinas(id),
     tiempo_setup_min INTEGER DEFAULT 0,
-    tiempo_ciclo_min INTEGER DEFAULT 0,
+    tiempo_ciclo_seg REAL DEFAULT 0,
     estado TEXT DEFAULT 'Pendiente',
     qty_requerida REAL DEFAULT 0,
     qty_producida REAL DEFAULT 0,
@@ -1101,6 +1225,31 @@ def init_db():
     def _cols(table):
         return [r[1] for r in db.execute(f"PRAGMA table_info({table})").fetchall()]
 
+    # Semielaborado (PSE) versionado: materiales.pse_firma guarda con qué
+    # insumos se creó ese semielaborado, y ordenes_tercerizado.material_se_id
+    # congela cuál le toca a cada OTT (ver _get_or_create_pse). Sin esto,
+    # editar los insumos de una operación tercerizada mezclaba dos piezas
+    # distintas bajo el mismo código de material.
+    try:
+        db.execute("ALTER TABLE materiales ADD COLUMN pse_firma TEXT")
+    except Exception: pass
+    try:
+        db.execute("ALTER TABLE ordenes_tercerizado ADD COLUMN material_se_id "
+                   "INTEGER REFERENCES materiales(id)")
+    except Exception: pass
+
+    # tiempo_ciclo_min -> tiempo_ciclo_seg. El tiempo de ciclo de una operación
+    # es por pieza y en el taller se mide en segundos, no en minutos: cargarlo
+    # en minutos obligaba a escribir fracciones (0,25 min) y se prestaba a
+    # errores. El tiempo de SETUP sigue en minutos, porque es la preparación de
+    # la máquina y se hace una vez por lote.
+    # Esta migración va primero que el resto porque el recálculo de rendimiento
+    # que corre más abajo ya lee la columna con el nombre nuevo.
+    for _t in ("proceso_operaciones", "orden_operaciones"):
+        if "tiempo_ciclo_seg" not in _cols(_t):
+            db.execute(f"ALTER TABLE {_t} RENAME COLUMN tiempo_ciclo_min TO tiempo_ciclo_seg")
+            db.execute(f"UPDATE {_t} SET tiempo_ciclo_seg = COALESCE(tiempo_ciclo_seg,0)*60")
+
     # ordenes_cliente_items: fecha_deseada, ot_id
     oci = _cols("ordenes_cliente_items")
     if "fecha_deseada" not in oci:
@@ -1182,12 +1331,42 @@ def init_db():
 
     # El índice único de arriba (producto_id) permitía UN SOLO material por
     # producto. Se mantiene único por (producto_id, categoria) para no romper
-    # instalaciones existentes con más de un material por producto.
+    # instalaciones existentes con más de un material por producto — EXCEPTO
+    # para 'Semielaborado', donde ott_registrar_retorno crea a propósito un
+    # material por CADA operación intermedia tercerizada de un mismo
+    # producto (ver comentario ahí: "no compartir stock entre sí"). Con el
+    # índice viejo, la segunda operación tercerizada de un producto fallaba
+    # con "UNIQUE constraint failed" al intentar crear su propio
+    # semielaborado. Se separa en dos índices parciales: uno para materiales
+    # sin operación (PT y demás — sigue siendo uno solo por producto+categoría)
+    # y otro para los que sí tienen operación (uno por producto+categoría+operación).
     try:
         db.execute("DROP INDEX IF EXISTS idx_materiales_producto_id")
+        db.execute("DROP INDEX IF EXISTS idx_materiales_producto_categoria")
         db.execute("""
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_materiales_producto_categoria
-            ON materiales(producto_id, categoria) WHERE producto_id IS NOT NULL
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_materiales_producto_categoria_sinop
+            ON materiales(producto_id, categoria) WHERE producto_id IS NOT NULL AND operacion_id IS NULL
+        """)
+        db.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_materiales_producto_categoria_op
+            ON materiales(producto_id, categoria, operacion_id) WHERE producto_id IS NOT NULL AND operacion_id IS NOT NULL
+        """)
+    except Exception: pass
+
+    # Un semielaborado ya no es uno por operación, sino uno por operación Y
+    # juego de insumos: cambiar lo que se le manda al proveedor genera otra
+    # pieza, con su propio código -v2 (ver _get_or_create_pse). El índice de
+    # arriba, único por (producto, categoría, operación), bloqueaba esa
+    # segunda versión con "UNIQUE constraint failed". Se reemplaza por uno
+    # que incluye la firma. Va COALESCE y no la columna pelada porque en
+    # SQLite dos NULL no chocan entre sí, y eso dejaría entrar duplicados
+    # justo en las filas viejas que todavía no tienen firma.
+    try:
+        db.execute("DROP INDEX IF EXISTS idx_materiales_producto_categoria_op")
+        db.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_materiales_prod_cat_op_firma
+            ON materiales(producto_id, categoria, operacion_id, COALESCE(pse_firma,''))
+            WHERE producto_id IS NOT NULL AND operacion_id IS NOT NULL
         """)
     except Exception: pass
 
@@ -1319,6 +1498,33 @@ def init_db():
                           ("precio_tercerizado","REAL DEFAULT 0"),("tiempo_minimo_dias","INTEGER DEFAULT 0")]:
         if col not in poc:
             db.execute(f"ALTER TABLE proceso_operaciones ADD COLUMN {col} {typedef}")
+
+    # proveedores: categoría de compra (TRATAMIENTO SUPERFICIAL / MATERIA PRIMA / PROCESO)
+    # usada para clasificar los gráficos del dashboard de requerimientos productivos.
+    pvc = _cols("proveedores")
+    if "categoria_compra" not in pvc:
+        db.execute("ALTER TABLE proveedores ADD COLUMN categoria_compra TEXT")
+        # Seed inicial a partir del padrón de proveedores conocido (no pisa
+        # los que ya tengan una categoria_compra cargada a mano más adelante).
+        _CATEGORIA_COMPRA_SEED = {
+            'TRATAMIENTO SUPERFICIAL': ['ALUCOLOR','GALVATERM','PENELLA','SEA (PERILLO)','CECARELLI','TMA',
+                'MEGACOLOR','METALTECH','NEW METAL','ELECTROPLATERS','CHOUSA','ST. TRATAMIENTOS','TERMIA',
+                'BLENDOR','INDUSTERMIC','ALPEC','KUPPE','ARTELUM','PAVONADO ALCALINO LELOIR','GALVANOTECNIA',
+                'CAROLO','CEMENTA TEMP'],
+            'MATERIA PRIMA': ['HERMAC','PACHECO CHAPAS','LAMINACION BASCONIA','CIA. PANAMERICANA',
+                'ACEROS BOHLER (VOESTALPINE)','ACEROS BORRONI','ACEROS FB','ACEROS COFER','ACEROS CRYPTON',
+                'CORIFERSA','FECORT','CORTESTAMP S.A.','FORVIANCA','EG SAN MARTIN','REXCO','FAMIQ','KRUGER',
+                'PAGANI','NAM','METAL POL','MAPO','HYDRO','METRAR','LIT ALUMINIO','APERAM',
+                'OUTOKUMPU FORTINOX','BULONAR','MARCHESE','POLIMETAL','BOLLHOFF','PROVEMET','FORNIS',
+                'FASTENER','NUT ARGENTINA','MANCUL','ACEROS HAS','METALURGICA SM','NOMEN','ACEROS ANGELETTI',
+                'ETC','FORTINOX'],
+            'PROCESO': ['ETAR','ARGENFEN','CRAMSAC','BAINOX','MECANIZADOS NOT','ALAMBRES RUMBOS',
+                'M. N. RESORTES','DAG RESORTES','RAYMONDA'],
+        }
+        for _cat, _provs in _CATEGORIA_COMPRA_SEED.items():
+            for _p in _provs:
+                db.execute("UPDATE proveedores SET categoria_compra=? WHERE UPPER(TRIM(razon))=? AND categoria_compra IS NULL",
+                           (_cat, _p.upper()))
 
     # proceso_operaciones: volumen agrupado — cuando está activo, la cantidad
     # requerida de esta operación no es igual al total a realizar de la OT,
@@ -1461,7 +1667,47 @@ def init_db():
         db.execute("ALTER TABLE ordenes_compra ADD COLUMN remito_devolucion_id INTEGER REFERENCES remitos(id)")
     except Exception: pass
     try:
+        # Fecha de la primera recepción con cantidad>0 de este ítem (ver
+        # recibir_oc). La usa _sync_requerimiento_desde_compra como f_entrega
+        # del requerimiento_productivo espejo — antes no había forma de saber
+        # cuándo se recibió cada ítem, solo el acumulado en cantidad_recibida.
+        db.execute("ALTER TABLE ordenes_compra_items ADD COLUMN fecha_recibida TEXT")
+    except Exception: pass
+    try:
         db.execute("ALTER TABLE remitos ADD COLUMN oc_id INTEGER REFERENCES ordenes_compra(id)")
+    except Exception: pass
+    try:
+        # Clave estable del ítem de OC que originó este requerimiento espejo
+        # (ver _sync_requerimiento_desde_compra). Antes el vínculo era el
+        # propio "numero" (numero="OCP-ITEM-{item_id}"), lo que obligaba a
+        # mostrar ese texto interno en vez de un correlativo como el resto de
+        # los requerimientos. Con esta columna el "numero" puede ser un
+        # correlativo normal y el upsert se hace por origen_item_id.
+        db.execute("ALTER TABLE requerimientos_productivos ADD COLUMN origen_item_id INTEGER")
+    except Exception: pass
+    try:
+        # OT de origen de la compra (vía solicitudes_compra.ot_origen_id), para
+        # poder mostrar "OT-024" en la columna Cliente de los requerimientos de
+        # compra que no tienen cliente propio (son materia prima, no pedidos).
+        db.execute("ALTER TABLE requerimientos_productivos ADD COLUMN ot_origen_id INTEGER REFERENCES ordenes(id)")
+    except Exception: pass
+    try:
+        # Cantidad Aprobada: columna calcada del Excel de Requerimientos
+        # Productivos. Para requerimientos que vienen de una OTT se calcula
+        # sola en _sync_requerimiento_desde_ott (cantidad_entregada menos
+        # cant_no_conforme); para los cargados a mano queda editable desde
+        # la pantalla.
+        db.execute("ALTER TABLE requerimientos_productivos ADD COLUMN cantidad_aprobada REAL")
+    except Exception: pass
+    try:
+        # Backfill: los requerimientos de compra ya creados con el esquema
+        # viejo tienen numero="OCP-ITEM-{item_id}" y origen_item_id NULL. Se
+        # completa origen_item_id a partir de ese numero para que el sync los
+        # siga encontrando (y no duplique) aunque más adelante se les asigne
+        # un numero correlativo nuevo.
+        db.execute("""UPDATE requerimientos_productivos
+            SET origen_item_id = CAST(SUBSTR(numero, 10) AS INTEGER)
+            WHERE numero LIKE 'OCP-ITEM-%' AND origen_item_id IS NULL""")
     except Exception: pass
     try:
         # Backfill: materiales.descripcion es una copia denormalizada de
@@ -1523,6 +1769,16 @@ def init_db():
     except Exception: pass
     try:
         db.execute("ALTER TABLE operacion_materiales ADD COLUMN tipo TEXT DEFAULT 'material'")
+    except Exception: pass
+    try:
+        # Vínculo del material 'Semielaborado' con la operación tercerizada
+        # intermedia que lo genera (ver ott_registrar_retorno). Antes el
+        # material se buscaba/creaba solo por producto_id+categoria, así que
+        # dos operaciones intermedias distintas del MISMO producto terminaban
+        # compartiendo un único material/código de semielaborado y mezclando
+        # su stock entre sí. Con operacion_id cada operación intermedia tiene
+        # su propio material, con código "(codigo producto)-(nombre operacion)".
+        db.execute("ALTER TABLE materiales ADD COLUMN operacion_id INTEGER REFERENCES proceso_operaciones(id)")
     except Exception: pass
     try:
         db.execute("ALTER TABLE operacion_materiales ADD COLUMN producto_id INTEGER REFERENCES productos(id)")
@@ -1655,6 +1911,7 @@ def init_db():
         ('pdf_mostrar_costos',  '0',                  'Mostrar costos en PDF (0/1)'),
         ('pdf_mostrar_precios', '0',                  'Mostrar precio de venta en PDF (0/1)'),
         ('pdf_nota_pie',        '',                   'Nota al pie del PDF de OT'),
+        ('valor_hora_mo',       '0',                  'Valor de mano de obra por hora ($)'),
     ]
     for _k, _v, _d in _cfg_defaults:
         db.execute("INSERT OR IGNORE INTO configuracion (clave,valor,descripcion) VALUES (?,?,?)",
@@ -1693,13 +1950,15 @@ def init_db():
         novedades = db.execute(
             "SELECT n.id, n.cantidad_producida, n.tiempo_real_min, "
             "COALESCE(n.tiempo_perdido,0) tiempo_perdido, "
-            "COALESCE(po.tiempo_ciclo_min, oo.tiempo_ciclo_min, 1) ciclo "
+            "COALESCE(po.tiempo_ciclo_seg, oo.tiempo_ciclo_seg, 60) ciclo "
             "FROM novedades_produccion n "
             "JOIN orden_operaciones oo ON oo.id=n.orden_operacion_id "
             "LEFT JOIN proceso_operaciones po ON po.id=oo.proceso_op_id"
         ).fetchall()
         for nov in novedades:
-            ciclo  = float(nov["ciclo"] or 1)
+            # El ciclo estandar se carga en SEGUNDOS; tiempo_real_min esta en
+            # minutos, asi que se pasa a minutos antes de comparar.
+            ciclo  = float(nov["ciclo"] or 60) / 60.0
             qty    = float(nov["cantidad_producida"] or 0)
             t_real = float(nov["tiempo_real_min"] or 0)
             t_perd = float(nov["tiempo_perdido"] or 0)
@@ -1746,6 +2005,125 @@ def init_db():
                 _sync_ott_retorno_a_operacion(p["lote_retorno_id"])
     except Exception as e:
         print(f"[init_db] Advertencia reparando OTTs con lote aprobado: {e}")
+
+    # Reparación: materiales de retorno de OTT intermedia (semielaborados)
+    # que quedaron con categoria distinta a 'Semielaborado' porque
+    # ott_registrar_retorno reutilizaba cualquier material existente con
+    # el mismo producto_id sin filtrar por categoria (bug corregido). Un
+    # material así puede tener MEZCLADOS lotes propios (p.ej. Producto
+    # terminado real) con lotes de retorno de OTT. NO se puede arreglar
+    # recategorizando el material entero (eso arrastra también el stock
+    # ajeno) — hay que separar lote por lote: los vinculados a una OTT
+    # (ordenes_tercerizado.lote_retorno_id) van a un material nuevo
+    # 'Semielaborado' con código (código del producto)-SE; el resto se
+    # queda donde estaba.
+    try:
+        with app.app_context():
+            afectados = query("""
+                SELECT DISTINCT m.id mat_id, m.codigo mat_codigo, pr.codigo prod_codigo,
+                       pr.id producto_id, m.unidad, m.precio_unit
+                FROM ordenes_tercerizado ott
+                JOIN lotes l ON l.id=ott.lote_retorno_id
+                JOIN materiales m ON m.id=l.material_id
+                JOIN productos pr ON pr.id=m.producto_id
+                WHERE ott.es_ultimo_nivel=0 AND m.categoria != 'Semielaborado'
+            """)
+            for m in afectados:
+                lotes_ott_ids = {r["lote_retorno_id"] for r in query(
+                    """SELECT lote_retorno_id FROM ordenes_tercerizado
+                       WHERE lote_retorno_id IS NOT NULL
+                         AND EXISTS (SELECT 1 FROM lotes l2 WHERE l2.id=ordenes_tercerizado.lote_retorno_id
+                                     AND l2.material_id=?)""", (m["mat_id"],))}
+                if not lotes_ott_ids:
+                    continue
+                nuevo_codigo = f"{m['prod_codigo']}-SE"
+                candidato = nuevo_codigo
+                intento = 1
+                while query("SELECT id FROM materiales WHERE codigo=?", (candidato,), one=True):
+                    intento += 1
+                    candidato = f"{nuevo_codigo}{intento}"
+                se_mat_id = execute("""INSERT INTO materiales
+                    (codigo,descripcion,categoria,producto_id,unidad,stock,stock_min,precio_unit,activo)
+                    SELECT ?, descripcion, 'Semielaborado', producto_id, unidad, 0, 0, precio_unit, 1
+                    FROM materiales WHERE id=?""", (candidato, m["mat_id"]))
+                lotes_a_mover = query(
+                    f"SELECT id,cantidad_activa FROM lotes WHERE id IN "
+                    f"({','.join('?'*len(lotes_ott_ids))})", tuple(lotes_ott_ids))
+                total_mover = sum(float(l["cantidad_activa"] or 0) for l in lotes_a_mover)
+                execute(f"UPDATE lotes SET material_id=? WHERE id IN "
+                        f"({','.join('?'*len(lotes_ott_ids))})",
+                        (se_mat_id, *lotes_ott_ids))
+                execute("UPDATE materiales SET stock=stock-? WHERE id=?", (total_mover, m["mat_id"]))
+                execute("UPDATE materiales SET stock=stock+? WHERE id=?", (total_mover, se_mat_id))
+                print(f"[init_db] Separados {len(lotes_ott_ids)} lote(s) de retorno OTT "
+                      f"({total_mover:g} unid.) del material id={m['mat_id']} ({m['mat_codigo']}) "
+                      f"hacia material nuevo id={se_mat_id} ({candidato})")
+    except Exception as e:
+        print(f"[init_db] Advertencia reparando materiales semielaborados: {e}")
+
+    # Backfill del versionado de semielaborados. Los que ya existen se quedan
+    # con la firma que tienen HOY sus insumos: son la versión vigente, y así
+    # _get_or_create_pse los reusa en vez de crear un -v2 de entrada para
+    # todos. Las OTT que ya tienen lote de retorno se congelan al material de
+    # ese lote, que es el que efectivamente están usando.
+    try:
+        with app.app_context():
+            for m in query("""SELECT id, operacion_id FROM materiales
+                    WHERE categoria='Semielaborado' AND operacion_id IS NOT NULL
+                      AND pse_firma IS NULL"""):
+                execute("UPDATE materiales SET pse_firma=? WHERE id=?",
+                        (_firma_insumos_operacion(m["operacion_id"]), m["id"]))
+            huerfanas = query("""SELECT ott.id, l.material_id
+                FROM ordenes_tercerizado ott JOIN lotes l ON l.id=ott.lote_retorno_id
+                WHERE ott.material_se_id IS NULL AND ott.es_ultimo_nivel=0""")
+            for o in huerfanas:
+                execute("UPDATE ordenes_tercerizado SET material_se_id=? WHERE id=?",
+                        (o["material_id"], o["id"]))
+            if huerfanas:
+                print(f"[init_db] Semielaborado congelado en {len(huerfanas)} OTT(s) ya en curso")
+    except Exception as e:
+        print(f"[init_db] Advertencia en el backfill de semielaborados: {e}")
+
+    # Reparación de la reparación anterior: una versión previa de esta
+    # migración recategorizaba el material entero in-place a
+    # 'Semielaborado' en vez de separar lotes, arrastrando también el
+    # stock de lotes ajenos (p.ej. Producto terminado real) que
+    # compartían el material. Acá se detectan esos materiales (codigo
+    # terminado en "-SE", categoria 'Semielaborado') que todavía tengan
+    # lotes NO vinculados a ninguna OTT, y se los separa hacia el
+    # material original (o uno nuevo si no existe más).
+    try:
+        with app.app_context():
+            se_materiales = query("""SELECT id, codigo, producto_id, unidad, precio_unit
+                FROM materiales WHERE categoria='Semielaborado' AND codigo LIKE '%-SE'""")
+            for m in se_materiales:
+                lotes_ott_ids = {r["lote_retorno_id"] for r in query(
+                    "SELECT lote_retorno_id FROM ordenes_tercerizado WHERE lote_retorno_id IS NOT NULL")}
+                lotes_del_material = query(
+                    "SELECT id,cantidad_activa FROM lotes WHERE material_id=?", (m["id"],))
+                ajenos = [l for l in lotes_del_material if l["id"] not in lotes_ott_ids]
+                if not ajenos:
+                    continue
+                codigo_original = m["codigo"][:-3]  # quita el sufijo "-SE"
+                otro = query("SELECT id FROM materiales WHERE codigo=?", (codigo_original,), one=True)
+                if otro:
+                    destino_id = otro["id"]
+                else:
+                    destino_id = execute("""INSERT INTO materiales
+                        (codigo,descripcion,categoria,producto_id,unidad,stock,stock_min,precio_unit,activo)
+                        SELECT ?, descripcion, 'Producto terminado', producto_id, unidad, 0, stock_min, precio_unit, 1
+                        FROM materiales WHERE id=?""", (codigo_original, m["id"]))
+                total_mover = sum(float(l["cantidad_activa"] or 0) for l in ajenos)
+                ph = ",".join("?"*len(ajenos))
+                execute(f"UPDATE lotes SET material_id=? WHERE id IN ({ph})",
+                        (destino_id, *[l["id"] for l in ajenos]))
+                execute("UPDATE materiales SET stock=stock-? WHERE id=?", (total_mover, m["id"]))
+                execute("UPDATE materiales SET stock=stock+? WHERE id=?", (total_mover, destino_id))
+                print(f"[init_db] Separados {len(ajenos)} lote(s) ajenos ({total_mover:g} unid.) "
+                      f"del material Semielaborado id={m['id']} hacia material id={destino_id} "
+                      f"(codigo {codigo_original})")
+    except Exception as e:
+        print(f"[init_db] Advertencia separando lotes mezclados en semielaborados: {e}")
 
     db.close()
 
@@ -2141,6 +2519,395 @@ def dashboard_operativo():
             "ORDER BY o.id DESC LIMIT 6")],
     })
 
+# ── Clasificación de material_proceso en categorías amplias (para gráficos) ───
+# El campo material_proceso guarda la especificación puntual de cada renglón
+# (ej. "SAE 1010 LC...", "6063 T5", "ANILLADO DE CAÑOS"), no una categoría.
+# Para agrupar como en el Excel original (TRATAMIENTO SUPERFICIAL / MATERIA
+# PRIMA / PROCESO) se usa la categoría del PROVEEDOR (proveedores.categoria_compra,
+# igual que en la hoja "DATOS INDICADORES DE COMPRAS" del Excel real, donde la
+# agrupación es por proveedor y no por texto libre). Si el proveedor no tiene
+# categoria_compra cargada, se cae a un heurístico por palabras clave sobre el
+# texto de material_proceso como respaldo.
+_KW_TRAT_SUP = (
+    "tratamiento superficial", "tratamiento termico", "tratamiento térmico",
+    "anodizado", "niquelado", "cataforesis", "pintura", "pintado", "pint.",
+    "pint ", "cincado", "cinc ", "zincado", "fosfat", "cromad", "cromo",
+    "pavonado", "plateado", "dorado", "pulido quimico", "pulido químico",
+    "galvaniz", "templado", "temple", "revenido", "arenado", "decapado",
+    "desplacado", "granallado",
+)
+_KW_MATERIA_PRIMA = (
+    "sae ", "sae1", "sae4", "sae 1", "sae 4", "aisi", "chapa", "barra",
+    "alambre", "tubo", "laton", "latón", "bronce", "6063", "6061", "nylon",
+    "acero", "hierro", "aluminio", "inox",
+)
+
+def _clasificar_material_proceso_texto(valor):
+    """Heurístico de respaldo por palabras clave, usado sólo cuando el
+    proveedor del requerimiento no tiene categoria_compra cargada."""
+    if not valor:
+        return "SIN CATEGORÍA"
+    v = valor.strip().lower()
+    if v.startswith("sae") or v.startswith("aisi"):
+        return "MATERIA PRIMA"
+    if any(kw in v for kw in _KW_TRAT_SUP):
+        return "TRATAMIENTO SUPERFICIAL"
+    if any(kw in v for kw in _KW_MATERIA_PRIMA):
+        return "MATERIA PRIMA"
+    return "PROCESO"
+
+def _clasificar_requerimiento(material_proceso, categoria_compra_proveedor):
+    """Categoría amplia de un requerimiento para los gráficos del dashboard.
+    Prioridad: categoria_compra del proveedor (fuente confiable, como en el
+    Excel original) > heurístico por texto de material_proceso (respaldo)."""
+    if categoria_compra_proveedor:
+        return categoria_compra_proveedor
+    return _clasificar_material_proceso_texto(material_proceso)
+
+
+# ── Calidad de un requerimiento productivo, en base al LOTE real de stock ────
+# (no al campo manual cumple_calidad/cant_no_conforme). Fuente única de verdad
+# usada por dashboard_requerimientos, dashboard_indicadores_compras y el
+# listado de Requerimientos productivos, para que los 3 módulos coincidan.
+#
+# Vínculo con el lote (ya existía en el sistema, sin columnas nuevas):
+#   - Requerimiento de COMPRA (materia prima): rp.origen_item_id
+#     -> ordenes_compra_items.id -> ordenes_compra_items.lote_id -> lotes.id
+#   - Requerimiento TERCERIZADO (proceso/tratamiento): rp.numero
+#     -> ordenes_tercerizado.numero -> ordenes_tercerizado.lote_retorno_id -> lotes.id
+#
+# Regla:
+#   - Lote con decisión de Calidad (estado Aprobado/Rechazado/Agotado):
+#     % aprobado = lotes.cantidad_activa / lotes.cantidad_original
+#     aprobado=1 si % >= 0.95, si no incidente (aprobado=0). evaluable=True.
+#   - Lote todavía 'Ingresado' (sin decisión de Calidad): NO evaluable —
+#     queda "pendiente de calidad", no cuenta ni como aprobado ni incidente.
+#   - Sin lote vinculado (históricos del Excel, cargas manuales sin OC/OTT
+#     de por medio): fallback al criterio manual (cant_no_conforme==0), y
+#     SÍ entra al cálculo (evaluable=True) — a diferencia del caso anterior.
+def _calidad_requerimientos_bulk(rows):
+    """rows: iterable de dicts/Row con al menos id, numero, origen_item_id,
+    cumple_calidad. Devuelve {rp_id: {evaluable, aprobado, origen, lote_estado, lote_pct}}."""
+    rows = list(rows)
+    if not rows:
+        return {}
+    origen_ids = sorted({r["origen_item_id"] for r in rows if r["origen_item_id"]})
+    numeros = sorted({r["numero"] for r in rows if r["numero"]})
+
+    lote_by_origen = {}
+    if origen_ids:
+        ph = ",".join("?" * len(origen_ids))
+        for oci in query(f"SELECT id, lote_id FROM ordenes_compra_items WHERE id IN ({ph})", tuple(origen_ids)):
+            if oci["lote_id"]:
+                lote_by_origen[oci["id"]] = oci["lote_id"]
+
+    lote_by_numero = {}
+    if numeros:
+        ph = ",".join("?" * len(numeros))
+        for ott in query(f"SELECT numero, lote_retorno_id FROM ordenes_tercerizado WHERE numero IN ({ph})", tuple(numeros)):
+            if ott["lote_retorno_id"]:
+                lote_by_numero[ott["numero"]] = ott["lote_retorno_id"]
+
+    lote_ids = sorted(set(lote_by_origen.values()) | set(lote_by_numero.values()))
+    lotes_info = {}
+    if lote_ids:
+        ph = ",".join("?" * len(lote_ids))
+        for l in query(f"SELECT id, estado, cantidad_activa, cantidad_original FROM lotes WHERE id IN ({ph})", tuple(lote_ids)):
+            lotes_info[l["id"]] = l
+
+    out = {}
+    for r in rows:
+        lote_id = lote_by_origen.get(r["origen_item_id"]) or lote_by_numero.get(r["numero"])
+        lote = lotes_info.get(lote_id) if lote_id else None
+        if lote:
+            if lote["estado"] in ("Aprobado", "Rechazado", "Agotado"):
+                orig = float(lote["cantidad_original"] or 0)
+                pct = (float(lote["cantidad_activa"] or 0) / orig) if orig > 0 else 0.0
+                out[r["id"]] = {"evaluable": True, "aprobado": 1 if pct >= 0.95 else 0,
+                                 "origen": "lote", "lote_estado": lote["estado"], "lote_pct": round(pct, 4)}
+            else:  # 'Ingresado' — todavía sin decisión de Calidad
+                out[r["id"]] = {"evaluable": False, "aprobado": None,
+                                 "origen": "lote", "lote_estado": lote["estado"], "lote_pct": None}
+        else:
+            cc = r["cumple_calidad"]
+            out[r["id"]] = {"evaluable": True, "aprobado": cc if cc is not None else None,
+                             "origen": "manual", "lote_estado": None, "lote_pct": None}
+    return out
+
+
+# ── Dashboard de requerimientos productivos ───────────────────────────────────
+@app.route("/api/dashboard/requerimientos")
+@login_required()
+def dashboard_requerimientos():
+    rows = query("""SELECT rp.*, c.razon cliente_nombre, p.razon proveedor_nombre, p.categoria_compra
+        FROM requerimientos_productivos rp
+        LEFT JOIN clientes c ON c.id=rp.cliente_id
+        LEFT JOIN proveedores p ON p.id=rp.proveedor_id""")
+    hoy = date.today()
+    calidad_map = _calidad_requerimientos_bulk(rows)
+    rows_dict = [dict(r) for r in rows]
+    for d in rows_dict:
+        d["_calidad"] = calidad_map.get(d["id"], {"evaluable": True, "aprobado": d.get("cumple_calidad"),
+                                                    "origen": "manual", "lote_estado": None, "lote_pct": None})
+
+    activos, vencidos, proximos, entregados_mes, anulados = [], [], [], 0, 0
+    cumple_fecha_ok = cumple_fecha_tot = 0
+    cumple_cant_ok = cumple_cant_tot = 0
+    cumple_calidad_ok = cumple_calidad_tot = 0
+    pendientes_calidad = 0
+    por_proveedor = {}
+
+    for d in rows_dict:
+        estado = _calc_estado_req(d.get("f_estimada"), d.get("f_entrega"), d.get("estado"))
+        d["estado"] = estado
+
+        if estado == "ANULADO":
+            anulados += 1
+            continue
+        if estado == "ENTREGADO":
+            if d.get("f_entrega") and str(d["f_entrega"])[:7] == hoy.strftime("%Y-%m"):
+                entregados_mes += 1
+        else:
+            activos.append(d)
+            proveedor = d.get("proveedor_nombre") or "Sin proveedor"
+            por_proveedor[proveedor] = por_proveedor.get(proveedor, 0) + 1
+            if estado == "VENCIDO":
+                try:
+                    fe = datetime.strptime(str(d["f_estimada"])[:10], "%Y-%m-%d").date()
+                    d["dias_vencido"] = (hoy - fe).days
+                except (ValueError, TypeError):
+                    d["dias_vencido"] = 0
+                vencidos.append(d)
+            elif estado == "PROXIMO" and d.get("f_estimada"):
+                try:
+                    fe = datetime.strptime(str(d["f_estimada"])[:10], "%Y-%m-%d").date()
+                    if fe <= hoy + timedelta(days=7):
+                        proximos.append(d)
+                except (ValueError, TypeError):
+                    pass
+
+        if d.get("cumple_fecha") is not None:
+            cumple_fecha_tot += 1
+            cumple_fecha_ok += d["cumple_fecha"]
+        if d.get("cumple_cantidad") is not None:
+            cumple_cant_tot += 1
+            cumple_cant_ok += d["cumple_cantidad"]
+        if d.get("f_entrega"):
+            if d["_calidad"]["evaluable"] and d["_calidad"]["aprobado"] is not None:
+                cumple_calidad_tot += 1
+                cumple_calidad_ok += d["_calidad"]["aprobado"]
+            elif not d["_calidad"]["evaluable"]:
+                pendientes_calidad += 1
+
+    vencidos.sort(key=lambda x: x["dias_vencido"], reverse=True)
+    proximos.sort(key=lambda x: x.get("f_estimada") or "")
+
+    def pct(ok, tot):
+        return round(100 * ok / tot) if tot else None
+
+    # ── Series mensuales para gráficos (últimos 12 meses con datos, por categoría) ──
+    MESES_LBL = ["ENE","FEB","MAR","ABR","MAY","JUN","JUL","AGO","SEP","OCT","NOV","DIC"]
+    entregados = [d for d in rows_dict if d["f_entrega"]]
+    for d in entregados:
+        d["_categoria"] = _clasificar_requerimiento(d.get("material_proceso"), d.get("categoria_compra"))
+    meses_con_datos = sorted({str(d["f_entrega"])[:7] for d in entregados})[-12:]
+
+    # Orden fijo (igual que el Excel original) y sólo categorías con datos
+    ORDEN_CAT = ["TRATAMIENTO SUPERFICIAL", "MATERIA PRIMA", "PROCESO", "SIN CATEGORÍA"]
+    categorias = [c for c in ORDEN_CAT if any(d["_categoria"] == c for d in entregados)]
+
+    def serie_mensual(campo):
+        # {categoria: [pct_mes1, pct_mes2, ...]}, más "PROMEDIO MENSUAL"
+        series = {}
+        for cat in categorias:
+            valores = []
+            for ym in meses_con_datos:
+                grupo = [d for d in entregados
+                         if d["_categoria"] == cat
+                         and str(d["f_entrega"])[:7] == ym and d.get(campo) is not None]
+                valores.append(pct(sum(g[campo] for g in grupo), len(grupo)) if grupo else None)
+            series[cat] = valores
+        promedio = []
+        for i in range(len(meses_con_datos)):
+            vals = [series[cat][i] for cat in categorias if series[cat][i] is not None]
+            promedio.append(round(sum(vals) / len(vals)) if vals else None)
+        series["PROMEDIO MENSUAL"] = promedio
+        return series
+
+    def serie_mensual_calidad():
+        # Igual que serie_mensual, pero basada en _calidad (lote real / fallback
+        # manual) en vez del campo cumple_calidad crudo, y excluyendo los
+        # requerimientos con lote todavía pendiente de clasificar en Calidad.
+        series = {}
+        for cat in categorias:
+            valores = []
+            for ym in meses_con_datos:
+                grupo = [d for d in entregados
+                         if d["_categoria"] == cat and str(d["f_entrega"])[:7] == ym
+                         and d["_calidad"]["evaluable"] and d["_calidad"]["aprobado"] is not None]
+                valores.append(pct(sum(g["_calidad"]["aprobado"] for g in grupo), len(grupo)) if grupo else None)
+            series[cat] = valores
+        promedio = []
+        for i in range(len(meses_con_datos)):
+            vals = [series[cat][i] for cat in categorias if series[cat][i] is not None]
+            promedio.append(round(sum(vals) / len(vals)) if vals else None)
+        series["PROMEDIO MENSUAL"] = promedio
+        return series
+
+    meses_lbl_out = [MESES_LBL[int(ym.split("-")[1]) - 1] for ym in meses_con_datos]
+
+    # ── Performance por proveedor: % cumplimiento fecha / cantidad / calidad,
+    # sobre los requerimientos entregados (f_entrega no nula). Reusa d["_calidad"]
+    # ya calculado arriba con _calidad_requerimientos_bulk (misma fuente que
+    # dashboard_indicadores_compras) para que ambos módulos coincidan. ──
+    def performance_por_proveedor():
+        por_prov = {}
+        for d in entregados:
+            prov = d.get("proveedor_nombre") or "Sin proveedor"
+            por_prov.setdefault(prov, []).append(d)
+
+        out = []
+        for prov, items in por_prov.items():
+            fecha_vals = [d["cumple_fecha"] for d in items if d.get("cumple_fecha") is not None]
+            cant_vals = [d["cumple_cantidad"] for d in items if d.get("cumple_cantidad") is not None]
+            calidad_vals = [d["_calidad"]["aprobado"] for d in items
+                             if d["_calidad"]["evaluable"] and d["_calidad"]["aprobado"] is not None]
+            out.append({
+                "proveedor": prov,
+                "entregados": len(items),
+                "cumple_fecha_pct": pct(sum(fecha_vals), len(fecha_vals)),
+                "cumple_cantidad_pct": pct(sum(cant_vals), len(cant_vals)),
+                "cumple_calidad_pct": pct(sum(calidad_vals), len(calidad_vals)),
+            })
+        # Sólo proveedores con al menos un dato evaluable en alguno de los 3 ejes,
+        # ordenados por volumen de entregas (los más relevantes primero).
+        out = [o for o in out if o["cumple_fecha_pct"] is not None
+               or o["cumple_cantidad_pct"] is not None or o["cumple_calidad_pct"] is not None]
+        out.sort(key=lambda o: o["entregados"], reverse=True)
+        return out[:10]
+
+    # ── Cantidad pedida vs entregada, top 10 por cantidad pedida entre los activos ──
+    barras = sorted(
+        [{"numero": d["numero"], "codigo": d.get("codigo"),
+          "cantidad_pedida": d.get("cantidad_pedida") or 0,
+          "cantidad_entregada": d.get("cantidad_entregada") or 0}
+         for d in rows_dict if (d.get("cantidad_pedida") or 0) > 0],
+        key=lambda x: x["cantidad_pedida"], reverse=True)[:10]
+
+    return jsonify({
+        "activos":         len(activos),
+        "vencidos":        len(vencidos),
+        "proximos_7d":     len(proximos),
+        "entregados_mes":  entregados_mes,
+        "cumple_fecha_pct":   pct(cumple_fecha_ok, cumple_fecha_tot),
+        "cumple_cantidad_pct": pct(cumple_cant_ok, cumple_cant_tot),
+        "cumple_calidad_pct":  pct(cumple_calidad_ok, cumple_calidad_tot),
+        "pendientes_calidad":  pendientes_calidad,
+        "top_vencidos": [
+            {"numero": d["numero"], "cliente": d.get("cliente_nombre"),
+             "codigo": d.get("codigo"), "proveedor": d.get("proveedor_nombre"),
+             "f_estimada": d.get("f_estimada"), "dias_vencido": d["dias_vencido"]}
+            for d in vencidos[:8]],
+        "top_proximos": [
+            {"numero": d["numero"], "cliente": d.get("cliente_nombre"),
+             "codigo": d.get("codigo"), "proveedor": d.get("proveedor_nombre"),
+             "f_estimada": d.get("f_estimada")}
+            for d in proximos[:8]],
+        "por_proveedor": sorted(
+            [{"proveedor": k, "cantidad": v} for k, v in por_proveedor.items()],
+            key=lambda x: x["cantidad"], reverse=True)[:8],
+        "graficos": {
+            "meses": meses_lbl_out,
+            "objetivo_pct": 90,
+            "indice_calidad": serie_mensual_calidad(),
+            "cumplimiento_entrega": serie_mensual("cumple_fecha"),
+            "cantidad_pedida_vs_entregada": barras,
+            "performance_por_proveedor": performance_por_proveedor(),
+        },
+    })
+
+# ── Indicadores de compras por proveedor (réplica hoja "DATOS INDICADORES DE
+# COMPRAS" del Excel) ──────────────────────────────────────────────────────
+# Por cada proveedor, mes a mes: Lotes Entregados, Entregados a tiempo,
+# Aprobados, Incidentes de Calidad, y los 3 índices:
+#   CE  (Cumplimiento de Entrega) = entregados_a_tiempo / entregados
+#   IC  (Índice de Calidad)       = aprobados/entregados - incidentes_rate*0.1
+#   IPP (Índice Performance Prov) = promedio(CE, IC)
+# Nota: el Excel original resta también "Observados/Rechazados/Desviados"
+# cargados a mano; acá no existen esos campos en la base, así que quedan
+# absorbidos en "aprobados" (cumple_calidad) — el resultado es equivalente
+# cuando esos campos manuales están en 0, que es el caso normal.
+@app.route("/api/dashboard/indicadores_compras")
+@login_required()
+def dashboard_indicadores_compras():
+    anio = request.args.get("anio", str(date.today().year))
+    rows = query("""SELECT rp.*, p.razon proveedor_nombre, p.categoria_compra
+        FROM requerimientos_productivos rp
+        JOIN proveedores p ON p.id=rp.proveedor_id
+        WHERE rp.f_entrega IS NOT NULL AND substr(rp.f_entrega,1,4)=?""", (anio,))
+    rows = [dict(r) for r in rows]
+    for d in rows:
+        d["_categoria"] = _clasificar_requerimiento(d.get("material_proceso"), d.get("categoria_compra"))
+    # Calidad real basada en el lote (con fallback manual para los sin vínculo),
+    # misma fuente única que usa dashboard_requerimientos — ver _calidad_requerimientos_bulk.
+    calidad_map = _calidad_requerimientos_bulk(rows)
+    for d in rows:
+        d["_calidad"] = calidad_map.get(d["id"], {"evaluable": True, "aprobado": d.get("cumple_calidad"),
+                                                    "origen": "manual", "lote_estado": None, "lote_pct": None})
+
+    MESES_LBL = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"]
+    ORDEN_CAT = ["TRATAMIENTO SUPERFICIAL", "MATERIA PRIMA", "PROCESO", "SIN CATEGORÍA"]
+
+    def calc_indicadores(items):
+        meses = []
+        tot_entregados = tot_a_tiempo = tot_aprobados = tot_evaluados = tot_pendientes = 0
+        for m in range(1, 13):
+            ym = f"{anio}-{m:02d}"
+            grupo = [d for d in items if str(d["f_entrega"])[:7] == ym]
+            entregados = len(grupo)
+            a_tiempo = sum(1 for d in grupo if d.get("cumple_fecha") == 1)
+            # "Aprobados"/"Incidentes" sólo salen de los evaluables (lote con decisión
+            # de Calidad, o sin lote vinculado con fallback manual). Los que tienen
+            # lote todavía 'Ingresado' quedan afuera y se cuentan como "pendientes".
+            evaluados = [d for d in grupo if d["_calidad"]["evaluable"] and d["_calidad"]["aprobado"] is not None]
+            aprobados = sum(d["_calidad"]["aprobado"] for d in evaluados)
+            n_eval = len(evaluados)
+            incidentes = n_eval - aprobados
+            pendientes = entregados - n_eval
+            ce = round(a_tiempo / entregados, 4) if entregados else None
+            ic = round((aprobados / n_eval) - (incidentes / n_eval * 0.1), 4) if n_eval else None
+            ipp = round((ce + ic) / 2, 4) if (ce is not None and ic is not None) else None
+            tot_entregados += entregados; tot_a_tiempo += a_tiempo; tot_aprobados += aprobados
+            tot_evaluados += n_eval; tot_pendientes += pendientes
+            meses.append({
+                "mes": MESES_LBL[m - 1], "entregados": entregados, "a_tiempo": a_tiempo,
+                "aprobados": aprobados, "incidentes": incidentes, "pendientes": pendientes,
+                "ce": ce, "ic": ic, "ipp": ipp,
+            })
+        tot_incidentes = tot_evaluados - tot_aprobados
+        ce_t = round(tot_a_tiempo / tot_entregados, 4) if tot_entregados else None
+        ic_t = round((tot_aprobados / tot_evaluados) - (tot_incidentes / tot_evaluados * 0.1), 4) if tot_evaluados else None
+        ipp_t = round((ce_t + ic_t) / 2, 4) if (ce_t is not None and ic_t is not None) else None
+        return meses, {
+            "entregados": tot_entregados, "a_tiempo": tot_a_tiempo, "aprobados": tot_aprobados,
+            "incidentes": tot_incidentes, "pendientes": tot_pendientes, "ce": ce_t, "ic": ic_t, "ipp": ipp_t,
+        }
+
+    categorias_out = []
+    categorias_presentes = [c for c in ORDEN_CAT if any(d["_categoria"] == c for d in rows)]
+    for cat in categorias_presentes:
+        items_cat = [d for d in rows if d["_categoria"] == cat]
+        proveedores_cat = sorted({d["proveedor_nombre"] for d in items_cat})
+        proveedores_out = []
+        for prov in proveedores_cat:
+            items_prov = [d for d in items_cat if d["proveedor_nombre"] == prov]
+            meses, total = calc_indicadores(items_prov)
+            proveedores_out.append({"proveedor": prov, "meses": meses, "total": total})
+        proveedores_out.sort(key=lambda p: p["total"]["entregados"], reverse=True)
+        categorias_out.append({"categoria": cat, "proveedores": proveedores_out})
+
+    return jsonify({"anio": anio, "meses_lbl": MESES_LBL, "categorias": categorias_out})
+
 # ── Dashboard económico / financiero ──────────────────────────────────────────
 @app.route("/api/dashboard/economico")
 @login_required()
@@ -2439,10 +3206,12 @@ def get_materiales():
     out = []
     for r in rows:
         d = dict(r)
-        # Para materiales con categoria 'Material' o 'Producto terminado'
-        # (ambos manejan lotes), se reemplaza el stock por el stock aprobado
-        # de lotes. Insumos sin lote conservan el stock original.
-        if d.get("categoria") in ("Material", "Producto terminado"):
+        # Para materiales con categoria 'Material', 'Producto terminado' o
+        # 'Semielaborado' (los tres manejan lotes — este último son los
+        # materiales auto-generados por retorno de OTT intermedia, ver
+        # ott_registrar_retorno), se reemplaza el stock por el stock
+        # aprobado de lotes. Insumos sin lote conservan el stock original.
+        if d.get("categoria") in ("Material", "Producto terminado", "Semielaborado"):
             d["stock"] = d.pop("stock_lotes")
         else:
             d.pop("stock_lotes", None)
@@ -2500,12 +3269,23 @@ def create_material():
 def update_material(mid):
     d = request.json
     rol_sesion = session.get("rol")
+    actual = query("SELECT codigo,producto_id FROM materiales WHERE id=?", (mid,), one=True)
+    if not actual:
+        return jsonify({"error": "Material no encontrado"}), 404
+    nuevo_codigo = actual["codigo"]
+    if "codigo" in d and d.get("codigo") and d["codigo"] != actual["codigo"]:
+        if actual["producto_id"]:
+            return jsonify({"error": "Este código proviene de un producto vinculado — edítelo desde el módulo Productos."}), 400
+        dup = query("SELECT id FROM materiales WHERE codigo=? AND id!=?", (d["codigo"], mid), one=True)
+        if dup:
+            return jsonify({"error": f"El código '{d['codigo']}' ya está en uso por otro material"}), 409
+        nuevo_codigo = d["codigo"]
     if "precio_unit" in d and rol_sesion == "admin":
-        execute("UPDATE materiales SET descripcion=?,categoria=?,categoria_producto_id=?,unidad=?,stock_min=?,stock_max=?,precio_unit=?,proveedor_id=?,obs=?,actualizado=datetime('now','localtime') WHERE id=?",
-            (d["descripcion"],d.get("categoria"),d.get("categoria_producto_id"),d.get("unidad"),d.get("stock_min",0),d.get("stock_max",0),d["precio_unit"],d.get("proveedor_id"),d.get("obs"),mid))
+        execute("UPDATE materiales SET codigo=?,descripcion=?,categoria=?,categoria_producto_id=?,unidad=?,stock_min=?,stock_max=?,precio_unit=?,proveedor_id=?,obs=?,actualizado=datetime('now','localtime') WHERE id=?",
+            (nuevo_codigo,d["descripcion"],d.get("categoria"),d.get("categoria_producto_id"),d.get("unidad"),d.get("stock_min",0),d.get("stock_max",0),d["precio_unit"],d.get("proveedor_id"),d.get("obs"),mid))
     else:
-        execute("UPDATE materiales SET descripcion=?,categoria=?,categoria_producto_id=?,unidad=?,stock_min=?,stock_max=?,proveedor_id=?,obs=?,actualizado=datetime('now','localtime') WHERE id=?",
-            (d["descripcion"],d.get("categoria"),d.get("categoria_producto_id"),d.get("unidad"),d.get("stock_min",0),d.get("stock_max",0),d.get("proveedor_id"),d.get("obs"),mid))
+        execute("UPDATE materiales SET codigo=?,descripcion=?,categoria=?,categoria_producto_id=?,unidad=?,stock_min=?,stock_max=?,proveedor_id=?,obs=?,actualizado=datetime('now','localtime') WHERE id=?",
+            (nuevo_codigo,d["descripcion"],d.get("categoria"),d.get("categoria_producto_id"),d.get("unidad"),d.get("stock_min",0),d.get("stock_max",0),d.get("proveedor_id"),d.get("obs"),mid))
     # Propagar la nueva descripción a las copias guardadas en compras
     # (solicitudes_compra y ordenes_compra_items no hacen JOIN en vivo con materiales,
     #  guardan una copia propia del texto al momento de crearse)
@@ -2577,16 +3357,17 @@ def get_proveedores():
 def create_proveedor():
     d = request.json
     if not d.get("razon"): return jsonify({"error":"Razón social requerida"}), 400
-    lid = execute("INSERT INTO proveedores (razon,cuit,contacto,telefono,email,materiales,plazo_dias,calificacion,estado,obs) VALUES (?,?,?,?,?,?,?,?,?,?)",
-        (d["razon"],d.get("cuit"),d.get("contacto"),d.get("telefono"),d.get("email"),d.get("materiales"),d.get("plazo_dias",3),d.get("calificacion",5),d.get("estado","Activo"),d.get("obs")))
+    lid = execute("INSERT INTO proveedores (razon,cuit,contacto,telefono,email,materiales,plazo_dias,calificacion,estado,obs,categoria_compra) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (d["razon"],d.get("cuit"),d.get("contacto"),d.get("telefono"),d.get("email"),d.get("materiales"),d.get("plazo_dias",3),d.get("calificacion",5),d.get("estado","Activo"),d.get("obs"),d.get("categoria_compra") or None))
     return jsonify({"ok":True,"id":lid}), 201
 
 @app.route("/api/proveedores/<int:pid>", methods=["PUT"])
 @login_required(roles=["admin","almacen"])
 def update_proveedor(pid):
     d = request.json
-    execute("UPDATE proveedores SET razon=?,cuit=?,contacto=?,telefono=?,email=?,materiales=?,plazo_dias=?,calificacion=?,estado=?,obs=? WHERE id=?",
-        (d["razon"],d.get("cuit"),d.get("contacto"),d.get("telefono"),d.get("email"),d.get("materiales"),d.get("plazo_dias",3),d.get("calificacion",5),d.get("estado","Activo"),d.get("obs"),pid))
+    if not d.get("razon"): return jsonify({"error":"Razón social requerida"}), 400
+    execute("UPDATE proveedores SET razon=?,cuit=?,contacto=?,telefono=?,email=?,materiales=?,plazo_dias=?,calificacion=?,estado=?,obs=?,categoria_compra=? WHERE id=?",
+        (d["razon"],d.get("cuit"),d.get("contacto"),d.get("telefono"),d.get("email"),d.get("materiales"),d.get("plazo_dias",3),d.get("calificacion",5),d.get("estado","Activo"),d.get("obs"),d.get("categoria_compra") or None,pid))
     return jsonify({"ok":True})
 
 @app.route("/api/proveedores/<int:pid>/materiales", methods=["GET"])
@@ -2630,13 +3411,87 @@ def get_productos():
             LEFT JOIN clientes cl ON cl.id=p.cliente_id
             WHERE p.activo=1 ORDER BY p.codigo""")
     result = []
+    try:
+        valor_hora_mo = float(get_config_valor("valor_hora_mo", "0") or 0)
+    except (TypeError, ValueError):
+        valor_hora_mo = 0
     for r in rows:
         d = dict(r)
         # Calculate costo_mat dynamically from current material prices
         d["costo_mat"] = round(calcular_costo_producto(d["id"], 1.0), 2)
-        d["tiempo_ciclo_total_min"] = round(calcular_tiempo_ciclo_total(d["id"]), 2)
+        # El ciclo se carga por operación en SEGUNDOS, pero el total acumulado
+        # del producto se expone en MINUTOS: es la escala en la que se lee en
+        # la tabla de Procesos/Productos (35 min, no 2100 seg).
+        _ciclo_total_seg = calcular_tiempo_ciclo_total_seg(d["id"])
+        d["tiempo_ciclo_total_min"] = round(_ciclo_total_seg / 60.0, 2)
+        d["rendimiento_ponderado"] = calcular_rendimiento_ponderado_producto(d["id"])
+        d["costo_terc"] = round(calcular_costo_terciarizado_producto(d["id"]), 2)
+        # Costo de mano de obra: el tiempo de ciclo total está en SEGUNDOS y el
+        # valor hora se configura por hora, así que se divide por 3600.
+        d["costo_mo"] = round(_ciclo_total_seg / 3600.0 * valor_hora_mo, 2)
+        d["costo_total"] = round((d["costo_mat"] or 0) + (d["costo_mo"] or 0) + (d["costo_terc"] or 0), 2)
         result.append(d)
     return jsonify(result)
+
+def calcular_costo_terciarizado_producto(producto_id):
+    """Costo terciarizado de un producto: suma del precio por unidad
+    (precio_tercerizado) de todas sus operaciones marcadas como
+    tercerizadas (es_tercerizada=1) en la plantilla de proceso del
+    producto. Es el costo, por unidad de producto, de mandar a hacer
+    afuera esas operaciones (no incluye materiales de las operaciones
+    propias, eso ya lo cubre costo_mat)."""
+    row = query("""
+        SELECT COALESCE(SUM(precio_tercerizado),0) total
+        FROM proceso_operaciones
+        WHERE producto_id=? AND es_tercerizada=1
+    """, (producto_id,), one=True)
+    return float(row["total"] or 0)
+
+def calcular_rendimiento_ponderado_producto(producto_id):
+    """Rendimiento ponderado por tiempo real, sobre todas las Novedades
+    históricas (de todas las OTs) del producto:
+        Σ(tiempo_real_i * rend_i) / Σ(tiempo_real_i)
+    El rendimiento de cada novedad se recalcula en vivo a partir de sus
+    datos crudos (cantidad, tiempo real, ciclo estándar) con la misma
+    fórmula que usa la creación de novedades, en lugar de confiar en el
+    campo rendimiento_pct ya guardado — así no se ve afectado por
+    novedades cuyo rendimiento_pct haya quedado en 0 (default) por no
+    haber sido recalculado."""
+    rows = query("""
+        SELECT n.cantidad_producida qty, n.tiempo_real_min t_real,
+               COALESCE(n.tiempo_perdido,0) t_perd,
+               COALESCE(NULLIF(po.tiempo_ciclo_seg,0), NULLIF(oo.tiempo_ciclo_seg,0), 60) ciclo
+        FROM novedades_produccion n
+        JOIN orden_operaciones oo ON oo.id = n.orden_operacion_id
+        JOIN ordenes o ON o.id = oo.orden_id
+        LEFT JOIN proceso_operaciones po ON po.id = oo.proceso_op_id
+        WHERE o.producto_id = ? AND n.tiempo_real_min > 0
+    """, (producto_id,))
+    if not rows:
+        return None
+    num = 0.0
+    den = 0.0
+    for r in rows:
+        # ciclo viene en segundos; tiempo_real_min en minutos.
+        ciclo = float(r["ciclo"] or 60) / 60.0
+        qty = float(r["qty"] or 0)
+        t_real = float(r["t_real"] or 0)
+        t_perd = float(r["t_perd"] or 0)
+        if qty <= 0 or ciclo <= 0 or t_real <= 0:
+            continue
+        # Misma fórmula que usa el recálculo real de novedades (init_db) y
+        # la creación de novedades: el tiempo productivo descuenta el
+        # tiempo perdido declarado, no el tiempo real bruto. Antes esta
+        # función no restaba tiempo_perdido, lo que subestimaba el
+        # rendimiento (y en varios casos lo dejaba en ~0%).
+        t_productivo = max(t_real - t_perd, 0.1)
+        rend = round((qty / t_productivo) / (1 / ciclo) * 100, 1)
+        rend = min(rend, 999)
+        num += t_real * rend
+        den += t_real
+    if den <= 0:
+        return None
+    return round(num / den, 2)
 
 @app.route("/api/productos/<int:pid>", methods=["GET"])
 @login_required()
@@ -2644,7 +3499,7 @@ def get_producto(pid):
     prod = query("SELECT p.*,COALESCE(p.peso_kg,0) peso_kg,c.nombre categoria_nombre FROM productos p LEFT JOIN categorias_producto c ON c.id=p.categoria_id WHERE p.id=?", (pid,), one=True)
     if not prod: return jsonify({"error":"No encontrado"}), 404
     d = dict(prod)
-    d["tiempo_ciclo_total_min"] = round(calcular_tiempo_ciclo_total(pid), 2)
+    d["tiempo_ciclo_total_min"] = round(calcular_tiempo_ciclo_total_seg(pid) / 60.0, 2)
     ops = query("SELECT op.*,cm.nombre cat_maq_nombre,m.nombre maquina_nombre FROM proceso_operaciones op LEFT JOIN categorias_maquina cm ON cm.id=op.categoria_maquina_id LEFT JOIN maquinas m ON m.id=op.maquina_id WHERE op.producto_id=? ORDER BY CAST(op.orden AS INTEGER), op.orden", (pid,))
     d["operaciones"] = []
     for op in ops:
@@ -2723,12 +3578,12 @@ def copiar_producto(pid):
         new_opid = execute(
             """INSERT INTO proceso_operaciones
                (producto_id,orden,nombre,descripcion,categoria_maquina_id,maquina_id,
-                tiempo_setup_min,tiempo_ciclo_min,es_tercerizada,proveedor_id,
+                tiempo_setup_min,tiempo_ciclo_seg,es_tercerizada,proveedor_id,
                 precio_tercerizado,tiempo_minimo_dias,volumen_agrupado,valor_recalculado,obs)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (new_pid, op["orden"], op["nombre"], op["descripcion"],
              op["categoria_maquina_id"], op["maquina_id"],
-             op["tiempo_setup_min"], op["tiempo_ciclo_min"],
+             op["tiempo_setup_min"], op["tiempo_ciclo_seg"],
              op["es_tercerizada"] if "es_tercerizada" in op.keys() else 0,
              op["proveedor_id"] if "proveedor_id" in op.keys() else None,
              op["precio_tercerizado"] if "precio_tercerizado" in op.keys() else 0,
@@ -2813,14 +3668,14 @@ def create_operacion():
     vol_agrup = 1 if d.get("volumen_agrupado") else 0
     lid = execute("""INSERT INTO proceso_operaciones
         (producto_id,orden,nombre,descripcion,categoria_maquina_id,maquina_id,
-         tiempo_setup_min,tiempo_ciclo_min,es_tercerizada,proveedor_id,
+         tiempo_setup_min,tiempo_ciclo_seg,es_tercerizada,proveedor_id,
          precio_tercerizado,tiempo_minimo_dias,obs,volumen_agrupado,valor_recalculado)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (d["producto_id"],d.get("orden",1),d["nombre"],d.get("descripcion"),
          d.get("categoria_maquina_id") if not es_terc else None,
          d.get("maquina_id") if not es_terc else None,
          d.get("tiempo_setup_min",0) if not es_terc else 0,
-         d.get("tiempo_ciclo_min",0) if not es_terc else 0,
+         d.get("tiempo_ciclo_seg",0) if not es_terc else 0,
          es_terc,
          d.get("proveedor_id") if es_terc else None,
          d.get("precio_tercerizado",0) if es_terc else 0,
@@ -2871,12 +3726,12 @@ def update_operacion(oid):
         es_terc = 0
     vol_agrup = 1 if d.get("volumen_agrupado") else 0
     execute("""UPDATE proceso_operaciones SET orden=?,nombre=?,descripcion=?,
-        categoria_maquina_id=?,maquina_id=?,tiempo_setup_min=?,tiempo_ciclo_min=?,
+        categoria_maquina_id=?,maquina_id=?,tiempo_setup_min=?,tiempo_ciclo_seg=?,
         es_tercerizada=?,proveedor_id=?,precio_tercerizado=?,tiempo_minimo_dias=?,obs=?,
         volumen_agrupado=?,valor_recalculado=?
         WHERE id=?""",
         (nuevo_orden, d["nombre"], d.get("descripcion"), d.get("categoria_maquina_id"),
-         d.get("maquina_id"), d.get("tiempo_setup_min",0), d.get("tiempo_ciclo_min",0),
+         d.get("maquina_id"), d.get("tiempo_setup_min",0), d.get("tiempo_ciclo_seg",0),
          es_terc, d.get("proveedor_id") if es_terc else None,
          d.get("precio_tercerizado",0) if es_terc else 0,
          d.get("tiempo_minimo_dias",0), d.get("obs"),
@@ -2987,15 +3842,316 @@ def _calc_cumplimientos_req(f_estimada, f_entrega, cantidad_pedida, cantidad_ent
 def _req_row_out(r):
     d = dict(r)
     d["estado"] = _calc_estado_req(d.get("f_estimada"), d.get("f_entrega"), d.get("estado"))
+    if not d.get("cliente_nombre") and d.get("ot_origen_numero"):
+        # Requerimientos de compra (materia prima) no tienen cliente propio:
+        # se muestra la OT que originó la solicitud de compra en su lugar,
+        # en la misma columna donde el resto de los requerimientos muestra
+        # el cliente.
+        d["cliente_nombre"] = d["ot_origen_numero"]
     return d
+
+def _next_numero_req():
+    """Próximo número correlativo para requerimientos_productivos, igual que
+    el que sugiere el modal de carga manual del frontend: el mayor numero
+    puramente numérico + 1 (arranca en 1 si no hay ninguno todavía)."""
+    filas = query("SELECT numero FROM requerimientos_productivos")
+    maxn = 0
+    for f in filas:
+        try: n = int(f["numero"])
+        except Exception: continue
+        if n > maxn: maxn = n
+    return str(maxn + 1)
+
+# ── Sincronización automática OTT -> Requerimiento productivo ────────────────
+# Reemplaza la carga manual (y el auto_carga por IA/PDF, ver más abajo): cada
+# vez que una orden tercerizada (ordenes_tercerizado / "OTT") cambia — se crea,
+# se emite un remito de traslado hacia el proveedor, se recibe (total o
+# parcialmente) o se completa — se refleja automáticamente en
+# requerimientos_productivos, sin que nadie tenga que tipearlo en el Excel ni
+# en la pantalla de carga manual. El vínculo entre ambas tablas es
+# requerimientos_productivos.numero = ordenes_tercerizado.numero (ambos son
+# únicos), así que el sync es un upsert por ese número.
+def _sync_requerimiento_desde_ott(ott_id):
+    """Crea o actualiza el requerimiento_productivo espejo de una OTT.
+    Se llama después de cualquier cambio relevante sobre la OTT (alta, emisión
+    de remito, recepción parcial/total, devolución de rechazo, completado).
+    No debe lanzar excepción hacia arriba: es un efecto secundario de
+    sincronización, y un problema acá nunca debe hacer fallar la operación
+    real sobre la OTT (que ya quedó grabada)."""
+    try:
+        ott = query("""
+            SELECT ott.*, o.numero ot_numero, o.cliente_id ot_cliente_id,
+                   o.descripcion ot_descripcion, o.cantidad ot_cantidad,
+                   po.nombre proceso_nombre, po.producto_id proceso_producto_id,
+                   pr.codigo prod_codigo, pr.unidad prod_unidad,
+                   prov.razon proveedor_razon,
+                   rem.numero remito_numero
+            FROM ordenes_tercerizado ott
+            LEFT JOIN ordenes o ON o.id=ott.ot_origen_id
+            LEFT JOIN proceso_operaciones po ON po.id=ott.proceso_op_id
+            LEFT JOIN productos pr ON pr.id=po.producto_id
+            LEFT JOIN proveedores prov ON prov.id=ott.proveedor_id
+            LEFT JOIN remitos rem ON rem.id=ott.remito_traslado_id
+            WHERE ott.id=?""", (ott_id,), one=True)
+        if not ott:
+            return
+
+        cantidad_pedida = float(ott["cantidad_enviada"] or 0)
+        if cantidad_pedida <= 0:
+            # Todavía no se remitió nada: usar lo planificado en la OT como
+            # cantidad pedida provisoria (se corrige sola cuando se emita el
+            # remito real y cantidad_enviada pase a tener un valor > 0).
+            cantidad_pedida = float(ott["ot_cantidad"] or 0)
+
+        f_entrega = ott["fecha_retorno_real"]
+        cantidad_entregada = float(ott["cantidad_recibida"] or 0) if f_entrega else None
+        cant_no_conforme = None
+        if f_entrega:
+            enviada = float(ott["cantidad_enviada"] or 0)
+            recibida = float(ott["cantidad_recibida"] or 0)
+            # Rechazado y ya devuelto al proveedor: no llegó conforme.
+            cant_no_conforme = float(ott["cantidad_rechazada_devuelta"] or 0)
+
+        # Cantidad Aprobada = lo entregado menos lo no conforme. Solo se
+        # puede calcular una vez que hay entrega; antes queda en None (se
+        # completa sola apenas haya fecha de entrega, igual que
+        # cantidad_entregada/cant_no_conforme).
+        cantidad_aprobada = (cantidad_entregada - cant_no_conforme) if f_entrega else None
+
+        estado = _calc_estado_req(ott["fecha_retorno_est"], f_entrega)
+        if ott["estado"] == "Cancelado":
+            estado = "ANULADO"
+        cumple_fecha, cumple_cantidad, cumple_calidad = _calc_cumplimientos_req(
+            ott["fecha_retorno_est"], f_entrega, cantidad_pedida, cantidad_entregada, cant_no_conforme)
+
+        existente = query("SELECT id FROM requerimientos_productivos WHERE numero=?", (ott["numero"],), one=True)
+        campos = dict(
+            cliente_id=ott["ot_cliente_id"],
+            codigo=ott["prod_codigo"] or ott["ot_numero"],
+            material_proceso=ott["proceso_nombre"],
+            provision="Tercerizado",
+            cantidad_pedida=cantidad_pedida,
+            unidad=ott["prod_unidad"],
+            proveedor_id=ott["proveedor_id"],
+            nro_oc_remito=ott["remito_numero"],
+            f_pedido=ott["creado"][:10] if ott["creado"] else None,
+            f_necesidad=None,
+            f_estimada=ott["fecha_retorno_est"],
+            f_entrega=f_entrega,
+            estado=estado,
+            cantidad_entregada=cantidad_entregada,
+            remito=ott["remito_numero"],
+            nro_factura=None,
+            cumple_fecha=cumple_fecha,
+            cumple_cantidad=cumple_cantidad,
+            cumple_calidad=cumple_calidad,
+            cant_no_conforme=cant_no_conforme,
+            obs=f"Auto-generado desde {ott['numero']} (OT {ott['ot_numero'] or '—'})",
+        )
+        if f_entrega:
+            # Solo se agrega la clave (y por lo tanto se pisa en el UPDATE de
+            # abajo) una vez que hay entrega real, igual que cantidad_entregada
+            # y cant_no_conforme. Antes de eso no se incluye, para no pisar un
+            # valor que alguien haya cargado a mano.
+            campos["cantidad_aprobada"] = cantidad_aprobada
+        if existente:
+            # No pisar f_necesidad/nro_icp/ubicacion_remito/cantidad_aprobada
+            # (antes de la entrega) si alguien los completó a mano sobre este
+            # mismo requerimiento.
+            sets = ",".join(f"{k}=?" for k in campos)
+            execute(f"UPDATE requerimientos_productivos SET {sets} WHERE id=?",
+                    (*campos.values(), existente["id"]))
+        else:
+            cols = ",".join(("numero", *campos.keys()))
+            qs = ",".join("?" * (len(campos) + 1))
+            execute(f"INSERT INTO requerimientos_productivos ({cols}) VALUES ({qs})",
+                    (ott["numero"], *campos.values()))
+    except Exception as e:
+        # Sync best-effort: se loguea pero nunca interrumpe el flujo de la OTT.
+        print(f"[requerimientos_productivos] No se pudo sincronizar OTT {ott_id}: {e}")
+
+# ── Sincronización automática Pedido de cliente -> Requerimiento productivo ──
+# Mismo patrón que _sync_requerimiento_desde_ott: cada ítem de pedido de
+# cliente (ordenes_cliente_items) tiene su requerimiento_productivo espejo.
+# Alta: al crear el ítem del pedido. Entrega: al emitir el remito.
+# Vínculo numero = f"OC-CLI-ITEM-{item_id}" (único por ítem, estable en el
+# tiempo aunque cambien cantidades/fechas).
+def _sync_requerimiento_desde_pedido(item_id):
+    """Crea o actualiza el requerimiento_productivo espejo de un ítem de
+    pedido de cliente (ordenes_cliente_items). Se llama después de crear el
+    ítem (alta) y después de emitir/anular un remito que lo incluya (entrega).
+    No debe lanzar excepción hacia arriba: es un efecto secundario de
+    sincronización, y un problema acá nunca debe hacer fallar la operación
+    real sobre el pedido/remito (que ya quedó grabada)."""
+    try:
+        item = query("""
+            SELECT oci.*, oc.numero oc_numero, oc.cliente_id oc_cliente_id,
+                   oc.fecha oc_fecha, oc.estado oc_estado,
+                   pr.codigo prod_codigo, pr.unidad prod_unidad, pr.nombre prod_nombre
+            FROM ordenes_cliente_items oci
+            JOIN ordenes_cliente oc ON oc.id=oci.orden_cliente_id
+            LEFT JOIN productos pr ON pr.id=oci.producto_id
+            WHERE oci.id=?""", (item_id,), one=True)
+        if not item:
+            return
+
+        numero = f"OC-CLI-ITEM-{item_id}"
+        cantidad_pedida = float(item["cantidad"] or 0)
+
+        entregado = query("""SELECT COALESCE(SUM(ri.cantidad),0) cant,
+                   MAX(r.creado) ultima, MAX(r.numero) remito_numero
+            FROM remito_items ri JOIN remitos r ON r.id=ri.remito_id
+            WHERE ri.orden_cliente_item_id=? AND r.estado!='Anulado'""",
+            (item_id,), one=True)
+        cantidad_entregada = float(entregado["cant"] or 0)
+        f_entrega = entregado["ultima"][:10] if (cantidad_entregada > 0 and entregado["ultima"]) else None
+
+        estado = _calc_estado_req(item["fecha_deseada"], f_entrega)
+        if item["oc_estado"] == "Cancelada":
+            estado = "ANULADO"
+        cumple_fecha, cumple_cantidad, cumple_calidad = _calc_cumplimientos_req(
+            item["fecha_deseada"], f_entrega, cantidad_pedida, cantidad_entregada, None)
+
+        existente = query("SELECT id FROM requerimientos_productivos WHERE numero=?", (numero,), one=True)
+        campos = dict(
+            cliente_id=item["oc_cliente_id"],
+            codigo=item["prod_codigo"] or item["prod_nombre"],
+            material_proceso=item["prod_nombre"],
+            provision="Venta directa",
+            cantidad_pedida=cantidad_pedida,
+            unidad=item["prod_unidad"],
+            proveedor_id=None,
+            nro_oc_remito=item["oc_numero"],
+            f_pedido=item["oc_fecha"][:10] if item["oc_fecha"] else None,
+            f_necesidad=None,
+            f_estimada=item["fecha_deseada"],
+            f_entrega=f_entrega,
+            estado=estado,
+            cantidad_entregada=cantidad_entregada if f_entrega else None,
+            remito=entregado["remito_numero"] if f_entrega else None,
+            nro_factura=None,
+            cumple_fecha=cumple_fecha,
+            cumple_cantidad=cumple_cantidad,
+            cumple_calidad=cumple_calidad,
+            cant_no_conforme=None,
+            obs=f"Auto-generado desde pedido {item['oc_numero']} (ítem {item_id})",
+        )
+        if existente:
+            sets = ",".join(f"{k}=?" for k in campos)
+            execute(f"UPDATE requerimientos_productivos SET {sets} WHERE id=?",
+                    (*campos.values(), existente["id"]))
+        else:
+            cols = ",".join(("numero", *campos.keys()))
+            qs = ",".join("?" * (len(campos) + 1))
+            execute(f"INSERT INTO requerimientos_productivos ({cols}) VALUES ({qs})",
+                    (numero, *campos.values()))
+    except Exception as e:
+        # Sync best-effort: se loguea pero nunca interrumpe el flujo del pedido/remito.
+        print(f"[requerimientos_productivos] No se pudo sincronizar ítem de pedido {item_id}: {e}")
+
+# ── Sincronización automática Compra (a proveedor) -> Requerimiento productivo
+# Mismo patrón que OTT y pedidos de cliente, ahora para lo que se compra a
+# proveedores: cada ítem de orden de compra (ordenes_compra_items) tiene su
+# requerimiento_productivo espejo. Alta: al emitir la OC (crear el ítem).
+# Entrega: al recibir mercadería (recibir_oc). numero = f"OCP-ITEM-{item_id}",
+# único y estable por ítem.
+# Solo se sincronizan las compras "productivas": ítems cuyo material tiene
+# categoria='Material' (materia prima que entra a producción). Insumos,
+# Herramientas y demás categorías no generan requerimiento — no son compras
+# productivas — y si el ítem no tiene material_id (descripción libre) tampoco
+# se sincroniza, porque no hay forma de saber su categoría.
+def _sync_requerimiento_desde_compra(item_id):
+    """Crea o actualiza el requerimiento_productivo espejo de un ítem de
+    orden de compra (ordenes_compra_items), solo si es una compra productiva
+    (material categoria='Material'). Se llama después de emitir la OC (alta)
+    y después de registrar una recepción sobre ese ítem (entrega).
+    No debe lanzar excepción hacia arriba: es un efecto secundario de
+    sincronización, y un problema acá nunca debe hacer fallar la operación
+    real sobre la OC (que ya quedó grabada)."""
+    try:
+        item = query("""
+            SELECT oci.*, oc.numero oc_numero, oc.proveedor_id oc_proveedor_id,
+                   oc.creado oc_creado, oc.fecha_entrega_est oc_fecha_entrega_est,
+                   oc.estado oc_estado,
+                   m.codigo mat_codigo, m.descripcion mat_descripcion, m.unidad mat_unidad,
+                   m.categoria mat_categoria,
+                   sc.ot_origen_id sc_ot_origen_id
+            FROM ordenes_compra_items oci
+            JOIN ordenes_compra oc ON oc.id=oci.oc_id
+            LEFT JOIN materiales m ON m.id=oci.material_id
+            LEFT JOIN solicitudes_compra sc ON sc.id=oci.solicitud_id
+            WHERE oci.id=?""", (item_id,), one=True)
+        if not item:
+            return
+        if item["mat_categoria"] != "Material":
+            # No es una compra productiva (Insumo, Herramienta, sin material_id, etc.)
+            return
+
+        # El "numero" visible es un correlativo normal (igual que el resto de
+        # los requerimientos, ej. 12500), no un identificador técnico: el
+        # vínculo estable para el upsert es origen_item_id, no numero (ver
+        # migración de origen_item_id más arriba).
+        existente_prev = query(
+            "SELECT id, numero FROM requerimientos_productivos WHERE origen_item_id=?",
+            (item_id,), one=True)
+        numero = existente_prev["numero"] if existente_prev else _next_numero_req()
+        cantidad_pedida = float(item["cantidad"] or 0)
+        cantidad_entregada = float(item["cantidad_recibida"] or 0)
+        f_entrega = item["fecha_recibida"][:10] if (cantidad_entregada > 0 and item["fecha_recibida"]) else None
+
+        estado = _calc_estado_req(item["oc_fecha_entrega_est"], f_entrega)
+        if item["oc_estado"] == "Cancelada":
+            estado = "ANULADO"
+        cumple_fecha, cumple_cantidad, cumple_calidad = _calc_cumplimientos_req(
+            item["oc_fecha_entrega_est"], f_entrega, cantidad_pedida, cantidad_entregada, None)
+
+        campos = dict(
+            cliente_id=None,
+            codigo=item["mat_codigo"] or item["descripcion"],
+            material_proceso=item["mat_descripcion"] or item["descripcion"],
+            provision="Compra",
+            cantidad_pedida=cantidad_pedida,
+            unidad=item["mat_unidad"] or item["unidad"],
+            proveedor_id=item["oc_proveedor_id"],
+            nro_oc_remito=item["oc_numero"],
+            f_pedido=item["oc_creado"][:10] if item["oc_creado"] else None,
+            f_necesidad=None,
+            f_estimada=item["oc_fecha_entrega_est"],
+            f_entrega=f_entrega,
+            estado=estado,
+            cantidad_entregada=cantidad_entregada if f_entrega else None,
+            remito=None,
+            nro_factura=None,
+            cumple_fecha=cumple_fecha,
+            cumple_cantidad=cumple_cantidad,
+            cumple_calidad=cumple_calidad,
+            cant_no_conforme=None,
+            obs=f"Auto-generado desde compra {item['oc_numero']} (ítem {item_id})",
+            origen_item_id=item_id,
+            ot_origen_id=item["sc_ot_origen_id"],
+        )
+        if existente_prev:
+            sets = ",".join(f"{k}=?" for k in campos)
+            execute(f"UPDATE requerimientos_productivos SET {sets} WHERE id=?",
+                    (*campos.values(), existente_prev["id"]))
+        else:
+            cols = ",".join(("numero", *campos.keys()))
+            qs = ",".join("?" * (len(campos) + 1))
+            execute(f"INSERT INTO requerimientos_productivos ({cols}) VALUES ({qs})",
+                    (numero, *campos.values()))
+    except Exception as e:
+        # Sync best-effort: se loguea pero nunca interrumpe el flujo de la compra.
+        print(f"[requerimientos_productivos] No se pudo sincronizar ítem de compra {item_id}: {e}")
 
 @app.route("/api/requerimientos_productivos", methods=["GET"])
 @login_required()
 def get_requerimientos_productivos():
-    sql = """SELECT rp.*, c.razon cliente_nombre, p.razon proveedor_nombre
+    sql = """SELECT rp.*, c.razon cliente_nombre, p.razon proveedor_nombre,
+               o.numero ot_origen_numero
         FROM requerimientos_productivos rp
         LEFT JOIN clientes c ON c.id=rp.cliente_id
         LEFT JOIN proveedores p ON p.id=rp.proveedor_id
+        LEFT JOIN ordenes o ON o.id=rp.ot_origen_id
         WHERE 1=1"""
     params = []
     cliente_id = request.args.get("cliente_id")
@@ -3004,8 +4160,15 @@ def get_requerimientos_productivos():
         sql += " AND rp.cliente_id=?"; params.append(cliente_id)
     if proveedor_id:
         sql += " AND rp.proveedor_id=?"; params.append(proveedor_id)
-    sql += " ORDER BY rp.id DESC"
-    rows = [_req_row_out(r) for r in query(sql, tuple(params))]
+    sql += " ORDER BY (rp.f_estimada IS NULL), rp.f_estimada, rp.id DESC"
+    raw_rows = query(sql, tuple(params))
+    calidad_map = _calidad_requerimientos_bulk(raw_rows)
+    rows = []
+    for r in raw_rows:
+        d = _req_row_out(r)
+        d["_calidad"] = calidad_map.get(d["id"], {"evaluable": True, "aprobado": d.get("cumple_calidad"),
+                                                    "origen": "manual", "lote_estado": None, "lote_pct": None})
+        rows.append(d)
     estado = request.args.get("estado")
     if estado:
         rows = [r for r in rows if r["estado"] == estado]
@@ -3025,15 +4188,16 @@ def create_requerimiento_productivo():
         (numero,cliente_id,codigo,material_proceso,provision,cantidad_pedida,unidad,
          proveedor_id,nro_oc_remito,f_pedido,f_necesidad,f_estimada,f_entrega,estado,
          cantidad_entregada,remito,nro_factura,cumple_fecha,cumple_cantidad,cumple_calidad,
-         nro_icp,cant_no_conforme,ubicacion_remito,obs)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+         nro_icp,cant_no_conforme,ubicacion_remito,cantidad_aprobada,obs)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (d["numero"], d.get("cliente_id") or None, d.get("codigo"), d.get("material_proceso"),
          d.get("provision"), d["cantidad_pedida"], d.get("unidad"),
          d.get("proveedor_id") or None, d.get("nro_oc_remito"), d.get("f_pedido"),
          d.get("f_necesidad"), d.get("f_estimada"), d.get("f_entrega"), estado,
          d.get("cantidad_entregada"), d.get("remito"), d.get("nro_factura"),
          cumple_fecha, cumple_cantidad, cumple_calidad,
-         d.get("nro_icp"), d.get("cant_no_conforme"), d.get("ubicacion_remito"), d.get("obs")))
+         d.get("nro_icp"), d.get("cant_no_conforme"), d.get("ubicacion_remito"),
+         d.get("cantidad_aprobada"), d.get("obs")))
     return jsonify({"ok":True,"id":rid}), 201
 
 @app.route("/api/requerimientos_productivos/<int:rid>", methods=["PUT"])
@@ -3050,14 +4214,15 @@ def update_requerimiento_productivo(rid):
         numero=?,cliente_id=?,codigo=?,material_proceso=?,provision=?,cantidad_pedida=?,unidad=?,
         proveedor_id=?,nro_oc_remito=?,f_pedido=?,f_necesidad=?,f_estimada=?,f_entrega=?,estado=?,
         cantidad_entregada=?,remito=?,nro_factura=?,cumple_fecha=?,cumple_cantidad=?,cumple_calidad=?,
-        nro_icp=?,cant_no_conforme=?,ubicacion_remito=?,obs=? WHERE id=?""",
+        nro_icp=?,cant_no_conforme=?,ubicacion_remito=?,cantidad_aprobada=?,obs=? WHERE id=?""",
         (d["numero"], d.get("cliente_id") or None, d.get("codigo"), d.get("material_proceso"),
          d.get("provision"), d["cantidad_pedida"], d.get("unidad"),
          d.get("proveedor_id") or None, d.get("nro_oc_remito"), d.get("f_pedido"),
          d.get("f_necesidad"), d.get("f_estimada"), d.get("f_entrega"), estado,
          d.get("cantidad_entregada"), d.get("remito"), d.get("nro_factura"),
          cumple_fecha, cumple_cantidad, cumple_calidad,
-         d.get("nro_icp"), d.get("cant_no_conforme"), d.get("ubicacion_remito"), d.get("obs"), rid))
+         d.get("nro_icp"), d.get("cant_no_conforme"), d.get("ubicacion_remito"),
+         d.get("cantidad_aprobada"), d.get("obs"), rid))
     return jsonify({"ok":True})
 
 @app.route("/api/requerimientos_productivos/<int:rid>/entrega", methods=["PUT"])
@@ -3071,14 +4236,22 @@ def registrar_entrega_requerimiento(rid):
     if not d.get("f_entrega"): return jsonify({"error":"Fecha de entrega requerida"}), 400
     cantidad_entregada = d.get("cantidad_entregada")
     cant_no_conforme = d.get("cant_no_conforme")
+    # Cantidad Aprobada: si mandaron un valor explícito lo respeta (por si el
+    # usuario la corrige a mano), si no la calcula como entregada - no conforme.
+    if "cantidad_aprobada" in d:
+        cantidad_aprobada = d.get("cantidad_aprobada")
+    elif cantidad_entregada is not None:
+        cantidad_aprobada = float(cantidad_entregada or 0) - float(cant_no_conforme or 0)
+    else:
+        cantidad_aprobada = None
     estado = _calc_estado_req(r["f_estimada"], d.get("f_entrega"))
     cumple_fecha, cumple_cantidad, cumple_calidad = _calc_cumplimientos_req(
         r["f_estimada"], d.get("f_entrega"), r["cantidad_pedida"], cantidad_entregada, cant_no_conforme)
     execute("""UPDATE requerimientos_productivos SET
         f_entrega=?,cantidad_entregada=?,remito=?,nro_factura=?,cant_no_conforme=?,
-        estado=?,cumple_fecha=?,cumple_cantidad=?,cumple_calidad=? WHERE id=?""",
+        cantidad_aprobada=?,estado=?,cumple_fecha=?,cumple_cantidad=?,cumple_calidad=? WHERE id=?""",
         (d.get("f_entrega"), cantidad_entregada, d.get("remito"), d.get("nro_factura"),
-         cant_no_conforme, estado, cumple_fecha, cumple_cantidad, cumple_calidad, rid))
+         cant_no_conforme, cantidad_aprobada, estado, cumple_fecha, cumple_cantidad, cumple_calidad, rid))
     return jsonify({"ok":True})
 
 @app.route("/api/requerimientos_productivos/<int:rid>", methods=["DELETE"])
@@ -3086,6 +4259,235 @@ def registrar_entrega_requerimiento(rid):
 def delete_requerimiento_productivo(rid):
     execute("DELETE FROM requerimientos_productivos WHERE id=?", (rid,))
     return jsonify({"ok":True})
+
+# ── Auto-carga de requerimientos productivos (remitos/OC/facturas) ────────────
+# Sube un PDF o foto de remito/OC/factura, un modelo de IA extrae los datos y
+# el sistema los graba solo (alta de pedido o registro de entrega), sin
+# pantalla de confirmación intermedia.
+import base64 as _b64, json as _json, urllib.request as _urlreq, urllib.error as _urlerr
+
+REQ_AUTO_DIR = os.path.join(os.path.dirname(__file__), "documentos", "requerimientos_auto")
+
+REQ_EXTRACT_PROMPT = """Sos un asistente que extrae datos de documentos de proveedores (remitos,
+órdenes de compra, facturas) para cargarlos en el sistema de "Requerimientos productivos" de
+un ERP de manufactura. Analizá el documento adjunto y devolvé SOLO un JSON válido, sin texto
+adicional, sin markdown, sin explicaciones.
+
+Determiná el TIPO de documento y devolvé el formato correspondiente:
+
+TIPO "alta" (orden de compra / pedido nuevo a un proveedor tercerizado):
+{
+  "tipo": "alta",
+  "numero": "",
+  "cliente": "",
+  "codigo": "",
+  "material_proceso": "",
+  "provision": "",
+  "cantidad_pedida": 0,
+  "unidad": "",
+  "proveedor": "",
+  "nro_oc_remito": "",
+  "f_pedido": "YYYY-MM-DD",
+  "f_necesidad": "YYYY-MM-DD",
+  "f_estimada": "YYYY-MM-DD"
+}
+
+TIPO "entrega" (remito o factura de recepción de mercadería/proceso ya pedido):
+{
+  "tipo": "entrega",
+  "numero_requerimiento": "",
+  "nro_oc_remito": "",
+  "proveedor": "",
+  "f_entrega": "YYYY-MM-DD",
+  "cantidad_entregada": 0,
+  "remito": "",
+  "nro_factura": "",
+  "cant_no_conforme": 0,
+  "nro_icp": ""
+}
+
+Si el documento trae varios ítems distintos, devolvé una LISTA de objetos (uno por ítem).
+Si no podés determinar el tipo, devolvé {"tipo": "indeterminado", "motivo": "..."}.
+
+REGLAS:
+- No inventes datos: campo no encontrado -> "" (texto) o null (número/fecha).
+- Fechas siempre en formato YYYY-MM-DD.
+- Nunca devuelvas "estado", "cumple_fecha", "cumple_cantidad" ni "cumple_calidad" (se calculan solos).
+"""
+
+def _req_auto_match_id(nombre, tabla):
+    """Busca un cliente/proveedor existente por coincidencia de razón social
+    (case-insensitive, substring en cualquier sentido). Devuelve el id o None."""
+    if not nombre:
+        return None
+    nombre_n = nombre.strip().lower()
+    rows = query(f"SELECT id, razon FROM {tabla}")
+    for r in rows:
+        razon_n = (r["razon"] or "").strip().lower()
+        if razon_n and (razon_n == nombre_n or razon_n in nombre_n or nombre_n in razon_n):
+            return r["id"]
+    return None
+
+def _req_auto_llamar_ia(file_bytes, mime):
+    """Llama a la API de Anthropic con el documento adjunto y devuelve el JSON
+    (dict o list) ya parseado. Lanza RuntimeError con un mensaje claro si algo falla."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise RuntimeError("Falta configurar la variable de entorno ANTHROPIC_API_KEY en el servidor")
+
+    b64 = _b64.b64encode(file_bytes).decode()
+    if mime == "application/pdf":
+        content_block = {"type": "document", "source": {"type": "base64", "media_type": mime, "data": b64}}
+    else:
+        content_block = {"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}}
+
+    body = _json.dumps({
+        "model": "claude-sonnet-4-6",
+        "max_tokens": 2000,
+        "system": REQ_EXTRACT_PROMPT,
+        "messages": [{"role": "user", "content": [content_block, {"type": "text", "text": "Extraé los datos de este documento."}]}],
+    }).encode()
+
+    req = _urlreq.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=body,
+        headers={
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with _urlreq.urlopen(req, timeout=60) as resp:
+            data = _json.loads(resp.read().decode())
+    except _urlerr.HTTPError as e:
+        detalle = e.read().decode(errors="replace")[:300]
+        raise RuntimeError(f"Error de la API de IA ({e.code}): {detalle}")
+    except _urlerr.URLError as e:
+        raise RuntimeError(f"No se pudo conectar a la API de IA: {e.reason}")
+
+    texto = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text").strip()
+    texto = texto.strip("`")
+    if texto.lower().startswith("json"):
+        texto = texto[4:].strip()
+    try:
+        return _json.loads(texto)
+    except ValueError as e:
+        raise RuntimeError(f"La IA no devolvió JSON válido: {e} — respuesta: {texto[:300]}")
+
+def _req_auto_procesar_item(item):
+    """Aplica un ítem extraído (alta o entrega) directamente sobre la base,
+    reutilizando la misma lógica de cálculo que los endpoints manuales.
+    Devuelve un dict describiendo qué se hizo."""
+    tipo = (item.get("tipo") or "").strip().lower()
+
+    if tipo == "alta":
+        numero = (item.get("numero") or "").strip()
+        cantidad_pedida = item.get("cantidad_pedida")
+        if not numero or not cantidad_pedida:
+            return {"ok": False, "motivo": "Alta sin número o cantidad_pedida", "item": item}
+        existente = query("SELECT id FROM requerimientos_productivos WHERE numero=?", (numero,), one=True)
+        if existente:
+            return {"ok": False, "motivo": f"Ya existe un requerimiento con número {numero}", "item": item}
+        cliente_id = _req_auto_match_id(item.get("cliente"), "clientes")
+        proveedor_id = _req_auto_match_id(item.get("proveedor"), "proveedores")
+        estado = _calc_estado_req(item.get("f_estimada"), None, None)
+        rid = execute("""INSERT INTO requerimientos_productivos
+            (numero,cliente_id,codigo,material_proceso,provision,cantidad_pedida,unidad,
+             proveedor_id,nro_oc_remito,f_pedido,f_necesidad,f_estimada,estado)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (numero, cliente_id, item.get("codigo"), item.get("material_proceso"),
+             item.get("provision"), cantidad_pedida, item.get("unidad"),
+             proveedor_id, item.get("nro_oc_remito"), item.get("f_pedido"),
+             item.get("f_necesidad"), item.get("f_estimada"), estado))
+        return {"ok": True, "accion": "alta", "id": rid, "numero": numero}
+
+    if tipo == "entrega":
+        numero = (item.get("numero_requerimiento") or "").strip()
+        nro_oc = (item.get("nro_oc_remito") or "").strip()
+        r = None
+        if numero:
+            r = query("SELECT * FROM requerimientos_productivos WHERE numero=?", (numero,), one=True)
+        if not r and nro_oc:
+            r = query("SELECT * FROM requerimientos_productivos WHERE nro_oc_remito=? AND f_entrega IS NULL", (nro_oc,), one=True)
+        if not r:
+            return {"ok": False, "motivo": f"No se encontró el requerimiento (número={numero!r}, OC={nro_oc!r})", "item": item}
+        if not item.get("f_entrega"):
+            return {"ok": False, "motivo": "Entrega sin f_entrega", "item": item}
+        cantidad_entregada = item.get("cantidad_entregada")
+        cant_no_conforme = item.get("cant_no_conforme")
+        estado = _calc_estado_req(r["f_estimada"], item.get("f_entrega"))
+        cumple_fecha, cumple_cantidad, cumple_calidad = _calc_cumplimientos_req(
+            r["f_estimada"], item.get("f_entrega"), r["cantidad_pedida"], cantidad_entregada, cant_no_conforme)
+        execute("""UPDATE requerimientos_productivos SET
+            f_entrega=?,cantidad_entregada=?,remito=?,nro_factura=?,cant_no_conforme=?,
+            nro_icp=?,estado=?,cumple_fecha=?,cumple_cantidad=?,cumple_calidad=? WHERE id=?""",
+            (item.get("f_entrega"), cantidad_entregada, item.get("remito"), item.get("nro_factura"),
+             cant_no_conforme, item.get("nro_icp"), estado, cumple_fecha, cumple_cantidad,
+             cumple_calidad, r["id"]))
+        return {"ok": True, "accion": "entrega", "id": r["id"], "numero": r["numero"]}
+
+    return {"ok": False, "motivo": item.get("motivo") or f"Tipo de documento no reconocido: {tipo!r}", "item": item}
+
+@app.route("/api/requerimientos_productivos/auto_carga", methods=["POST"])
+@login_required(roles=["admin","almacen","vendedor"])
+def auto_carga_requerimiento():
+    """DEPRECADO: la carga por PDF/foto + IA ya no es necesaria. Los
+    requerimientos productivos ahora se generan y actualizan solos a partir
+    de las órdenes tercerizadas (OTT) — ver _sync_requerimiento_desde_ott.
+    Se deja el endpoint respondiendo 410 (en vez de borrarlo) para no romper
+    en caliente algún cliente viejo que todavía lo llame, y con toda la
+    lógica original comentada más abajo por si hiciera falta un caso
+    puntual que no pase por OTT."""
+    return jsonify({
+        "error": "La carga automática por PDF fue reemplazada: los requerimientos productivos "
+                 "se generan solos desde las órdenes tercerizadas (OTT) del sistema. "
+                 "Si este caso no tiene una OTT asociada, cargalo manualmente desde la pantalla "
+                 "de Requerimientos productivos."
+    }), 410
+
+def _auto_carga_requerimiento_legacy():
+    """Implementación original (fuera de ruta, solo de referencia). No se
+    llama desde ningún lado."""
+    if "file" not in request.files:
+        return jsonify({"error": "Sin archivo"}), 400
+    f = request.files["file"]
+    if not f.filename:
+        return jsonify({"error": "Nombre vacío"}), 400
+
+    mime = f.mimetype or ""
+    if mime not in ("application/pdf", "image/png", "image/jpeg", "image/webp"):
+        return jsonify({"error": f"Formato no soportado ({mime}). Usá PDF, PNG, JPG o WEBP."}), 400
+
+    file_bytes = f.read()
+    if len(file_bytes) > 15 * 1024 * 1024:
+        return jsonify({"error": "Archivo demasiado grande (máx. 15MB)"}), 400
+
+    # Guardar copia del documento original para trazabilidad
+    os.makedirs(REQ_AUTO_DIR, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ext = {"application/pdf": ".pdf", "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}[mime]
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", f.filename)
+    dest_name = f"{ts}__{safe}{'' if safe.lower().endswith(ext) else ext}"
+    with open(os.path.join(REQ_AUTO_DIR, dest_name), "wb") as fh:
+        fh.write(file_bytes)
+
+    try:
+        extraido = _req_auto_llamar_ia(file_bytes, mime)
+    except RuntimeError as e:
+        return jsonify({"error": str(e), "archivo_guardado": dest_name}), 502
+
+    items = extraido if isinstance(extraido, list) else [extraido]
+    resultados = [_req_auto_procesar_item(item) for item in items]
+    ok_count = sum(1 for r in resultados if r["ok"])
+    return jsonify({
+        "ok": ok_count > 0,
+        "procesados": len(resultados),
+        "exitosos": ok_count,
+        "resultados": resultados,
+        "archivo_guardado": dest_name,
+    }), (201 if ok_count else 422)
 
 # ── Ordenes ───────────────────────────────────────────────────────────────────
 @app.route("/api/ordenes", methods=["GET"])
@@ -3191,14 +4593,26 @@ def _generar_ott_para_ot(ot_id, ot_numero):
             es_ult = 1 if (max_orden is not None and int(op["orden"]) == int(max_orden)) else 0
         except Exception:
             es_ult = 0
+        # El semielaborado que va a volver se congela acá, igual que el
+        # proveedor y el precio: si más adelante alguien edita los insumos en
+        # Procesos, esta OT sigue con el PSE que tenía y la definición nueva
+        # arranca recién en las OT siguientes. Solo aplica a operaciones
+        # INTERMEDIAS: la última no genera semielaborado sino el PT de la OT.
+        mat_se_id = None
+        if not es_ult:
+            try:
+                mat_se_id = _get_or_create_pse(op["proceso_op_id"])
+            except Exception as e:
+                print(f"[WARN] No se pudo resolver el semielaborado de la "
+                      f"operación {op['id']} al crear {num_ott}: {e}")
         execute("""INSERT INTO ordenes_tercerizado
             (numero,ot_origen_id,operacion_id,proceso_op_id,proveedor_id,
-             precio_acordado,estado,es_ultimo_nivel,creado_por)
-            VALUES (?,?,?,?,?,?,?,?,?)""",
+             precio_acordado,estado,es_ultimo_nivel,material_se_id,creado_por)
+            VALUES (?,?,?,?,?,?,?,?,?,?)""",
             (num_ott, ot_id, op["id"], op["proceso_op_id"],
              op["proveedor_id"] if "proveedor_id" in op.keys() else None,
              op["precio_tercerizado"] if "precio_tercerizado" in op.keys() else 0,
-             "Pendiente", es_ult, session.get("user_id")))
+             "Pendiente", es_ult, mat_se_id, session.get("user_id")))
 
 
 @app.route("/api/ordenes/<int:oid>", methods=["GET"])
@@ -3257,6 +4671,49 @@ def _completar_ot_automatico(oid):
         print(f"[OTT] No se pudo autocompletar OT {numero_ot} desde retorno OTT: {e}")
         return
     execute("UPDATE ordenes SET estado='Completada' WHERE id=?", (oid,))
+
+
+def _reducir_lotes_pt(mat_pt_id, lotes, sobrante, ot_lote_num):
+    """Descuenta `sobrante` piezas de los lotes de PT de una OT, empezando por
+    el mas nuevo (los lotes vienen ordenados por el llamador).
+
+    Solo se toca lo que Calidad TODAVIA NO clasifico
+    (cantidad_original - cantidad_activa - cantidad_rechazada): lo aprobado ya
+    entro a `materiales.stock` y puede estar consumido por otra OT, asi que
+    descontarlo desde aca dejaria un descuadre peor que el que se intenta
+    corregir. Si no alcanza con lo sin clasificar, se descuenta lo que se
+    pueda y se avisa por consola en vez de romper la edicion.
+
+    Devuelve lo que NO se pudo descontar.
+    """
+    for lote in lotes:
+        if sobrante <= 0.0001:
+            break
+        sin_clasificar = (float(lote["cantidad_original"] or 0)
+                          - float(lote["cantidad_activa"] or 0)
+                          - float(lote["cantidad_rechazada"] or 0))
+        quitar = min(sobrante,
+                     max(0.0, sin_clasificar),
+                     float(lote["cantidad_disponible"] or 0))
+        if quitar <= 0.0001:
+            continue
+        execute("""UPDATE lotes SET
+            cantidad_original=MAX(0, cantidad_original-?),
+            cantidad_disponible=MAX(0, cantidad_disponible-?),
+            estado=CASE WHEN cantidad_original-? <= 0.0001 AND estado<>'Abierto'
+                        THEN 'Agotado' ELSE estado END
+            WHERE id=?""", (quitar, quitar, quitar, lote["id"]))
+        execute("""INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id)
+            VALUES (?,?,?,?,?,?)""",
+            (mat_pt_id, lote["id"], "ajuste", quitar,
+             f"Correccion de produccion OT {ot_lote_num} - se descuentan {quitar:g} piezas "
+             f"del lote {lote['numero']} (no habian pasado por Calidad)",
+             session.get("user_id")))
+        sobrante -= quitar
+    if sobrante > 0.0001:
+        print(f"[WARN] OT {ot_lote_num}: quedaron {sobrante:g} piezas de PT sin poder "
+              f"descontar del lote - ya estaban clasificadas por Calidad.")
+    return sobrante
 
 
 def generar_pt_faltante_si_corresponde(oid):
@@ -3320,10 +4777,19 @@ def generar_pt_faltante_si_corresponde(oid):
     # ── Sin capacidad de cajón configurada: comportamiento legado, un único
     # lote de PT por OT (todo junto, pendiente de Calidad). ────────────────
     if capacidad_cajon <= 0:
-        lote_pt_row = query("SELECT id, cantidad_original FROM lotes WHERE numero=? AND material_id=?",
+        lote_pt_row = query("""SELECT id, numero, cantidad_original, cantidad_disponible,
+            COALESCE(cantidad_activa,0) cantidad_activa,
+            COALESCE(cantidad_rechazada,0) cantidad_rechazada
+            FROM lotes WHERE numero=? AND material_id=?""",
             (ot_lote_num, mat_pt["id"]), one=True)
         ya_generado = float(lote_pt_row["cantidad_original"]) if lote_pt_row else 0.0
         faltante = lote_target - ya_generado
+        if faltante < -0.0001 and lote_pt_row:
+            # Se corrigio una novedad HACIA ABAJO: el lote tiene mas piezas de
+            # las que la planta termino declarando. Se devuelve la diferencia
+            # en vez de dejar el lote inflado.
+            _reducir_lotes_pt(mat_pt["id"], [lote_pt_row], -faltante, ot_lote_num)
+            return
         if faltante <= 0:
             return  # Las Novedades ya cubrieron toda la cantidad (del lote de esta OT)
 
@@ -3374,6 +4840,16 @@ def generar_pt_faltante_si_corresponde(oid):
         (mat_pt["id"], prefijo_cajon + "%"), one=True)["s"] or 0.0
 
     restante = lote_target - float(ya_generado)
+    if restante < -0.0001:
+        # Correccion hacia abajo: se descuenta del cajon mas nuevo hacia atras,
+        # que es el que todavia no llego a Calidad.
+        cajones = query("""SELECT id, numero, cantidad_original, cantidad_disponible,
+            COALESCE(cantidad_activa,0) cantidad_activa,
+            COALESCE(cantidad_rechazada,0) cantidad_rechazada
+            FROM lotes WHERE material_id=? AND numero LIKE ?
+            ORDER BY id DESC""", (mat_pt["id"], prefijo_cajon + "%"))
+        _reducir_lotes_pt(mat_pt["id"], cajones, -restante, ot_lote_num)
+        return
     if restante <= 0.0001:
         return  # Las Novedades ya cubrieron toda la cantidad (en los cajones de esta OT)
 
@@ -3945,11 +5421,11 @@ def _populate_orden_operaciones(oid):
             qty_op = qty
         execute("""INSERT INTO orden_operaciones
             (orden_id,proceso_op_id,orden,nombre,categoria_maquina_id,maquina_id,
-             tiempo_setup_min,tiempo_ciclo_min,estado,qty_requerida,
+             tiempo_setup_min,tiempo_ciclo_seg,estado,qty_requerida,
              es_tercerizada,proveedor_id,precio_tercerizado,tiempo_minimo_dias)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (oid,op["id"],op["orden"],op["nombre"],op["categoria_maquina_id"],op["maquina_id"],
-             op["tiempo_setup_min"],op["tiempo_ciclo_min"],"Pendiente",qty_op,
+             op["tiempo_setup_min"],op["tiempo_ciclo_seg"],"Pendiente",qty_op,
              op["es_tercerizada"] if "es_tercerizada" in op.keys() else 0,
              op["proveedor_id"] if "proveedor_id" in op.keys() else None,
              op["precio_tercerizado"] if "precio_tercerizado" in op.keys() else 0,
@@ -4045,12 +5521,18 @@ def _recalcular_material_requerido_ot(oid, material_id):
         WHERE oo.orden_id=?""", (material_id, oid), one=True)
     total = float(row["total"] or 0) if row else 0
     existing = query("SELECT id FROM orden_materiales WHERE orden_id=? AND material_id=?", (oid, material_id), one=True)
+    # IMPORTANTE: solo se actualiza la cantidad de un material que la OT YA
+    # tenía en su "foto" de orden_materiales (tomada al crearse, o al
+    # cambiar el producto de una OT sin actividad — ver _populate_orden_materiales).
+    # Si el material NO estaba, NO se inserta acá: eso pasaría si alguien
+    # agrega un material nuevo al proceso/producto DESPUÉS de creada la OT y
+    # luego se toca la qty_requerida de una operación de esa OT (ej. desde
+    # Control de Producción). La OT ya creada debe permanecer intacta pase
+    # lo que pase en proceso/producto — el material nuevo simplemente no
+    # aplica a esta OT (mismo criterio que ya usan /materiales_requeridos
+    # y la validación de novedades, que respetan la foto original).
     if existing:
         execute("UPDATE orden_materiales SET cantidad_requerida=? WHERE id=?", (total, existing["id"]))
-    elif total > 0:
-        unidad = row["unidad"] if row else None
-        execute("INSERT INTO orden_materiales (orden_id,material_id,cantidad_requerida,cantidad_asignada,unidad) VALUES (?,?,?,0,?)",
-            (oid, material_id, total, unidad))
 
 
 @app.route("/api/ordenes/<int:oid>/operaciones/<int:opid>", methods=["PUT"])
@@ -4060,7 +5542,7 @@ def update_ot_operacion(oid, opid):
     # Build dynamic UPDATE based on which fields were provided
     allowed = {
         "orden", "nombre", "categoria_maquina_id", "maquina_id",
-        "tiempo_setup_min", "tiempo_ciclo_min", "qty_requerida", "estado",
+        "tiempo_setup_min", "tiempo_ciclo_seg", "qty_requerida", "estado",
     }
     fields = {k: v for k, v in d.items() if k in allowed}
     if not fields:
@@ -4134,12 +5616,12 @@ def add_ot_operacion(oid):
     if not d.get("nombre"): return jsonify({"error":"Nombre requerido"}), 400
     new_id = execute("""INSERT INTO orden_operaciones
         (orden_id,orden,nombre,categoria_maquina_id,maquina_id,
-         tiempo_setup_min,tiempo_ciclo_min,estado,qty_requerida,obs)
+         tiempo_setup_min,tiempo_ciclo_seg,estado,qty_requerida,obs)
         VALUES (?,?,?,?,?,?,?,?,?,?)""",
         (oid, d.get("orden",1), d["nombre"],
          d.get("categoria_maquina_id") or None,
          d.get("maquina_id") or None,
-         d.get("tiempo_setup_min",0), d.get("tiempo_ciclo_min",0),
+         d.get("tiempo_setup_min",0), d.get("tiempo_ciclo_seg",0),
          d.get("estado","Pendiente"), d.get("qty_requerida",0),
          d.get("obs")))
     return jsonify({"ok": True, "id": new_id}), 201
@@ -4312,6 +5794,24 @@ def get_ott(oid):
         else:
             r["cantidad_disponible"] = max((r.get("oo_qty_requerida") or 0) - cantidad_enviada, 0)
             r["cantidad_disponible_origen"] = "qty_requerida"
+
+    # Tope adicional por insumos tipo 'material' cargados en la operación
+    # (ver ott_emitir_remito para la validación real al confirmar el envío;
+    # esto es solo para que el modal ya muestre/limite el valor correcto).
+    if r.get("proceso_op_id"):
+        limite_insumo = None
+        for ins in query("""SELECT om.cantidad, m.stock mat_stock
+                FROM operacion_materiales om JOIN materiales m ON m.id=om.material_id
+                WHERE om.operacion_id=? AND om.tipo='material'""", (r["proceso_op_id"],)):
+            cant_unit = float(ins["cantidad"] or 0)
+            if cant_unit <= 0:
+                continue
+            max_por_insumo = float(ins["mat_stock"] or 0) / cant_unit
+            if limite_insumo is None or max_por_insumo < limite_insumo:
+                limite_insumo = max_por_insumo
+        if limite_insumo is not None and limite_insumo < r["cantidad_disponible"]:
+            r["cantidad_disponible"] = round(limite_insumo, 3)
+            r["cantidad_disponible_origen"] = "insumo"
     return jsonify(r)
 
 @app.route("/api/ott", methods=["POST"])
@@ -4333,6 +5833,7 @@ def create_ott():
          d.get("precio_acordado", 0), "Pendiente",
          1 if d.get("es_ultimo_nivel") else 0,
          d.get("fecha_retorno_est"), d.get("obs"), session["user_id"]))
+    _sync_requerimiento_desde_ott(lid)
     return jsonify({"ok": True, "id": lid, "numero": numero}), 201
 
 @app.route("/api/ott/<int:oid>", methods=["PUT"])
@@ -4343,7 +5844,81 @@ def update_ott(oid):
         fecha_retorno_est=?,fecha_envio=?,obs=? WHERE id=?""",
         (d.get("estado"), d.get("proveedor_id"), d.get("precio_acordado",0),
          d.get("fecha_retorno_est"), d.get("fecha_envio"), d.get("obs"), oid))
+    _sync_requerimiento_desde_ott(oid)
     return jsonify({"ok": True})
+
+def _generar_sc_insumo_ott(material_id, faltante, motivo):
+    """Genera (o amplía, si ya hay una activa) una Solicitud de Compra por
+    el faltante puntual de un material/insumo requerido para remitir una
+    OTT — a diferencia de auto_generar_sc_bajo_stock, esto NO depende de
+    stock_min/stock_max: es el faltante exacto para cubrir este remito."""
+    if faltante <= 0 or not material_id:
+        return None
+    mat = query("SELECT codigo,descripcion,unidad FROM materiales WHERE id=?", (material_id,), one=True)
+    if not mat:
+        return None
+    sc_exist = query("""SELECT id,cantidad FROM solicitudes_compra
+        WHERE material_id=? AND estado IN ('Pendiente','Cotizada','En evaluación')
+        ORDER BY id DESC LIMIT 1""", (material_id,), one=True)
+    if sc_exist:
+        nueva_cant = round(float(sc_exist["cantidad"] or 0) + faltante, 3)
+        execute("""UPDATE solicitudes_compra SET cantidad=?,
+            obs=COALESCE(obs,'') || ? WHERE id=?""",
+            (nueva_cant, f" | +{round(faltante,3)} {mat['unidad']} por {motivo}.", sc_exist["id"]))
+        return {"numero": None, "material": mat["descripcion"], "cantidad": round(faltante, 3), "actualizada": True}
+    numero = next_numero_sc()
+    execute("""INSERT INTO solicitudes_compra
+        (numero,tipo,material_id,descripcion,cantidad,unidad,urgencia,estado,solicitante_id,obs)
+        VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (numero, "Productiva", material_id, mat["descripcion"], round(faltante, 3), mat["unidad"],
+         "Urgente", "Pendiente", session.get("user_id"),
+         f"Generada automáticamente: faltante de insumo por {motivo}."))
+    return {"numero": numero, "material": mat["descripcion"], "cantidad": round(faltante, 3)}
+
+
+def _generar_ot_aux_insumo_ott(producto_id, faltante, motivo):
+    """Genera (o amplía, si ya hay una OT auxiliar en curso para el mismo
+    producto) una OT auxiliar para fabricar el faltante de un producto
+    usado como insumo de una operación tercerizada, para cubrir un remito
+    de OTT. Mismo patrón que las OT auxiliares del MRP (_gap_analysis_materiales),
+    pero disparado puntualmente por el faltante de este remito."""
+    if faltante <= 0 or not producto_id:
+        return None
+    prod = query("SELECT id,codigo,nombre FROM productos WHERE id=? AND activo=1", (producto_id,), one=True)
+    if not prod:
+        return None
+    ot_exist = query("""SELECT id,numero,cantidad FROM ordenes
+        WHERE producto_id=? AND estado IN ('Pendiente','En proceso')
+          AND obs LIKE 'OT auxiliar generada automáticamente por remito de OTT%'
+        ORDER BY id DESC LIMIT 1""", (producto_id,), one=True)
+    if ot_exist:
+        nueva_cant = round(float(ot_exist["cantidad"] or 0) + faltante, 3)
+        execute("UPDATE ordenes SET cantidad=? WHERE id=?", (nueva_cant, ot_exist["id"]))
+        execute("DELETE FROM orden_materiales WHERE orden_id=?", (ot_exist["id"],))
+        populate_mats_internal(ot_exist["id"], producto_id, nueva_cant)
+        return {"numero": ot_exist["numero"], "producto": prod["nombre"],
+                "cantidad": round(faltante, 3), "actualizada": True}
+    last = query("SELECT numero FROM ordenes ORDER BY id DESC LIMIT 1", one=True)
+    try: n = int(last["numero"].split("-")[1]) + 1 if last else 1
+    except Exception: n = 1
+    numero_aux = f"OT-{n:03d}"
+    ops_proc_aux = query(
+        "SELECT * FROM proceso_operaciones WHERE producto_id=? ORDER BY CAST(orden AS INTEGER), orden",
+        (producto_id,))
+    tiempo_std_aux = tiempo_std_min(ops_proc_aux, faltante)
+    costo_mat_aux = calcular_costo_producto(producto_id, faltante)
+    oid_aux = execute("""INSERT INTO ordenes
+        (numero,cliente_id,producto_id,descripcion,cantidad,prioridad,estado,fecha_entrega,costo_mat,costo_mo,precio_venta,obs)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (numero_aux, None, producto_id,
+         f"{prod['codigo']} — {prod['nombre']} (OT auxiliar por faltante de insumo)",
+         round(faltante, 3), "Alta", "Pendiente", date.today().isoformat(),
+         round(costo_mat_aux, 2), round(tiempo_std_aux, 0), 0,
+         f"OT auxiliar generada automáticamente por remito de OTT. Motivo: {motivo}."))
+    populate_ops_internal(oid_aux, producto_id, faltante)
+    populate_mats_internal(oid_aux, producto_id, faltante)
+    return {"numero": numero_aux, "producto": prod["nombre"], "cantidad": round(faltante, 3)}
+
 
 @app.route("/api/ott/<int:oid>/emitir_remito", methods=["POST"])
 @login_required(roles=["admin","operario"])
@@ -4415,23 +5990,78 @@ def ott_emitir_remito(oid):
         mat = query("SELECT id,stock,codigo FROM materiales WHERE producto_id=? AND activo=1",
                     (ott["producto_id"],), one=True)
 
+    # Si el paso anterior fue tercerizado, lo que se reenvía al segundo
+    # proveedor es SU semielaborado, no un material cualquiera del producto.
+    # La consulta de arriba no filtra por categoría y suele devolver el
+    # material de Producto Terminado, así que el descuento de más abajo no
+    # encontraba lotes vinculados y salteaba el consumo en silencio: el
+    # semielaborado quedaba en stock aunque las piezas ya estuvieran de nuevo
+    # afuera. Se resuelve por el PSE que congeló la OTT anterior.
+    if op_anterior is not None and op_anterior["es_tercerizada"]:
+        pse_previo = query("""SELECT m.id, m.stock, m.codigo
+            FROM ordenes_tercerizado o JOIN materiales m ON m.id=o.material_se_id
+            WHERE o.operacion_id=? AND o.material_se_id IS NOT NULL
+            ORDER BY o.id DESC LIMIT 1""", (op_anterior["id"],), one=True)
+        if pse_previo:
+            mat = pse_previo
+
+    # Tope adicional por insumos (materiales, no productos) cargados en la
+    # operación como "Material/Producto como insumo": si la operación
+    # requiere, por ejemplo, 3 unidades de un material por cada unidad de
+    # pieza a tercerizar, y solo hay 300 en stock, no se puede remitir más
+    # de 100 piezas aunque el resto de los límites (planificado, producido
+    # por la operación anterior, etc.) permitan más — no alcanzaría material
+    # para acompañar ese envío. Los insumos tipo 'producto' NO entran acá:
+    # su faltante se resuelve generando una OT auxiliar (ver más abajo), no
+    # limitando el remito.
+    limite_insumo, limite_insumo_cod = None, None
+    if ott["proceso_op_id"]:
+        for ins in query("""SELECT om.cantidad, m.stock mat_stock, m.codigo mat_codigo
+                FROM operacion_materiales om JOIN materiales m ON m.id=om.material_id
+                WHERE om.operacion_id=? AND om.tipo='material'""", (ott["proceso_op_id"],)):
+            cant_unit = float(ins["cantidad"] or 0)
+            if cant_unit <= 0:
+                continue
+            max_por_insumo = float(ins["mat_stock"] or 0) / cant_unit
+            if limite_insumo is None or max_por_insumo < limite_insumo:
+                limite_insumo, limite_insumo_cod = max_por_insumo, ins["mat_codigo"]
+
     if op_anterior is not None:
         disponible = max(float(op_anterior["qty_producida"] or 0) - float(total_ya_enviado or 0), 0)
+        if limite_insumo is not None:
+            disponible = min(disponible, limite_insumo)
         if cantidad > disponible:
             return jsonify({"error": f"Cantidad excede lo producido en la operación anterior "
-                                      f"(disponible: {disponible}, solicitado: {cantidad})"}), 400
+                                      f"(disponible: {disponible}, solicitado: {cantidad})"
+                                      + (f" — limitado por stock de insumo {limite_insumo_cod}"
+                                         if limite_insumo is not None and disponible < float(op_anterior["qty_producida"] or 0) - float(total_ya_enviado or 0)
+                                         else "")}), 400
     elif mat:
-        if mat["stock"] < cantidad:
-            return jsonify({"error": f"Stock insuficiente de {mat['codigo']} para enviar a tercerizar "
-                                      f"(disponible: {mat['stock']}, solicitado: {cantidad})"}), 400
+        disponible = mat["stock"]
+        if limite_insumo is not None:
+            disponible = min(disponible, limite_insumo)
+        if disponible < cantidad:
+            return jsonify({"error": f"Stock insuficiente de {mat['codigo'] if disponible==mat['stock'] else limite_insumo_cod} "
+                                      f"para enviar a tercerizar (disponible: {disponible}, solicitado: {cantidad})"}), 400
     elif oo and oo["qty_requerida"]:
         # Primer paso del proceso: el límite es la cantidad planificada de la
         # operación en la OT (no hay stock físico todavía para acotarlo),
         # neta de todo lo ya enviado para ese paso.
         disponible = max(float(oo["qty_requerida"]) - float(total_ya_enviado or 0), 0)
+        if limite_insumo is not None:
+            disponible = min(disponible, limite_insumo)
         if cantidad > disponible:
             return jsonify({"error": f"Cantidad excede lo planificado para la operación "
-                                      f"(disponible: {disponible}, solicitado: {cantidad})"}), 400
+                                      f"(disponible: {disponible}, solicitado: {cantidad})"
+                                      + (f" — limitado por stock de insumo {limite_insumo_cod}"
+                                         if limite_insumo is not None and limite_insumo < float(oo["qty_requerida"]) - float(total_ya_enviado or 0)
+                                         else "")}), 400
+    elif limite_insumo is not None and cantidad > limite_insumo:
+        # No hay operación anterior, ni stock propio del semielaborado, ni
+        # cantidad planificada cargada — el único límite que queda es el
+        # insumo.
+        return jsonify({"error": f"Cantidad excede la disponible según stock de insumo "
+                                  f"{limite_insumo_cod} (disponible: {limite_insumo}, solicitado: {cantidad})"}), 400
 
     # Create remito de traslado
     last_rem = query("SELECT numero FROM remitos ORDER BY id DESC LIMIT 1", one=True)
@@ -4492,6 +6122,43 @@ def ott_emitir_remito(oid):
                      session["user_id"]))
             stock_descontado = True
 
+    # ── Insumos de la operación tercerizada (materiales/productos que se
+    # mandan al proveedor junto con la pieza, cargados en "Material/Producto
+    # como insumo" del proceso). Se consumen proporcionalmente a la cantidad
+    # remitida (om.cantidad * cantidad). Si no alcanza el stock: el faltante
+    # de un MATERIAL genera/amplía una Solicitud de Compra puntual; el
+    # faltante de un PRODUCTO (semielaborado) genera/amplía una OT auxiliar
+    # para fabricarlo. El remito igual se emite — no se bloquea por esto.
+    insumos_op = query("""SELECT om.tipo, om.material_id, om.producto_id, om.cantidad,
+            m.codigo mat_codigo, m.stock mat_stock
+        FROM operacion_materiales om
+        JOIN materiales m ON m.id=om.material_id
+        WHERE om.operacion_id=?""", (ott["proceso_op_id"],)) if ott["proceso_op_id"] else []
+    scs_insumo, ots_insumo = [], []
+    for ins in insumos_op:
+        requerido = round(float(ins["cantidad"] or 0) * cantidad, 4)
+        if requerido <= 0:
+            continue
+        stock_disp = float(ins["mat_stock"] or 0)
+        consumir = min(requerido, stock_disp)
+        faltante = round(requerido - consumir, 4)
+        if consumir > 0:
+            execute("""UPDATE materiales SET stock=stock-?, actualizado=datetime('now','localtime')
+                WHERE id=?""", (consumir, ins["material_id"]))
+            execute("""INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id)
+                VALUES (?,NULL,'salida',?,?,?)""",
+                (ins["material_id"], consumir,
+                 f"Consumo insumo p/ remito OTT {ott['numero']} — {num_rem} ({ins['mat_codigo']})",
+                 session["user_id"]))
+        if faltante > 0:
+            motivo = f"remito {num_rem} de OTT {ott['numero']}"
+            if ins["tipo"] == "producto" and ins["producto_id"]:
+                r = _generar_ot_aux_insumo_ott(ins["producto_id"], faltante, motivo)
+                if r: ots_insumo.append(r)
+            else:
+                r = _generar_sc_insumo_ott(ins["material_id"], faltante, motivo)
+                if r: scs_insumo.append(r)
+
     # Si ya estaba "En proceso" (hubo una recepción parcial previa), se
     # mantiene ese estado — no se retrocede a "Remito emitido". Si estaba
     # "Pendiente" o "Remito emitido", pasa (o queda) en "Remito emitido".
@@ -4500,9 +6167,12 @@ def ott_emitir_remito(oid):
         remito_traslado_id=?, fecha_envio=COALESCE(fecha_envio,date('now','localtime')),
         cantidad_enviada=? WHERE id=?""",
         (nuevo_estado, rid, cantidad_enviada_previa + cantidad, oid))
+    _sync_requerimiento_desde_ott(oid)
     return jsonify({"ok": True, "remito_numero": num_rem, "remito_id": rid,
                      "cantidad_enviada_total": cantidad_enviada_previa + cantidad,
-                     "stock_descontado": stock_descontado})
+                     "stock_descontado": stock_descontado,
+                     "solicitudes_compra_insumo": scs_insumo,
+                     "ots_auxiliares_insumo": ots_insumo})
 
 @app.route("/api/ott/<int:oid>/registrar_retorno", methods=["POST"])
 @login_required(roles=["admin","operario","almacen"])
@@ -4518,7 +6188,7 @@ def ott_registrar_retorno(oid):
     fija en cantidad_enviada de la OTT (no se va acumulando con cada
     recepción) para que un ciclo de rechazo → devolución → reingreso de
     reemplazo no la infle más allá de lo realmente enviado."""
-    ott = query("""SELECT ott.*,po.producto_id,pr.codigo prod_codigo,pr.nombre prod_nombre,
+    ott = query("""SELECT ott.*,po.producto_id,po.nombre op_nombre,pr.codigo prod_codigo,pr.nombre prod_nombre,
         pr.unidad prod_unidad,o.numero ot_numero
         FROM ordenes_tercerizado ott
         LEFT JOIN proceso_operaciones po ON po.id=ott.proceso_op_id
@@ -4601,6 +6271,7 @@ def ott_registrar_retorno(oid):
                 "quedan piezas pendientes de recibir."
             )
         }
+        _sync_requerimiento_desde_ott(oid)
         return jsonify(resultado), 201
 
     # ── Caso operación INTERMEDIA (semielaborado) ──────────────────────────
@@ -4613,27 +6284,42 @@ def ott_registrar_retorno(oid):
     # (FK), NO por codigo: dos productos distintos pueden compartir codigo
     # con un material ajeno por casualidad, y buscar solo por codigo
     # terminaría mezclando stock de cosas distintas.
-    mat = query("SELECT id FROM materiales WHERE producto_id=? AND activo=1",
-                (ott["producto_id"],), one=True)
-    if not mat:
-        # Auto-create a material entry para este semielaborado, con un
-        # codigo distinguible si el codigo del producto ya está tomado.
-        codigo_base = ott["prod_codigo"]
+    # Búsqueda por vínculo real (FK): producto_id + operacion_id (proceso_op_id
+    # de la OTT). NO solo por producto_id: un mismo producto puede tener más
+    # de una operación intermedia tercerizada, y cada una debe generar/usar
+    # su PROPIO material de semielaborado (no compartir stock entre sí).
+    # El semielaborado ya viene congelado desde que se creó la OTT: es el que
+    # corresponde a la definición con la que las piezas salieron del taller,
+    # aunque después se hayan editado los insumos en Procesos.
+    mat_id = ott["material_se_id"] if "material_se_id" in ott.keys() else None
+    if not mat_id:
+        # OTT anterior al versionado: se resuelve contra la definición vigente
+        # y se congela para las próximas recepciones parciales de esta misma
+        # OTT, así todas caen en el mismo material.
+        mat_id = _get_or_create_pse(ott["proceso_op_id"])
+        if mat_id:
+            execute("UPDATE ordenes_tercerizado SET material_se_id=? WHERE id=?",
+                    (mat_id, oid))
+    if not mat_id:
+        # Sin proceso_op_id no hay de dónde derivar el semielaborado (la
+        # operación del proceso fue borrada). Camino legado: material colgado
+        # del producto, sin versionar.
+        op_nombre = (ott["op_nombre"] or "SE").strip()
+        codigo_base = f"{ott['prod_codigo']}-{op_nombre}"
         candidato = codigo_base
         intento = 1
         while query("SELECT id FROM materiales WHERE codigo=?", (candidato,), one=True):
             intento += 1
-            candidato = f"{codigo_base}-PT{intento}"
+            candidato = f"{codigo_base}-{intento}"
         mat_id = execute("""INSERT INTO materiales
-            (codigo,descripcion,categoria,producto_id,unidad,stock,stock_min,precio_unit,activo)
-            VALUES (?,?,?,?,?,0,0,0,1)""",
+            (codigo,descripcion,categoria,producto_id,operacion_id,unidad,stock,stock_min,precio_unit,activo)
+            VALUES (?,?,?,?,?,?,0,0,0,1)""",
             (candidato,
-             ott["prod_nombre"],
+             f"{ott['prod_nombre']} — {op_nombre}",
              "Semielaborado",
              ott["producto_id"],
+             ott["proceso_op_id"],
              ott["prod_unidad"] or "unid"))
-    else:
-        mat_id = mat["id"]
 
     # Si ya existe un lote de retorno para esta OTT (de una recepción
     # parcial anterior), se amplía ese mismo lote en vez de crear uno
@@ -4674,13 +6360,13 @@ def ott_registrar_retorno(oid):
         if cantidad_enviada > 0:
             execute("""UPDATE lotes SET cantidad_original=MAX(cantidad_original,?),
                 cantidad_disponible=cantidad_disponible+?,
-                estado=CASE WHEN estado IN ('Aprobado','Rechazado') THEN 'Ingresado' ELSE estado END
+                estado=CASE WHEN estado IN ('Aprobado','Rechazado','Agotado') THEN 'Ingresado' ELSE estado END
                 WHERE id=?""",
                 (cantidad_enviada, cantidad, lote_id))
         else:
             execute("""UPDATE lotes SET cantidad_original=cantidad_original+?,
                 cantidad_disponible=cantidad_disponible+?,
-                estado=CASE WHEN estado IN ('Aprobado','Rechazado') THEN 'Ingresado' ELSE estado END
+                estado=CASE WHEN estado IN ('Aprobado','Rechazado','Agotado') THEN 'Ingresado' ELSE estado END
                 WHERE id=?""",
                 (cantidad, cantidad, lote_id))
     else:
@@ -4785,6 +6471,7 @@ def ott_registrar_retorno(oid):
             "quedan piezas pendientes de recibir."
         )
     }
+    _sync_requerimiento_desde_ott(oid)
     return jsonify(resultado), 201
 
 @app.route("/api/ott/<int:oid>/devolver_rechazo", methods=["POST"])
@@ -4873,6 +6560,7 @@ def ott_devolver_rechazo(oid):
         WHERE id=?""",
         (nuevo_estado, cantidad_recibida_nueva, ya_devuelto + cantidad, rid, oid))
 
+    _sync_requerimiento_desde_ott(oid)
     return jsonify({"ok": True, "cantidad_devuelta": cantidad, "remito_numero": num_rem,
         "remito_id": rid, "cantidad_recibida": cantidad_recibida_nueva,
         "cantidad_rechazada_devuelta": ya_devuelto + cantidad, "estado": nuevo_estado})
@@ -4909,6 +6597,14 @@ def ott_completar(oid):
                 (aprobado, ott["oo_id"]))
         else:
             execute("UPDATE orden_operaciones SET estado='Completada' WHERE id=?", (ott["oo_id"],))
+    # Con la OTT cerrada, el semielaborado ya cumplió su función: se gasta acá
+    # para que no quede stock que nadie consume. Va después de leer "aprobado"
+    # porque el consumo pone cantidad_activa en cero.
+    try:
+        _consumir_pse_al_cerrar_ott(oid)
+    except Exception as e:
+        print(f"[WARN] No se pudo consumir el semielaborado al cerrar la OTT {oid}: {e}")
+    _sync_requerimiento_desde_ott(oid)
     return jsonify({"ok": True})
 
 # ── Materiales/PT requeridos por una operación de OT + lotes disponibles ──────
@@ -5344,6 +7040,26 @@ def get_ordenes_cliente():
         result.append(d)
     return jsonify(result)
 
+def _sync_precio_venta_producto(producto_id, precio_unit):
+    """Si el precio unitario cargado en un ítem de pedido de cliente difiere
+    del precio_venta actual del producto, actualiza el producto para que el
+    precio de venta quede sincronizado (se refleja en Productos y en las
+    pantallas que lo consultan, como Clientes).
+    Se hace acá (server-side) y no como una segunda llamada desde el
+    frontend porque /api/productos requiere rol admin/operario, mientras que
+    guardar un pedido de cliente lo puede hacer un vendedor: con la llamada
+    separada, un vendedor actualizaba el precio del pedido pero el precio
+    del producto quedaba sin cambios (403 silencioso)."""
+    try:
+        precio_unit = float(precio_unit or 0)
+    except (TypeError, ValueError):
+        return
+    if precio_unit <= 0:
+        return
+    prod = query("SELECT precio_venta FROM productos WHERE id=?", (producto_id,), one=True)
+    if prod and round(float(prod["precio_venta"] or 0), 2) != round(precio_unit, 2):
+        execute("UPDATE productos SET precio_venta=? WHERE id=?", (precio_unit, producto_id))
+
 @app.route("/api/ordenes_cliente", methods=["POST"])
 @login_required(roles=["admin","vendedor"])
 def create_orden_cliente():
@@ -5375,11 +7091,13 @@ def create_orden_cliente():
         (numero, d["cliente_id"], d.get("fecha_entrega"), d.get("estado","Recibida"), d.get("obs")))
     for item in d["items"]:
         if item.get("producto_id") and item.get("cantidad"):
-            execute("""INSERT INTO ordenes_cliente_items
+            item_id = execute("""INSERT INTO ordenes_cliente_items
                 (orden_cliente_id,producto_id,cantidad,precio_unit,fecha_deseada,obs)
                 VALUES (?,?,?,?,?,?)""",
                 (lid, item["producto_id"], item["cantidad"],
                  item.get("precio_unit",0), item.get("fecha_deseada"), item.get("obs")))
+            _sync_requerimiento_desde_pedido(item_id)
+            _sync_precio_venta_producto(item["producto_id"], item.get("precio_unit"))
     return jsonify({"ok":True,"id":lid,"numero":numero}), 201
 
 
@@ -5391,14 +7109,25 @@ def _recalcular_tiempo_total_producto(prod_id):
     2 procesos posibles para el mismo paso), se toma la más rápida como
     estimación — la ruta realmente usada se elige en Control de producción."""
     tot = query("""SELECT COALESCE(SUM(t),0) total FROM (
-        SELECT MIN(tiempo_setup_min+tiempo_ciclo_min) t
+        SELECT MIN(tiempo_setup_min + tiempo_ciclo_seg/60.0) t
         FROM proceso_operaciones WHERE producto_id=? GROUP BY orden)""",
         (prod_id,), one=True)["total"]
     execute("UPDATE productos SET tiempo_total_hs=? WHERE id=?", (round(tot/60,2), prod_id))
 
-def calcular_tiempo_ciclo_total(prod_id, qty=1.0, _visitados=None):
-    """Suma tiempo_ciclo_min de todas las operaciones (sin setup), recursivo.
-    Si un material es un PT con proceso, suma también su tiempo de fabricación."""
+def tiempo_std_min(ops, qty):
+    """Tiempo estándar en MINUTOS de una lista de operaciones para 'qty' piezas.
+    Ojo con las unidades: tiempo_setup_min está en minutos (es una preparación
+    de máquina, se hace una vez) y tiempo_ciclo_seg en segundos (es por pieza),
+    así que el ciclo se pasa a minutos antes de sumar."""
+    return sum(
+        (op["tiempo_setup_min"] or 0) + (op["tiempo_ciclo_seg"] or 0) / 60.0 * qty
+        for op in ops
+    )
+
+def calcular_tiempo_ciclo_total_seg(prod_id, qty=1.0, _visitados=None):
+    """Suma tiempo_ciclo_seg de todas las operaciones (sin setup), recursivo.
+    Devuelve SEGUNDOS. Si un material es un PT con proceso, suma también su
+    tiempo de fabricación."""
     if _visitados is None:
         _visitados = set()
     if prod_id in _visitados:
@@ -5408,7 +7137,7 @@ def calcular_tiempo_ciclo_total(prod_id, qty=1.0, _visitados=None):
     # Tiempo de ciclo propio (si un paso tiene rutas alternativas con el
     # mismo número de orden, se toma la más rápida como estimación)
     ops = query("""SELECT COALESCE(SUM(t),0) s FROM (
-        SELECT MIN(tiempo_ciclo_min) t FROM proceso_operaciones
+        SELECT MIN(tiempo_ciclo_seg) t FROM proceso_operaciones
         WHERE producto_id=? GROUP BY orden)""",
         (prod_id,), one=True)
     total = float(ops["s"] or 0) * qty
@@ -5427,7 +7156,7 @@ def calcular_tiempo_ciclo_total(prod_id, qty=1.0, _visitados=None):
             sub = query("SELECT id FROM productos WHERE codigo=? AND activo=1",
                         (m["codigo"],), one=True)
             if sub:
-                total += calcular_tiempo_ciclo_total(
+                total += calcular_tiempo_ciclo_total_seg(
                     sub["id"], float(m["total_cant"] or 0), _visitados)
     return total
 
@@ -5485,11 +7214,8 @@ def explotar_multinivel(prod_id, qty, cliente_id, fecha_entrega_padre, oc_numero
     costo_mat = calcular_costo_producto(prod_id, qty)
     ops_proc = query("SELECT * FROM proceso_operaciones WHERE producto_id=? ORDER BY CAST(orden AS INTEGER), orden",
                      (prod_id,))
-    tiempo_std_min = sum(
-        (op["tiempo_setup_min"] or 0) + (op["tiempo_ciclo_min"] or 0) * qty
-        for op in ops_proc
-    )
-    dias_necesarios = max(1, math.ceil(tiempo_std_min / 480))
+    tiempo_std = tiempo_std_min(ops_proc, qty)
+    dias_necesarios = max(1, math.ceil(tiempo_std / 480))
     if nivel == 0:
         fecha_ot = fecha_entrega_padre
     else:
@@ -5516,19 +7242,19 @@ def explotar_multinivel(prod_id, qty, cliente_id, fecha_entrega_padre, oc_numero
         (numero_ot, cliente_id, prod_id,
          f"{prod['codigo']} — {prod['nombre']}",
          qty, "Normal", "Pendiente",
-         fecha_ot, round(costo_mat, 2), round(tiempo_std_min, 0),
+         fecha_ot, round(costo_mat, 2), round(tiempo_std, 0),
          float(prod["precio_venta"] or 0), obs))
 
     # Operaciones
     for op in ops_proc:
         execute("""INSERT INTO orden_operaciones
             (orden_id,proceso_op_id,orden,nombre,categoria_maquina_id,maquina_id,
-             tiempo_setup_min,tiempo_ciclo_min,estado,qty_requerida,
+             tiempo_setup_min,tiempo_ciclo_seg,estado,qty_requerida,
              es_tercerizada,proveedor_id,precio_tercerizado,tiempo_minimo_dias)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (ot_id, op["id"], op["orden"], op["nombre"],
              op["categoria_maquina_id"], op["maquina_id"],
-             op["tiempo_setup_min"], op["tiempo_ciclo_min"],
+             op["tiempo_setup_min"], op["tiempo_ciclo_seg"],
              "Pendiente", qty,
              op["es_tercerizada"] if "es_tercerizada" in op.keys() else 0,
              op["proveedor_id"] if "proveedor_id" in op.keys() else None,
@@ -5786,11 +7512,13 @@ def update_orden_cliente(ocid):
         execute("DELETE FROM ordenes_cliente_items WHERE orden_cliente_id=? AND (ot_id IS NULL OR ot_id=0)", (ocid,))
         for item in (d["items"] or []):
             if item.get("producto_id") and item.get("cantidad"):
-                execute("""INSERT INTO ordenes_cliente_items
+                item_id = execute("""INSERT INTO ordenes_cliente_items
                     (orden_cliente_id,producto_id,cantidad,precio_unit,fecha_deseada,obs)
                     VALUES (?,?,?,?,?,?)""",
                     (ocid, item["producto_id"], item["cantidad"],
                      item.get("precio_unit",0), item.get("fecha_deseada"), item.get("obs")))
+                _sync_requerimiento_desde_pedido(item_id)
+                _sync_precio_venta_producto(item["producto_id"], item.get("precio_unit"))
     return jsonify({"ok":True})
 
 # ── MRP ampliado: consolidar OC-cliente → generar OTs ────────────────────────
@@ -5902,10 +7630,7 @@ def mrp_consolidar():
         ops_proc_item = query(
             "SELECT * FROM proceso_operaciones WHERE producto_id=? ORDER BY CAST(orden AS INTEGER), orden",
             (item["producto_id"],))
-        tiempo_std_min = sum(
-            (op["tiempo_setup_min"] or 0) + (op["tiempo_ciclo_min"] or 0) * item["total_qty"]
-            for op in ops_proc_item
-        )
+        tiempo_std = tiempo_std_min(ops_proc_item, item["total_qty"])
 
         # Costo de materiales: se calcula dinámicamente en base a la receta
         # actual del producto (igual que en explotar_multinivel / calcular_costo_producto),
@@ -5919,7 +7644,7 @@ def mrp_consolidar():
             (numero,item["cliente_id"],item["producto_id"],
              f"Fabricación {item['producto_nombre']} — generado por MRP",
              item["total_qty"],"Normal","Pendiente",item["fecha_entrega"],
-             round(costo_mat_item, 2),round(tiempo_std_min, 0),item["precio_venta"]))
+             round(costo_mat_item, 2),round(tiempo_std, 0),item["precio_venta"]))
         populate_ops_internal(oid, item["producto_id"], item["total_qty"])
         populate_mats_internal(oid, item["producto_id"], item["total_qty"])
         # Vincular esta OT a los renglones de OC que la originaron
@@ -6072,9 +7797,7 @@ def _gap_analysis_materiales():
             ops_proc_aux = query(
                 "SELECT * FROM proceso_operaciones WHERE producto_id=? ORDER BY CAST(orden AS INTEGER), orden",
                 (prod_pt["id"],))
-            tiempo_std_aux = sum(
-                (op["tiempo_setup_min"] or 0) + (op["tiempo_ciclo_min"] or 0) * cantidad_ot
-                for op in ops_proc_aux)
+            tiempo_std_aux = tiempo_std_min(ops_proc_aux, cantidad_ot)
             costo_mat_aux = calcular_costo_producto(prod_pt["id"], cantidad_ot)
 
             oid_aux = execute("""INSERT INTO ordenes
@@ -6199,10 +7922,7 @@ def mrp_consolidar_pronostico():
         ops_proc_item = query(
             "SELECT * FROM proceso_operaciones WHERE producto_id=? ORDER BY CAST(orden AS INTEGER), orden",
             (item["producto_id"],))
-        tiempo_std_min = sum(
-            (op["tiempo_setup_min"] or 0) + (op["tiempo_ciclo_min"] or 0) * item["total_qty"]
-            for op in ops_proc_item
-        )
+        tiempo_std = tiempo_std_min(ops_proc_item, item["total_qty"])
         costo_mat_item = calcular_costo_producto(item["producto_id"], item["total_qty"])
 
         oid = execute("""INSERT INTO ordenes
@@ -6211,7 +7931,7 @@ def mrp_consolidar_pronostico():
             (numero, item["cliente_id"], item["producto_id"],
              f"Fabricación {item['producto_nombre']} — generado por pronóstico {item['pron_codigos']} ({item['mes']})",
              item["total_qty"], "Normal", "Pendiente", None,
-             round(costo_mat_item, 2), round(tiempo_std_min, 0), item["precio_venta"],
+             round(costo_mat_item, 2), round(tiempo_std, 0), item["precio_venta"],
              f"Generada automáticamente a partir del/los pronóstico(s) de venta {item['pron_codigos']} — mes {item['mes']}."))
         populate_ops_internal(oid, item["producto_id"], item["total_qty"])
         populate_mats_internal(oid, item["producto_id"], item["total_qty"])
@@ -6233,11 +7953,11 @@ def populate_ops_internal(oid, prod_id, qty):
     for op in ops:
         execute("""INSERT INTO orden_operaciones
             (orden_id,proceso_op_id,orden,nombre,categoria_maquina_id,maquina_id,
-             tiempo_setup_min,tiempo_ciclo_min,estado,qty_requerida,
+             tiempo_setup_min,tiempo_ciclo_seg,estado,qty_requerida,
              es_tercerizada,proveedor_id,precio_tercerizado,tiempo_minimo_dias)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (oid,op["id"],op["orden"],op["nombre"],op["categoria_maquina_id"],op["maquina_id"],
-             op["tiempo_setup_min"],op["tiempo_ciclo_min"],"Pendiente",qty,
+             op["tiempo_setup_min"],op["tiempo_ciclo_seg"],"Pendiente",qty,
              op["es_tercerizada"] if "es_tercerizada" in op.keys() else 0,
              op["proveedor_id"] if "proveedor_id" in op.keys() else None,
              op["precio_tercerizado"] if "precio_tercerizado" in op.keys() else 0,
@@ -6258,15 +7978,15 @@ def populate_mats_internal(oid, prod_id, qty):
 def preview_corregir_novedades():
     """Previsualiza qué novedades cambiarían su rendimiento/desvío al
     recalcularlos usando el tiempo de ciclo que tiene la operación en SU
-    propia OT (orden_operaciones.tiempo_ciclo_min) como estándar, ya que
+    propia OT (orden_operaciones.tiempo_ciclo_seg) como estándar, ya que
     ese es el valor vigente para esa orden puntual (puede haber sido
     ajustado y diferir del proceso/plantilla). Solo si la OT no tiene un
     valor propio cargado (0/NULL) se recurre al de la plantilla
-    (proceso_operaciones.tiempo_ciclo_min) como respaldo. No modifica nada."""
+    (proceso_operaciones.tiempo_ciclo_seg) como respaldo. No modifica nada."""
     rows = query("""
         SELECT n.id, n.numero, n.cantidad_producida, n.tiempo_real_min, n.tiempo_perdido,
                n.rendimiento_pct, n.desvio,
-               COALESCE(NULLIF(oo.tiempo_ciclo_min, 0), po.tiempo_ciclo_min, 1) AS std_ciclo
+               COALESCE(NULLIF(oo.tiempo_ciclo_seg, 0), po.tiempo_ciclo_seg, 60) AS std_ciclo
         FROM novedades_produccion n
         JOIN orden_operaciones oo ON oo.id = n.orden_operacion_id
         LEFT JOIN proceso_operaciones po ON po.id = oo.proceso_op_id
@@ -6276,7 +7996,8 @@ def preview_corregir_novedades():
 
     afectadas = []
     for r in rows:
-        std_ciclo = r["std_ciclo"] or 1
+        # std_ciclo esta en segundos; tiempo_real_min en minutos.
+        std_ciclo = (r["std_ciclo"] or 60) / 60.0
         t_real = r["tiempo_real_min"]
         qty = r["cantidad_producida"]
         t_productivo = max(t_real, 0.1)
@@ -6304,7 +8025,7 @@ def aplicar_corregir_novedades():
     rows = query("""
         SELECT n.id, n.cantidad_producida, n.tiempo_real_min,
                n.rendimiento_pct, n.desvio,
-               COALESCE(NULLIF(oo.tiempo_ciclo_min, 0), po.tiempo_ciclo_min, 1) AS std_ciclo
+               COALESCE(NULLIF(oo.tiempo_ciclo_seg, 0), po.tiempo_ciclo_seg, 60) AS std_ciclo
         FROM novedades_produccion n
         JOIN orden_operaciones oo ON oo.id = n.orden_operacion_id
         LEFT JOIN proceso_operaciones po ON po.id = oo.proceso_op_id
@@ -6314,7 +8035,8 @@ def aplicar_corregir_novedades():
 
     updates = []
     for r in rows:
-        std_ciclo = r["std_ciclo"] or 1
+        # std_ciclo esta en segundos; tiempo_real_min en minutos.
+        std_ciclo = (r["std_ciclo"] or 60) / 60.0
         t_real = r["tiempo_real_min"]
         qty = r["cantidad_producida"]
         t_productivo = max(t_real, 0.1)
@@ -6439,7 +8161,7 @@ def create_novedad():
     # vinculado por ese camino — no se acepta elegir/crear un vínculo nuevo
     # desde este endpoint.
 
-    op = query("""SELECT oo.*,po.tiempo_ciclo_min std_ciclo,po.producto_id
+    op = query("""SELECT oo.*,po.tiempo_ciclo_seg std_ciclo,po.producto_id
         FROM orden_operaciones oo
         LEFT JOIN proceso_operaciones po ON po.id=oo.proceso_op_id
         WHERE oo.id=?""", (d["orden_operacion_id"],), one=True)
@@ -6483,7 +8205,9 @@ def create_novedad():
     if op["estado"] == "Completada":
         return jsonify({"error": "No se puede cargar más novedades: la operación ya está marcada como Completada (%s/%s piezas). Volvé a ponerla en proceso para seguir cargando." % (qty_prod_op, qty_req_op)}), 400
 
-    std_ciclo = op["tiempo_ciclo_min"] or op["std_ciclo"] or 1
+    # El ciclo estandar se carga en segundos y el tiempo real se declara en
+    # minutos, asi que se pasa a minutos para calcular el rendimiento.
+    std_ciclo = (op["tiempo_ciclo_seg"] or op["std_ciclo"] or 60) / 60.0
     t_perdido = float(d.get("tiempo_perdido") or 0)
     # tiempo_real = tiempo EFECTIVAMENTE trabajado (ya neto).
     # tiempo_perdido = tiempo aparte que no se trabajó (no está incluido en tiempo_real).
@@ -6873,25 +8597,30 @@ def update_novedad(nid):
                 execute("UPDATE orden_operaciones SET estado='En proceso' WHERE id=?",
                     (nov["orden_operacion_id"],))
 
-    # --- Ajustar stock PT si es ultima operacion ---
+    # --- Resincronizar el PT si es la ultima operacion ---
+    # El PT producido vive en un LOTE pendiente de Calidad; materiales.stock
+    # representa solo lo aprobado (ver liberar_lote). Antes aca se sumaba el
+    # diff directo a materiales.stock: eso metia piezas en stock salteando
+    # Calidad y, como el lote seguia sin actualizarse, la proxima novedad lo
+    # completaba igual y esas piezas terminaban contadas DOS veces al aprobar.
+    # Ahora se usa el mismo camino que el alta: recalcular el lote contra lo
+    # realmente producido en el ultimo paso, sin tocar el stock.
     max_ord = query("SELECT MAX(CAST(orden AS INTEGER)) mo FROM orden_operaciones WHERE orden_id=?",
                     (nov["orden_id"],), one=True)["mo"]
     if nov["orden"] == max_ord and diff != 0 and nov["producto_id"]:
-        prod = query("SELECT * FROM productos WHERE id=?", (nov["producto_id"],), one=True)
-        if prod:
-            mat_pt = get_or_create_pt_material(prod)
-            tipo_pt = "entrada" if diff > 0 else "salida"
-            execute("UPDATE materiales SET stock=MAX(0,stock+?),actualizado=datetime('now','localtime') WHERE id=?",
-                    (diff, mat_pt["id"]))
-            execute("INSERT INTO movimientos (material_id,tipo,cantidad,referencia,usuario_id) VALUES (?,?,?,?,?)",
-                    (mat_pt["id"], tipo_pt, abs(diff),
-                     f"Ajuste PT {nov['numero']}", session["user_id"]))
+        try:
+            generar_pt_faltante_si_corresponde(nov["orden_id"])
+        except Exception as e:
+            print(f"[WARN] No se pudo resincronizar el PT de la OT {nov['orden_id']} "
+                  f"al editar la novedad {nov['numero']}: {e}")
 
     # --- Recalcular rendimiento ---
-    std = float(nov["tiempo_ciclo_min"] if hasattr(nov,"tiempo_ciclo_min") else 1) or 1
-    op_std = query("SELECT tiempo_ciclo_min FROM proceso_operaciones WHERE id=?",
+    std = float(nov["tiempo_ciclo_seg"] if hasattr(nov,"tiempo_ciclo_seg") else 60) or 60
+    op_std = query("SELECT tiempo_ciclo_seg FROM proceso_operaciones WHERE id=?",
                    (nov["proceso_op_id"],), one=True) if nov["proceso_op_id"] else None
-    ciclo = float(op_std["tiempo_ciclo_min"] or 1) if op_std else 1
+    # ciclo en minutos (la columna esta en segundos) para comparar contra
+    # tiempo_real_min.
+    ciclo = (float(op_std["tiempo_ciclo_seg"] or 60) if op_std else 60) / 60.0
     t_perd_new = float(d.get("tiempo_perdido", nov["tiempo_perdido"] if "tiempo_perdido" in nov.keys() else 0) or 0)
     # tiempo_real ya es tiempo neto trabajado; tiempo_perdido es aparte, no se resta.
     t_prod_new = max(t_new, 0.1) if t_new > 0 else 0.1
@@ -6911,7 +8640,7 @@ def update_novedad(nid):
             rendimiento, desvio, d.get("fecha", nov["fecha"]), nid))
 
     return jsonify({"ok": True, "diff": diff, "rendimiento_pct": rendimiento,
-                    "desvio": desvio, "ajuste_stock": diff != 0})
+                    "desvio": desvio, "ajuste_pt": diff != 0})
 
 @app.route("/api/novedades/<int:nid>", methods=["DELETE"])
 @login_required(roles=["admin","operario"])
@@ -7082,6 +8811,7 @@ def delete_novedad(nid):
     if pt_lote_ids:
         placeholders_pt = ",".join("?" * len(pt_lote_ids))
         remito_items_pt = query(f"""SELECT ri.id ri_id, ri.remito_id, ri.cantidad,
+                ri.orden_cliente_item_id oci_id,
                 r.numero remito_numero, r.estado,
                 c.razon cliente_nombre, l.numero lote_numero, m.descripcion material
             FROM remito_items ri
@@ -7091,18 +8821,23 @@ def delete_novedad(nid):
             LEFT JOIN clientes c ON c.id=r.cliente_id
             WHERE ri.lote_id IN ({placeholders_pt}) AND r.estado!='Anulado'""", tuple(pt_lote_ids))
         remitos_afectados_ids = set()
+        oci_afectados_ids = set()
         for ri in remito_items_pt:
             detalle["remitos"].append({
                 "remito_numero": ri["remito_numero"], "fecha": None, "estado": ri["estado"],
                 "cliente_nombre": ri["cliente_nombre"], "cantidad": ri["cantidad"],
                 "lote_numero": ri["lote_numero"], "material": ri["material"],
                 "accion": "Ítem eliminado del remito al eliminar la novedad"})
+            if ri["oci_id"]:
+                oci_afectados_ids.add(ri["oci_id"])
             execute("DELETE FROM remito_items WHERE id=?", (ri["ri_id"],))
             remitos_afectados_ids.add(ri["remito_id"])
         for rem_id in remitos_afectados_ids:
             quedan = query("SELECT COUNT(*) c FROM remito_items WHERE remito_id=?", (rem_id,), one=True)["c"]
             if quedan == 0:
                 execute("UPDATE remitos SET estado='Anulado' WHERE id=?", (rem_id,))
+        for oci_id in oci_afectados_ids:
+            _sync_requerimiento_desde_pedido(oci_id)
 
     # --- Remitos que ya hayan usado stock de lotes de MATERIA PRIMA devueltos
     # (caso infrecuente: si se remitió materia prima como tal). Estos NO se
@@ -7498,16 +9233,31 @@ def _sync_ott_retorno_a_operacion(lote_id):
     la operación siguiente pueda ir cargando novedades de forma incremental
     — ver _tope_terc_previa); el pase a Completada queda 100% en manos del
     botón "Completar" de OTT. Es idempotente."""
-    ott = query("""SELECT ott.*, oo.id oo_id, oo.estado oo_estado, oo.qty_requerida
+    ott = query("""SELECT ott.*, oo.id oo_id, oo.estado oo_estado, oo.qty_requerida,
+            oo.orden_id oo_orden_id, oo.orden oo_orden
         FROM ordenes_tercerizado ott
         LEFT JOIN orden_operaciones oo ON oo.id=ott.operacion_id
         WHERE ott.lote_retorno_id=? AND ott.es_ultimo_nivel=0""", (lote_id,), one=True)
     if not ott or not ott["oo_id"]:
         return
-    lote = query("SELECT cantidad_activa,cantidad_rechazada,cantidad_disponible,estado FROM lotes WHERE id=?", (lote_id,), one=True)
+    lote = query("""SELECT id,numero,material_id,cantidad_activa,cantidad_rechazada,
+            cantidad_disponible,cantidad_reservada,estado
+        FROM lotes WHERE id=?""", (lote_id,), one=True)
     if not lote:
         return
-    aprobado = float(lote["cantidad_activa"] or 0)
+
+    # Lo aprobado ACUMULADO de este lote: lo que sigue en el lote más lo que
+    # ya se consumió para esta OT. Hay que sumar lo consumido porque el
+    # semielaborado se gasta al cerrar la OTT (ver _consumir_pse_al_cerrar_ott); si
+    # se mirara solo cantidad_activa, una segunda aprobación parcial pisaría
+    # qty_producida con el delta nuevo en vez del total.
+    consumido = 0.0
+    if ott["ot_origen_id"]:
+        row = query("""SELECT COALESCE(cantidad_consumida,0) c FROM orden_lotes
+            WHERE orden_id=? AND lote_id=?""",
+            (ott["ot_origen_id"], lote_id), one=True)
+        consumido = float(row["c"] or 0) if row else 0.0
+    aprobado = float(lote["cantidad_activa"] or 0) + consumido
     if aprobado <= 0:
         return  # todavía no hay nada aprobado
 
@@ -7517,6 +9267,80 @@ def _sync_ott_retorno_a_operacion(lote_id):
     if ott["oo_estado"] != "Completada":
         execute("UPDATE orden_operaciones SET qty_producida=? WHERE id=?",
             (aprobado, ott["oo_id"]))
+
+
+def _consumir_pse_al_cerrar_ott(ott_id):
+    """El semielaborado que vuelve de una tercerizada intermedia se consume en
+    la MISMA operación que lo produjo, al cerrarse la OTT.
+
+    El circuito real es: la pieza sale del taller, el proveedor la trabaja y
+    vuelve; el semielaborado existe para dejar registrado ese paso, no para
+    quedarse en el depósito. Si se lo deja en stock queda un remanente que
+    nadie gasta nunca — es lo que venía pasando con los semielaborados
+    anteriores. Entre el ingreso del lote y este consumo, la trazabilidad
+    queda completa y el stock neto vuelve a cero.
+
+    POR QUE ACA Y NO AL APROBAR: clasificar en Calidad es iterativo — se
+    aprueba una parte, llegan más piezas, se corrige una clasificación mal
+    cargada. Consumir en cada aprobación bajaba cantidad_disponible, que es
+    justamente contra lo que update_lote valida el reparto
+    Aprobado/Rechazado/Pendiente, y dejaba el lote en 'Agotado' fuera de la
+    cola de Calidad: no se podía reclasificar ni recibir el resto. El cierre
+    manual de la OTT (botón "Completar") es el momento en que Calidad ya
+    terminó y las piezas pasan a la operación siguiente.
+
+    EXCEPCION: si el paso siguiente de la ruta también es tercerizado, el
+    semielaborado NO se consume acá — esas mismas piezas se le mandan al
+    segundo proveedor, y ese envío ya descuenta el lote al emitir su remito
+    (ver ott_emitir_remito). Consumirlo dos veces dejaría al segundo remito
+    sin stock que descontar y lo haría fallar.
+    """
+    ott = query("""SELECT ott.*, oo.orden_id oo_orden_id, oo.orden oo_orden
+        FROM ordenes_tercerizado ott
+        LEFT JOIN orden_operaciones oo ON oo.id=ott.operacion_id
+        WHERE ott.id=? AND ott.es_ultimo_nivel=0""", (ott_id,), one=True)
+    if not ott or not ott["lote_retorno_id"] or not ott["ot_origen_id"]:
+        return
+    lote = query("""SELECT id,numero,material_id,cantidad_activa,cantidad_disponible
+        FROM lotes WHERE id=?""", (ott["lote_retorno_id"],), one=True)
+    if not lote:
+        return
+    aprobado_en_lote = float(lote["cantidad_activa"] or 0)
+    if aprobado_en_lote <= 0.0001:
+        return
+
+    try:
+        orden_num = int(ott["oo_orden"])
+    except (TypeError, ValueError):
+        return
+    siguiente = query("""SELECT es_tercerizada FROM orden_operaciones
+        WHERE orden_id=? AND CAST(orden AS INTEGER) > ?
+        ORDER BY CAST(orden AS INTEGER) ASC LIMIT 1""",
+        (ott["oo_orden_id"], orden_num), one=True)
+    if siguiente and siguiente["es_tercerizada"]:
+        return
+
+    mat_id = lote["material_id"]
+    execute("""UPDATE lotes SET
+            cantidad_activa=MAX(0, cantidad_activa-?),
+            cantidad_disponible=MAX(0, cantidad_disponible-?),
+            cantidad_reservada=MAX(0, COALESCE(cantidad_reservada,0)-?),
+            estado=CASE WHEN cantidad_disponible-? <= 0.0001 THEN 'Agotado' ELSE estado END
+        WHERE id=?""",
+        (aprobado_en_lote, aprobado_en_lote, aprobado_en_lote,
+         aprobado_en_lote, lote["id"]))
+    execute("""UPDATE materiales SET stock=MAX(0, stock-?),
+            actualizado=datetime('now','localtime') WHERE id=?""",
+        (aprobado_en_lote, mat_id))
+    execute("""UPDATE orden_lotes SET cantidad_consumida=COALESCE(cantidad_consumida,0)+?
+        WHERE orden_id=? AND lote_id=?""",
+        (aprobado_en_lote, ott["ot_origen_id"], lote["id"]))
+    execute("""INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id)
+        VALUES (?,?,'salida',?,?,?)""",
+        (mat_id, lote["id"], aprobado_en_lote,
+         f"Consumo del semielaborado al cerrar la operación tercerizada {ott['numero']} "
+         f"— Lote {lote['numero']} (entra y se gasta en el mismo paso)",
+         session.get("user_id")))
 
 
 @app.route("/api/lotes/<int:lid>", methods=["PUT"])
@@ -8059,10 +9883,7 @@ def create_oc():
                 return jsonify({"error":"No se puede emitir la OC: la solicitud de compra no tiene una cotización seleccionada"}), 400
             if int(cot["proveedor_id"]) != int(d["proveedor_id"]):
                 return jsonify({"error":"No se puede emitir la OC: todas las solicitudes deben tener su cotización seleccionada con el mismo proveedor de la OC"}), 400
-    last = query("SELECT numero FROM ordenes_compra ORDER BY id DESC LIMIT 1", one=True)
-    try: n = int(last["numero"].split("-")[1])+1 if last else 1
-    except: n = 1
-    numero = f"OCP-{n:04d}"
+    numero = next_numero_oc()
     total = sum(float(i.get("precio_unit",0))*float(i.get("cantidad",0)) for i in d["items"])
     estado = "Aprobada" if total <= LIMITE_APROBACION else "Pendiente aprobacion"
     lid = execute("""INSERT INTO ordenes_compra
@@ -8071,42 +9892,177 @@ def create_oc():
         (numero,d["proveedor_id"],estado,total,d.get("fecha_entrega_est"),d.get("obs"),session["user_id"]))
     lotes_creados = []
     for item in d["items"]:
-        execute("""INSERT INTO ordenes_compra_items
+        oci_id = execute("""INSERT INTO ordenes_compra_items
             (oc_id,solicitud_id,material_id,descripcion,cantidad,precio_unit,unidad)
             VALUES (?,?,?,?,?,?,?)""",
             (lid,item.get("solicitud_id"),item.get("material_id"),item["descripcion"],
              item["cantidad"],item["precio_unit"],item.get("unidad")))
+        _sync_requerimiento_desde_compra(oci_id)
         if item.get("solicitud_id"):
             execute("UPDATE solicitudes_compra SET estado='OC Emitida' WHERE id=?", (item["solicitud_id"],))
             sc = query("SELECT material_id FROM solicitudes_compra WHERE id=?", (item["solicitud_id"],), one=True)
             if sc and sc["material_id"]:
                 auto_generar_sc_bajo_stock(sc["material_id"], f"OC {numero} emitida para SC")
-        # ── Al EMITIR la OC se crea de una todo el Lote de ese ítem, en estado
-        # "Ingresado" (pendiente de aprobación de Calidad). El stock de
-        # materiales NO se toca acá: se suma recién cuando Calidad aprueba el
-        # lote vía update_lote(). Así el lote entrante queda visible/planificable
-        # desde el momento en que se emite la orden, sin esperar la recepción
-        # física de la mercadería.
+        # ── Al EMITIR la OC se crea de una el Lote de ese ítem (en 0), en
+        # estado "Ingresado", ya vinculado al ítem. El lote NO arranca con la
+        # cantidad pedida: solo va a reflejar lo que efectivamente vaya
+        # llegando (ver recibir_oc), para no dar por planificable algo que
+        # todavía no entró físicamente a planta.
         if item.get("material_id"):
             mat_cat = query("SELECT categoria FROM materiales WHERE id=?", (item["material_id"],), one=True)
             if mat_cat and mat_cat["categoria"] in ("Material", "Producto terminado"):
-                qty = float(item["cantidad"])
                 numero_lote = _gen_lote_numero()
                 lote_id = execute("""INSERT INTO lotes
                     (numero,material_id,cantidad_original,cantidad_disponible,cantidad_activa,
                      proveedor_id,referencia_proveedor,estado,creado_por)
                     VALUES (?,?,?,?,?,?,?,?,?)""",
-                    (numero_lote, item["material_id"], qty, qty, 0,
+                    (numero_lote, item["material_id"], 0, 0, 0,
                      d["proveedor_id"], f"OC {numero}", "Ingresado", session["user_id"]))
-                execute("""INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id)
-                    VALUES (?,?,?,?,?,?)""",
-                    (item["material_id"], lote_id, "ingreso", qty,
-                     f"OC {numero} emitida — Lote {numero_lote} (pendiente de aprobación de Calidad, no computa a stock)",
-                     session["user_id"]))
                 lotes_creados.append(numero_lote)
                 execute("UPDATE ordenes_compra_items SET lote_id=? WHERE oc_id=? AND material_id=? AND lote_id IS NULL",
                     (lote_id, lid, item["material_id"]))
     return jsonify({"ok":True,"id":lid,"numero":numero,"estado":estado,"total":total,"lotes":lotes_creados}), 201
+
+def _gen_recepcion_numero():
+    """Genera número de recepción correlativo por año: REC-2026-0001"""
+    from datetime import datetime
+    year = datetime.now().year
+    last = query(
+        "SELECT numero FROM recepciones WHERE numero LIKE ? ORDER BY id DESC LIMIT 1",
+        (f"REC-{year}-%",), one=True)
+    if last:
+        try: n = int(last["numero"].split("-")[2]) + 1
+        except: n = 1
+    else:
+        n = 1
+    return f"REC-{year}-{n:04d}"
+
+@app.route("/api/recepciones", methods=["GET"])
+@login_required()
+def get_recepciones():
+    """Todo lo que ENTRA por Recepción directa, OC (Compras) y OTT
+    (retorno de terceros) — las salidas de stock no se listan acá."""
+    result = []
+
+    directas = query("""SELECT r.*, m.codigo AS mat_codigo, m.descripcion AS mat_descripcion,
+        m.unidad AS mat_unidad, m.categoria AS mat_categoria,
+        p.razon AS proveedor_nombre, l.numero AS lote_numero, l.estado AS lote_estado,
+        u.username AS usuario
+        FROM recepciones r
+        JOIN materiales m ON m.id=r.material_id
+        LEFT JOIN proveedores p ON p.id=r.proveedor_id
+        LEFT JOIN lotes l ON l.id=r.lote_id
+        LEFT JOIN usuarios u ON u.id=r.creado_por
+        ORDER BY r.id DESC""")
+    for r in directas:
+        d = dict(r)
+        d["origen"] = "Directa"
+        result.append(d)
+
+    # ── OC (Compras): movimientos generados al Recibir una Orden de Compra
+    # (ver recibir_oc). No hay tabla propia para esto — se identifica por el
+    # prefijo fijo de referencia que usa ese endpoint. ──────────────────────
+    oc_movs = query("""SELECT mv.id,mv.fecha,mv.cantidad,mv.referencia,mv.lote_id,
+        m.codigo AS mat_codigo, m.descripcion AS mat_descripcion, m.unidad AS mat_unidad,
+        m.categoria AS mat_categoria, l.numero AS lote_numero, l.estado AS lote_estado,
+        u.username AS usuario
+        FROM movimientos mv
+        JOIN materiales m ON m.id=mv.material_id
+        LEFT JOIN lotes l ON l.id=mv.lote_id
+        LEFT JOIN usuarios u ON u.id=mv.usuario_id
+        WHERE mv.tipo IN ('recepcion','entrada') AND mv.referencia LIKE 'Recep. %'
+        ORDER BY mv.id DESC""")
+    for mv in oc_movs:
+        d = dict(mv)
+        oc_numero = d["referencia"][len("Recep. "):].strip()
+        oc = query("""SELECT oc.numero,pv.razon AS proveedor_nombre
+            FROM ordenes_compra oc LEFT JOIN proveedores pv ON pv.id=oc.proveedor_id
+            WHERE oc.numero=?""", (oc_numero,), one=True)
+        d["numero"] = oc_numero
+        d["proveedor_nombre"] = oc["proveedor_nombre"] if oc else None
+        d["remito"] = None
+        d["precio_unit"] = None
+        d["origen"] = "OC"
+        result.append(d)
+
+    # ── OTT (Terceros): retornos de operaciones intermedias con lote (ver
+    # ott_registrar_retorno). El retorno del ÚLTIMO nivel (PT → cliente) no
+    # genera lote/movimiento — se ve reflejado directo en la OT, no acá. ────
+    ott_movs = query("""SELECT mv.id,mv.fecha,mv.cantidad,mv.referencia,mv.lote_id,
+        m.codigo AS mat_codigo, m.descripcion AS mat_descripcion, m.unidad AS mat_unidad,
+        m.categoria AS mat_categoria, l.numero AS lote_numero, l.estado AS lote_estado,
+        u.username AS usuario
+        FROM movimientos mv
+        JOIN materiales m ON m.id=mv.material_id
+        LEFT JOIN lotes l ON l.id=mv.lote_id
+        LEFT JOIN usuarios u ON u.id=mv.usuario_id
+        WHERE mv.tipo='ingreso' AND mv.referencia LIKE 'Retorno OTT %'
+        ORDER BY mv.id DESC""")
+    for mv in ott_movs:
+        d = dict(mv)
+        ott_numero = d["referencia"][len("Retorno OTT "):].split(" (")[0].strip()
+        ott = query("""SELECT ott.numero,pv.razon AS proveedor_nombre
+            FROM ordenes_tercerizado ott LEFT JOIN proveedores pv ON pv.id=ott.proveedor_id
+            WHERE ott.numero=?""", (ott_numero,), one=True)
+        d["numero"] = ott_numero
+        d["proveedor_nombre"] = ott["proveedor_nombre"] if ott else None
+        d["remito"] = None
+        d["precio_unit"] = None
+        d["origen"] = "OTT"
+        result.append(d)
+
+    result.sort(key=lambda x: x.get("fecha") or "", reverse=True)
+    return jsonify(result)
+
+@app.route("/api/recepciones", methods=["POST"])
+@login_required(roles=["admin","almacen"])
+def create_recepcion():
+    """Registra el ingreso físico de material/insumo a planta, independiente
+    de cualquier Orden de Compra. Reutiliza la misma lógica de lotes/stock
+    que antes solo se disparaba al recibir una OC (ver recibir_oc):
+    Material/Producto terminado generan (o hacen crecer) un lote pendiente
+    de aprobación de Calidad; el resto de categorías suma directo a stock."""
+    d = request.json
+    if not d.get("material_id"): return jsonify({"error":"Material requerido"}), 400
+    try:
+        qty = float(d.get("cantidad", 0))
+    except (TypeError, ValueError):
+        return jsonify({"error":"Cantidad inválida"}), 400
+    if qty <= 0: return jsonify({"error":"La cantidad debe ser mayor a 0"}), 400
+    mat = query("SELECT * FROM materiales WHERE id=?", (d["material_id"],), one=True)
+    if not mat: return jsonify({"error":"Material no encontrado"}), 404
+    precio_unit = d.get("precio_unit")
+    try: precio_unit = float(precio_unit) if precio_unit not in (None,"") else None
+    except (TypeError, ValueError): precio_unit = None
+    numero = _gen_recepcion_numero()
+    lote_id = None
+    if mat["categoria"] in ("Material", "Producto terminado"):
+        numero_lote = _gen_lote_numero()
+        lote_id = execute("""INSERT INTO lotes
+            (numero,material_id,cantidad_original,cantidad_disponible,cantidad_activa,
+             proveedor_id,referencia_proveedor,estado,obs,creado_por)
+            VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (numero_lote, mat["id"], qty, qty, 0,
+             d.get("proveedor_id"), d.get("remito"), "Ingresado", d.get("obs"), session["user_id"]))
+        execute("""INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id)
+            VALUES (?,?,?,?,?,?)""",
+            (mat["id"], lote_id, "recepcion", qty, f"Recepción {numero}", session["user_id"]))
+    else:
+        execute("UPDATE materiales SET stock=stock+?,actualizado=datetime('now','localtime') WHERE id=?", (qty, mat["id"]))
+        execute("""INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id)
+            VALUES (?,?,?,?,?,?)""",
+            (mat["id"], None, "entrada", qty, f"Recepción {numero}", session["user_id"]))
+    rid = execute("""INSERT INTO recepciones
+        (numero,material_id,cantidad,proveedor_id,remito,precio_unit,lote_id,obs,creado_por)
+        VALUES (?,?,?,?,?,?,?,?,?)""",
+        (numero, mat["id"], qty, d.get("proveedor_id"), d.get("remito"), precio_unit,
+         lote_id, d.get("obs"), session["user_id"]))
+    if precio_unit is not None and precio_unit > 0 and d.get("proveedor_id"):
+        execute("""INSERT OR REPLACE INTO proveedor_materiales (proveedor_id,material_id,precio_unit,plazo_dias,es_principal)
+            VALUES (?,?,?,COALESCE((SELECT plazo_dias FROM proveedor_materiales WHERE proveedor_id=? AND material_id=?),3),
+            COALESCE((SELECT es_principal FROM proveedor_materiales WHERE proveedor_id=? AND material_id=?),0))""",
+            (d["proveedor_id"], mat["id"], precio_unit, d["proveedor_id"], mat["id"], d["proveedor_id"], mat["id"]))
+    return jsonify({"ok":True,"id":rid,"numero":numero,"lote":lote_id}), 201
 
 @app.route("/api/ordenes_compra/<int:ocid>/aprobar", methods=["POST"])
 @login_required(roles=["admin","vendedor"])
@@ -8141,35 +10097,35 @@ def recibir_oc(ocid):
             mat_cat = query("SELECT categoria FROM materiales WHERE id=?", (item["material_id"],), one=True)
             oc = query("SELECT numero FROM ordenes_compra WHERE id=?", (ocid,), one=True)
             if mat_cat and mat_cat["categoria"] in ("Material", "Producto terminado"):
-                # Categorías "Material" y "Producto terminado": el Lote ya fue
-                # creado al EMITIR la OC (ver create_oc), con todo su stock en
-                # "Ingresado" pendiente de aprobación de Calidad, dimensionado
-                # según la cantidad PEDIDA. Si lo efectivamente recibido supera
-                # lo pedido (recepción de más), ampliamos el lote con el
-                # excedente para que Calidad pueda evaluar también esa
-                # diferencia; si se recibe de menos, el lote ya venía
-                # dimensionado de más y queda ese sobrante pendiente de
-                # análisis en Calidad (no se resta solo, para no perder
-                # trazabilidad de una eventual entrega posterior del saldo).
-                recibido_previo = float(item["cantidad_recibida"] or 0)
-                recibido_total = recibido_previo + qty
-                pedido = float(item["cantidad"])
-                exceso_previo = max(0.0, recibido_previo - pedido)
-                exceso_nuevo = max(0.0, recibido_total - pedido)
-                delta_exceso = exceso_nuevo - exceso_previo
-                if delta_exceso > 0.0001:
-                    lote = query("""SELECT id,cantidad_original,cantidad_disponible FROM lotes
-                        WHERE material_id=? AND referencia_proveedor=? ORDER BY id DESC LIMIT 1""",
-                        (item["material_id"], f"OC {oc['numero']}"), one=True)
-                    if lote:
-                        execute("""UPDATE lotes SET cantidad_original=cantidad_original+?,
-                            cantidad_disponible=cantidad_disponible+? WHERE id=?""",
-                            (delta_exceso, delta_exceso, lote["id"]))
-                        execute("""INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id)
-                            VALUES (?,?,?,?,?,?)""",
-                            (item["material_id"], lote["id"], "ajuste", delta_exceso,
-                             f"Recepción de OC {oc['numero']} superó lo pedido — ampliación de lote {delta_exceso:.2f}",
-                             session["user_id"]))
+                # ── El Lote de este ítem se creó al EMITIR la OC (ver
+                # create_oc), en 0. Acá va creciendo con lo que efectivamente
+                # se recibe en cada entrega — sea igual, menor o mayor a lo
+                # pedido — para que siempre refleje la mercadería real que
+                # entró a planta, pendiente de aprobación de Calidad. Si más
+                # adelante llega el saldo faltante, el lote vuelve a crecer
+                # con esa entrega tardía. ──────────────────────────────────
+                # Primero se separa la porción de esta recepción que en
+                # realidad es el REINGRESO de un reemplazo por piezas
+                # rechazadas y devueltas al proveedor (ver
+                # oc_devolver_rechazo): esa porción no crea crecimiento nuevo
+                # del lote, vuelve al mismo lote como cantidad_disponible
+                # directamente (ver bloque siguiente). El resto de la
+                # recepción sí hace crecer el lote.
+                devuelto = float(item["cantidad_rechazada_devuelta"] or 0)
+                reingresado_previo = float(item["cantidad_rechazada_reingresada"] or 0)
+                pendiente_reingreso = max(0.0, devuelto - reingresado_previo)
+                a_reingresar = min(qty, pendiente_reingreso)
+                crecimiento = qty - a_reingresar
+                if crecimiento > 0.0001 and item["lote_id"]:
+                    execute("""UPDATE lotes SET cantidad_original=cantidad_original+?,
+                        cantidad_disponible=cantidad_disponible+? WHERE id=?""",
+                        (crecimiento, crecimiento, item["lote_id"]))
+                    execute("""INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id)
+                        VALUES (?,?,?,?,?,?)""",
+                        (item["material_id"], item["lote_id"], "ajuste", crecimiento,
+                         f"Recepción de OC {oc['numero']} — lote actualizado a lo efectivamente recibido "
+                         f"(+{crecimiento:.2f}, pendiente de aprobación de Calidad)",
+                         session["user_id"]))
                 # ── Reingreso de piezas devueltas por rechazo: si este ítem
                 # tuvo alguna devolución a proveedor (ver oc_devolver_rechazo),
                 # lo que ahora llega como reemplazo NO forma un lote nuevo:
@@ -8179,10 +10135,6 @@ def recibir_oc(ocid):
                 # reingresa como máximo lo que efectivamente se devolvió y aún
                 # no fue repuesto (cantidad_rechazada_devuelta menos lo ya
                 # reingresado en entregas anteriores del reemplazo). ──────────
-                devuelto = float(item["cantidad_rechazada_devuelta"] or 0)
-                reingresado_previo = float(item["cantidad_rechazada_reingresada"] or 0)
-                pendiente_reingreso = max(0.0, devuelto - reingresado_previo)
-                a_reingresar = min(qty, pendiente_reingreso)
                 if a_reingresar > 0.0001 and item["lote_id"]:
                     execute("""UPDATE lotes SET cantidad_disponible=cantidad_disponible+?,
                         estado=CASE WHEN estado IN ('Aprobado','Rechazado') THEN 'Ingresado' ELSE estado END
@@ -8206,6 +10158,7 @@ def recibir_oc(ocid):
                 (item["material_id"], None,
                  "entrada" if not (mat_cat and mat_cat["categoria"] in ("Material","Producto terminado")) else "recepcion",
                  qty, f"Recep. {oc['numero']}", session["user_id"]))
+        _sync_requerimiento_desde_compra(item["id"])
     items = query("SELECT cantidad,cantidad_recibida,precio_unit FROM ordenes_compra_items WHERE oc_id=?", (ocid,))
     total_ord = sum(i["cantidad"] for i in items)
     total_rec = sum(i["cantidad_recibida"] for i in items)
@@ -8318,6 +10271,30 @@ def oc_devolver_rechazo(ocid):
 
     return jsonify({"ok": True, "cantidad_devuelta": round(total_devuelto, 6), "remito_numero": num_rem,
         "remito_id": rid, "estado": nuevo_estado})
+
+@app.route("/api/ordenes_compra/<int:ocid>/cerrar", methods=["POST"])
+@login_required(roles=["admin","almacen","vendedor"])
+def cerrar_oc(ocid):
+    """Cierre manual de una OC cuando el saldo pendiente (lo que se pidió
+    menos lo efectivamente recibido) NO va a llegar más — el proveedor no
+    entrega el resto y no tiene sentido seguir esperándolo. Congela la OC en
+    'Cerrada' para que deje de listarse como pendiente de recepción (ver
+    filtros de MRP/SC), pero NO toca lo ya recibido ni los lotes: el lote
+    generado por esta OC queda tal cual con lo que efectivamente ingresó.
+
+    Si más adelante el proveedor manda ese saldo igual (entrega tardía), la
+    OC se puede volver a recibir con normalidad: recibir_oc() recalcula el
+    estado en base a cantidad_recibida vs cantidad pedida al final de cada
+    recepción, así que una nueva recepción saca a la OC de 'Cerrada' sola
+    (vuelve a 'Recibida parcial' o 'Recibida' según corresponda) y el lote
+    vuelve a crecer con lo que llegue.
+    """
+    oc = query("SELECT * FROM ordenes_compra WHERE id=?", (ocid,), one=True)
+    if not oc: return jsonify({"error":"OC no encontrada"}), 404
+    if oc["estado"] not in ("Aprobada","Enviada","Recibida parcial"):
+        return jsonify({"error": f"No se puede cerrar una OC en estado \"{oc['estado']}\""}), 400
+    execute("UPDATE ordenes_compra SET estado='Cerrada' WHERE id=?", (ocid,))
+    return jsonify({"ok":True,"estado":"Cerrada"})
 
 @app.route("/api/ordenes_compra/<int:ocid>", methods=["PUT"])
 @login_required(roles=["admin","almacen","vendedor"])
@@ -8584,6 +10561,8 @@ def create_remito():
             (qty, lote["material_id"]))
         execute("INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id) VALUES (?,?,?,?,?,?)",
             (lote["material_id"], lote["id"], "salida", qty, f"Remito {numero}", session["user_id"]))
+        if item.get("orden_cliente_item_id"):
+            _sync_requerimiento_desde_pedido(item["orden_cliente_item_id"])
     if items_insertados == 0:
         # Ningún ítem pudo aplicarse (stock insuficiente en todos): abortar remito
         execute("DELETE FROM remitos WHERE id=?", (rid,))
@@ -8915,7 +10894,7 @@ def _build_ot_pdf(oid):
             P("Operación", size=8, bold=True, color=WHITE),
             P("Sector / Máquina", size=8, bold=True, color=WHITE),
             P("Setup (min)", size=8, bold=True, color=WHITE, align=TA_CENTER),
-            P("Ciclo (min)", size=8, bold=True, color=WHITE, align=TA_CENTER),
+            P("Ciclo (seg)", size=8, bold=True, color=WHITE, align=TA_CENTER),
             P("Cant. req.", size=8, bold=True, color=WHITE, align=TA_CENTER),
             P("Ciclo x Cant.", size=8, bold=True, color=WHITE, align=TA_CENTER),
             P("Estado", size=8, bold=True, color=WHITE, align=TA_CENTER),
@@ -8937,14 +10916,16 @@ def _build_ot_pdf(oid):
                 if op["maquina_nombre"]:
                     sector += f'<br/><font size="7" color="#888888">{op["maquina_nombre"]}</font>'
 
-            ciclo_x_cant = float(op["tiempo_ciclo_min"] or 0) * float(op["qty_requerida"] or 0)
+            # El ciclo esta en segundos por pieza; la columna "Ciclo x Cant."
+            # se muestra en minutos, que es la escala util para el operario.
+            ciclo_x_cant = float(op["tiempo_ciclo_seg"] or 0) * float(op["qty_requerida"] or 0) / 60.0
 
             op_rows.append([
                 P(op["orden"], size=8, align=TA_CENTER),
                 Paragraph(op["nombre"], sty(size=8)),
                 Paragraph(sector, sty(size=8)),
                 P(op["tiempo_setup_min"] or 0, size=8, align=TA_CENTER),
-                P(op["tiempo_ciclo_min"] or 0, size=8, align=TA_CENTER),
+                P(op["tiempo_ciclo_seg"] or 0, size=8, align=TA_CENTER),
                 P(op["qty_requerida"] or 0, size=8, align=TA_CENTER),
                 Paragraph(f'<b>{fmt_min(ciclo_x_cant)}</b> min', sty(size=8, align=TA_CENTER)),
                 Paragraph(f'<font color="{est_c.hexval()}"><b>{op["estado"]}</b></font>',
@@ -10126,10 +12107,10 @@ def diagnostico_page():
         for op in proc_ops:
             execute("""INSERT INTO orden_operaciones
                 (orden_id,proceso_op_id,orden,nombre,categoria_maquina_id,maquina_id,
-                 tiempo_setup_min,tiempo_ciclo_min,estado,qty_requerida)
+                 tiempo_setup_min,tiempo_ciclo_seg,estado,qty_requerida)
                 VALUES (?,?,?,?,?,?,?,?,?,?)""",
                 (test_ot_id, op["id"], op["orden"], op["nombre"], op["categoria_maquina_id"],
-                 op["maquina_id"], op["tiempo_setup_min"], op["tiempo_ciclo_min"],
+                 op["maquina_id"], op["tiempo_setup_min"], op["tiempo_ciclo_seg"],
                  "Pendiente", ot6["cantidad"]))
         ok(f"Pobladas {len(proc_ops)} operaciones en OT-6")
 
@@ -10141,7 +12122,7 @@ def diagnostico_page():
             # Simulate declaring novedad on last op
             sep("4. Simulando novedad en última operación de OT-6")
             qty = float(last["qty_requerida"] or 1)
-            std = float(last["tiempo_ciclo_min"] or 1)
+            std = float(last["tiempo_ciclo_seg"] or 60) / 60.0   # seg -> min
             rendimiento = round((qty / qty) * 100, 1)
 
             last_n = query("SELECT numero FROM novedades_produccion ORDER BY id DESC LIMIT 1", one=True)
@@ -10265,9 +12246,56 @@ def rendimiento_operarios():
         ORDER BY avg_rend DESC""")
     return jsonify([dict(r) for r in rows])
 
+def _backfill_requerimientos_desde_ott():
+    """Corre en cada arranque: sincroniza cualquier OTT que todavía no tenga
+    su requerimiento_productivo espejo (OTT cargadas antes de este cambio,
+    o casos donde el sync en caliente falló). Es idempotente y rápido —
+    solo toca las OTT que faltan, no vuelve a tocar las que ya están."""
+    faltantes = query("""SELECT ott.id FROM ordenes_tercerizado ott
+        WHERE NOT EXISTS (SELECT 1 FROM requerimientos_productivos rp WHERE rp.numero=ott.numero)""")
+    if faltantes:
+        print(f"[requerimientos_productivos] Backfill: sincronizando {len(faltantes)} OTT existentes...")
+        for row in faltantes:
+            _sync_requerimiento_desde_ott(row["id"])
+        print("[requerimientos_productivos] Backfill completo.")
+
+def _backfill_requerimientos_desde_compras():
+    """Corre en cada arranque: sincroniza cualquier ítem de OC productivo
+    (material categoria='Material') que todavía no tenga su
+    requerimiento_productivo espejo (OC cargadas antes de este cambio, o
+    casos donde el sync en caliente falló). Idempotente — solo toca lo que
+    falta. _sync_requerimiento_desde_compra ya filtra internamente por
+    categoría, así que acá alcanza con pasarle todos los ítems sin espejo."""
+    faltantes = query("""SELECT oci.id FROM ordenes_compra_items oci
+        LEFT JOIN materiales m ON m.id=oci.material_id
+        WHERE m.categoria='Material'
+          AND NOT EXISTS (SELECT 1 FROM requerimientos_productivos rp WHERE rp.numero='OCP-ITEM-'||oci.id)""")
+    if faltantes:
+        print(f"[requerimientos_productivos] Backfill: sincronizando {len(faltantes)} ítems de OC existentes...")
+        for row in faltantes:
+            _sync_requerimiento_desde_compra(row["id"])
+        print("[requerimientos_productivos] Backfill completo (compras).")
+
+def _backfill_requerimientos_desde_pedidos():
+    """Corre en cada arranque: sincroniza cualquier ítem de pedido de cliente
+    (ordenes_cliente_items) que todavía no tenga su requerimiento_productivo
+    espejo (pedidos cargados antes de este cambio, o casos donde el sync en
+    caliente falló). Idempotente — solo toca lo que falta."""
+    faltantes = query("""SELECT oci.id FROM ordenes_cliente_items oci
+        WHERE NOT EXISTS (SELECT 1 FROM requerimientos_productivos rp WHERE rp.numero='OC-CLI-ITEM-'||oci.id)""")
+    if faltantes:
+        print(f"[requerimientos_productivos] Backfill: sincronizando {len(faltantes)} ítems de pedido existentes...")
+        for row in faltantes:
+            _sync_requerimiento_desde_pedido(row["id"])
+        print("[requerimientos_productivos] Backfill completo (pedidos de cliente).")
+
 if __name__ == "__main__":
     print("="*52+"\n   MetalERP v3.0 - Taller Metalurgico\n"+"="*52)
     init_db()
+    with app.app_context():
+        _backfill_requerimientos_desde_ott()
+        _backfill_requerimientos_desde_compras()
+        _backfill_requerimientos_desde_pedidos()
     ip = get_local_ip()
     
     # 1. Definimos el puerto en una variable única

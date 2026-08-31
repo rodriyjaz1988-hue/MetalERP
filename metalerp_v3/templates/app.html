@@ -171,6 +171,7 @@
     <div class="sl">Principal</div>
     <div class="ni" data-p="dash_operativo"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg><span>Producción / Calidad</span></div>
     <div class="ni" data-p="dash_economico"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 12L5 7l3 3 3-6 3 3"/><circle cx="2" cy="12" r="1.5" fill="currentColor"/><circle cx="5" cy="7" r="1.5" fill="currentColor"/><circle cx="8" cy="10" r="1.5" fill="currentColor"/><circle cx="11" cy="4" r="1.5" fill="currentColor"/><circle cx="14" cy="7" r="1.5" fill="currentColor"/></svg><span>Económico / Financiero</span></div>
+    <div class="ni" data-p="dash_requerimientos"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 12L5 7l3 3 3-6 3 3"/><rect x="2" y="2" width="12" height="12" rx="1.5"/></svg><span>Dashboard Requerimientos</span></div>
 
     <div class="sl">Producción</div>
     <div class="ni" data-p="ordenes"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="1" width="12" height="14" rx="1"/><line x1="5" y1="5" x2="11" y2="5"/><line x1="5" y1="8" x2="11" y2="8"/><line x1="5" y1="11" x2="8" y2="11"/></svg><span>Órdenes de trabajo</span></div>
@@ -200,6 +201,8 @@
 
     <div class="sl">Compras</div>
     <div class="ni" data-p="solicitudes"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 2h12v12H2z"/><path d="M5 5h6M5 8h6M5 11h4"/></svg><span>Compras</span><span class="ni-badge" id="sc-badge" style="display:none">0</span></div>
+    <div class="ni" data-p="indicadores_compras"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 12L5 7l3 3 3-6 3 3"/><circle cx="2" cy="12" r="1.3" fill="currentColor"/><circle cx="5" cy="7" r="1.3" fill="currentColor"/><circle cx="8" cy="10" r="1.3" fill="currentColor"/><circle cx="11" cy="4" r="1.3" fill="currentColor"/><circle cx="14" cy="7" r="1.3" fill="currentColor"/></svg><span>Indicadores de compras</span></div>
+    <div class="ni" data-p="recepciones"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1v9M4.5 6.5L8 10l3.5-3.5"/><rect x="2" y="11" width="12" height="4" rx="1"/></svg><span>Recepción de material/insumo</span></div>
     <div class="ni" data-p="proveedores"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="5" r="3"/><path d="M2 14c0-3 2.7-5 6-5s6 2 6 5"/></svg><span>Proveedores</span></div>
 
     <div class="sl">Sistema</div>
@@ -454,8 +457,43 @@
       <div class="card"><div class="ch"><span class="ct">Carga de trabajo por sector</span></div><div id="mrp-carga-sector"><div class="ld">Cargando...</div></div></div>
     </div>
 
+    <div class="page" id="p-dash_requerimientos">
+      <div class="pt">Requerimientos productivos</div><div class="ps">Estado de pedidos a proveedores tercerizados y cumplimiento de entregas</div>
+      <div class="metrics" id="dreq-metrics"><div class="ld">Cargando...</div></div>
+      <div style="margin-bottom:12px">
+        <div class="card"><div class="ch"><span class="ct">Índice de calidad mensual</span></div><div id="dreq-chart-calidad"><div class="ld">Cargando...</div></div></div>
+      </div>
+      <div style="margin-bottom:12px">
+        <div class="card"><div class="ch"><span class="ct">Cumplimiento de entrega mensual</span></div><div id="dreq-chart-entrega"><div class="ld">Cargando...</div></div></div>
+      </div>
+      <div style="margin-bottom:12px">
+        <div class="card"><div class="ch"><span class="ct">Cantidad entregada vs. pedida — top 10 requerimientos</span></div><div id="dreq-chart-barras"><div class="ld">Cargando...</div></div></div>
+      </div>
+      <div style="margin-bottom:12px">
+        <div class="card"><div class="ch"><span class="ct">Performance por proveedor — fecha / cantidad / calidad</span></div><div id="dreq-chart-performance-prov" style="overflow-x:auto"><div class="ld">Cargando...</div></div></div>
+      </div>
+      <div class="tc">
+        <div>
+          <div class="card"><div class="ch"><span class="ct" style="cursor:pointer;text-decoration:underline dotted" onclick="irAReqFiltrado('VENCIDO')">Requerimientos vencidos ↗</span></div><div id="dreq-vencidos"></div></div>
+          <div class="card"><div class="ch"><span class="ct">Por proveedor (pendientes)</span></div><div id="dreq-proveedor"></div></div>
+        </div>
+        <div>
+          <div class="card"><div class="ch"><span class="ct" style="cursor:pointer;text-decoration:underline dotted" onclick="irAReqFiltrado('PROXIMO')">Próximos a vencer (7 días) ↗</span></div><div id="dreq-proximos"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="page" id="p-indicadores_compras">
+      <div class="pt">Indicadores de compras</div><div class="ps">Cumplimiento de entrega (CE), Índice de Calidad (IC) e Índice de Performance del Proveedor (IPP), por categoría y proveedor</div>
+      <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center">
+        <label style="font-size:13px">Año:</label>
+        <select id="ic-anio" onchange="loadIndicadoresCompras()" style="padding:4px 8px"></select>
+      </div>
+      <div id="ic-body"><div class="ld">Cargando...</div></div>
+    </div>
+
     <div class="page" id="p-requerimientos_productivos">
-      <div class="pt">Requerimientos productivos</div><div class="ps">Pedidos de materiales / procesos a proveedores tercerizados y seguimiento de entregas</div>
+      <div class="pt">Requerimientos productivos</div><div class="ps">Pedidos de materiales / procesos a proveedores tercerizados y seguimiento de entregas — se generan y actualizan solos a partir de las OTT</div>
       <div class="card"><div class="ch">
         <div style="display:flex;align-items:center;gap:11px;flex-wrap:wrap">
           <div class="tabs" id="req-tabs">
@@ -467,7 +505,8 @@
           </div>
           <input type="text" id="req-buscar" placeholder="🔍 Buscar por número, código, cliente..." oninput="renderReq()" style="font-size:12px;padding:5px 9px;border:1px solid var(--color-border-secondary);border-radius:6px;min-width:220px">
         </div>
-        <button class="btn btn-p" id="b-req" style="display:none" onclick="openReqModal()">+ Nuevo requerimiento</button>
+        <div style="display:flex;gap:8px">
+        </div>
       </div><div id="req-list"><div class="ld">Cargando...</div></div></div>
     </div>
 
@@ -516,7 +555,7 @@
       <div class="pt">Inventario</div><div class="ps">Stock de materiales, herramientas e insumos</div>
       <div class="card">
         <div class="ch">
-          <div class="tabs" id="inv-tabs"><div class="tab active" data-c="">Todos</div><div class="tab" data-c="Material">Materiales</div><div class="tab" data-c="Insumo">Insumos</div><div class="tab" data-c="Herramienta">Herramientas</div><div class="tab" data-c="PT">Productos terminados</div></div>
+          <div class="tabs" id="inv-tabs"><div class="tab active" data-c="">Todos</div><div class="tab" data-c="Material">Materiales</div><div class="tab" data-c="Semielaborado">Semielaborados</div><div class="tab" data-c="Insumo">Insumos</div><div class="tab" data-c="Herramienta">Herramientas</div><div class="tab" data-c="PT">Productos terminados</div></div>
           <div style="display:flex;gap:8px;align-items:center">
             <input type="text" id="inv-search" class="sel-fil" placeholder="🔍 Buscar por código o descripción..." autocomplete="off" style="min-width:260px" oninput="filtrarInv()">
             <button class="btn" id="inv-sort-btn" onclick="toggleInvSort()">Stock ⇅</button>
@@ -535,9 +574,14 @@
         <div class="ch">
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <label style="font-size:12px;color:var(--color-text-secondary)">Artículo:</label>
-            <select id="mov-mat-fil" class="sel-fil" style="min-width:220px" onchange="loadMovimientos()">
-              <option value="">— Todos los artículos —</option>
-            </select>
+            <div style="position:relative">
+              <input type="text" id="mov-mat-fil-txt" class="sel-fil" placeholder="🔍 Código o descripción..." autocomplete="off" style="min-width:220px"
+                oninput="filtrarMovMatFil()"
+                onfocus="if($('mov-mat-fil-txt').value)filtrarMovMatFil()"
+                onblur="setTimeout(function(){$('mov-mat-fil-drop').style.display='none';},150)">
+              <input type="hidden" id="mov-mat-fil" value="">
+              <div id="mov-mat-fil-drop" style="display:none;position:absolute;z-index:50;top:100%;left:0;right:0;background:var(--color-background-primary);border:1px solid var(--color-border-tertiary);max-height:220px;overflow:auto;box-shadow:0 4px 10px rgba(0,0,0,.15)"></div>
+            </div>
             <select id="mov-tipo-fil" class="sel-fil" onchange="loadMovimientos()">
               <option value="">Todos los tipos</option>
               <option value="entrada">Entradas</option>
@@ -587,9 +631,32 @@
       </div>
     </div>
 
+    <div class="page" id="p-recepciones">
+      <div class="pt">Recepción de material/insumo</div>
+      <div class="ps">Todo lo que entra a planta se aprueba desde acá — recepción directa, Compras (OC) y Terceros (OTT) — sin incluir salidas</div>
+
+      <div class="card">
+        <div class="ch"><span class="ct">Pendientes de recibir — Compras (OC)</span></div>
+        <div id="rec-oc-pend-list"><div class="ld">Cargando...</div></div>
+      </div>
+
+      <div class="card">
+        <div class="ch"><span class="ct">Pendientes de retorno — Terceros (OTT)</span></div>
+        <div id="rec-ott-pend-list"><div class="ld">Cargando...</div></div>
+      </div>
+
+      <div class="card">
+        <div class="ch">
+          <span class="ct">Historial de recepciones</span>
+          <button class="btn btn-p" id="b-recepcion" style="display:none" onclick="openRecepcion()">+ Nueva recepción</button>
+        </div>
+        <div id="recepciones-list"><div class="ld">Cargando...</div></div>
+      </div>
+    </div>
+
     <div class="page" id="p-proveedores">
       <div class="pt">Proveedores</div><div class="ps">Registro, calificación y vinculación con materiales</div>
-      <div class="card"><div class="ch"><span class="ct">Proveedores registrados</span><input type="text" id="prov-search" placeholder="🔍 Buscar por razón social, contacto o teléfono..." oninput="loadProv()" style="margin-left:auto;margin-right:8px;padding:7px 12px;font-size:13px;border:1.5px solid #c7c7c0;border-radius:7px;outline:none;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.08);min-width:260px;transition:border-color .15s,box-shadow .15s" onfocus="this.style.borderColor='var(--color-accent)';this.style.boxShadow='0 0 0 3px rgba(0,0,0,0.06)'" onblur="this.style.borderColor='#c7c7c0';this.style.boxShadow='0 1px 3px rgba(0,0,0,.08)'"><button class="btn btn-p" id="b-prov" style="display:none" onclick="openMo('mo-prov')">+ Agregar</button></div><div id="prov-list"><div class="ld">Cargando...</div></div></div>
+      <div class="card"><div class="ch"><span class="ct">Proveedores registrados</span><input type="text" id="prov-search" placeholder="🔍 Buscar por razón social, contacto o teléfono..." oninput="loadProv()" style="margin-left:auto;margin-right:8px;padding:7px 12px;font-size:13px;border:1.5px solid #c7c7c0;border-radius:7px;outline:none;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.08);min-width:260px;transition:border-color .15s,box-shadow .15s" onfocus="this.style.borderColor='var(--color-accent)';this.style.boxShadow='0 0 0 3px rgba(0,0,0,0.06)'" onblur="this.style.borderColor='#c7c7c0';this.style.boxShadow='0 1px 3px rgba(0,0,0,.08)'"><button class="btn btn-p" id="b-prov" style="display:none" onclick="nuevoProv()">+ Agregar</button></div><div id="prov-list"><div class="ld">Cargando...</div></div></div>
     </div>
 
     <div class="page" id="p-remitir">
@@ -765,6 +832,20 @@
           <div id="cfg-cat-prod"><div class="ld">Cargando...</div></div>
         </div>
 
+      </div>
+
+      <div style="max-width:440px;margin-top:12px">
+        <div class="card">
+          <div class="fg"><label>Valor mano de obra (por hora)</label>
+            <input type="number" id="cfg-valor-hora-mo" placeholder="0" min="0" step="0.01"></div>
+          <div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:8px">
+            Valor guardado actualmente: <strong id="cfg-valor-hora-mo-actual">—</strong>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center">
+            <button class="btn btn-p" onclick="saveValorHoraMO()">Guardar mano de obra</button>
+            <span id="cfg-mo-msg" style="font-size:12px;color:var(--color-text-secondary)"></span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1039,7 +1120,7 @@
     <div class="fg"><label>Categoría de máquina</label><select id="op-catm"></select></div>
     <div class="fg"><label>Máquina específica</label><select id="op-maq"></select></div>
     <div class="fg"><label>Tiempo setup (min)</label><input type="number" id="op-set" value="0" min="0" step="0.5"></div>
-    <div class="fg"><label>Tiempo ciclo (seg)</label><input type="number" id="op-cic" value="0" min="0" step="1"></div>
+    <div class="fg"><label>Tiempo ciclo (seg)</label><input type="number" id="op-cic" value="0" min="0" step="0.1" placeholder="seg"></div>
     <div class="fg s2"><label>Observaciones</label><textarea id="op-obs" style="min-height:45px"></textarea></div>
     <div class="fg s2" style="display:flex;align-items:center;gap:8px;padding-top:14px">
       <input type="checkbox" id="op-terc" onchange="toggleTercOp('op')" style="width:15px;height:15px">
@@ -1048,13 +1129,19 @@
   </div>
   <div id="op-campos-terc" style="display:none;margin-top:8px;padding:8px;border:1px solid var(--color-border-tertiary);border-radius:6px">
     <div class="fg2">
-      <div class="fg"><label>Proveedor</label><select id="op-prv"></select></div>
+      <div class="fg" style="position:relative"><label>Proveedor</label>
+        <input type="text" id="op-prv-search" placeholder="🔍 Buscar proveedor..." autocomplete="off"
+          oninput="filtrarProvOp('op')" onfocus="filtrarProvOp('op')"
+          onblur="setTimeout(function(){var c=$('op-prv-results');if(c)c.style.display='none';},150)">
+        <input type="hidden" id="op-prv">
+        <div id="op-prv-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:7px;margin-top:3px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.14);z-index:20"></div>
+      </div>
       <div class="fg"><label>Precio acordado ($) <span style="font-size:10px;color:var(--color-text-secondary)">por unidad</span></label><input type="number" id="op-prec" min="0" step="0.01" placeholder="0.00"></div>
       <div class="fg"><label>Plazo de entrega (días)</label><input type="number" id="op-tdays" value="1" min="1"></div>
     </div>
   </div>
-  <div id="op-campos-propios" style="margin-top:12px;padding-top:11px;border-top:1px solid #f0f0ec">
-    <div style="font-size:12px;font-weight:600;color:#555;margin-bottom:8px">Materias primas / insumos</div>
+  <div id="op-mats-section" style="margin-top:12px;padding-top:11px;border-top:1px solid #f0f0ec">
+    <div style="font-size:12px;font-weight:600;color:#555;margin-bottom:8px">Material/Producto como insumo</div>
     <div id="op-mats"></div>
     <button class="btn btn-s" onclick="abrirBuscadorMaterial('op')" style="margin-top:6px">+ Buscar material</button>
     <div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--color-border-tertiary)">
@@ -1086,11 +1173,17 @@
     <div class="fg"><label>Categoría de máquina</label><select id="ope-catm"></select></div>
     <div class="fg"><label>Máquina específica</label><select id="ope-maq"></select></div>
     <div class="fg"><label>Tiempo setup (min)</label><input type="number" id="ope-set" min="0" step="0.5" placeholder="min"></div>
-    <div class="fg"><label>Tiempo ciclo (seg)</label><input type="number" id="ope-cic" min="0" step="1" placeholder="seg"></div>
+    <div class="fg"><label>Tiempo ciclo (seg)</label><input type="number" id="ope-cic" min="0" step="0.1" placeholder="seg"></div>
   </div>
   <div id="ope-campos-terc" class="fg2" style="display:none">
-    <div class="fg"><label>Proveedor <span class="req">*</span></label><select id="ope-prv"></select></div>
-    <div class="fg"><label>Precio unitario ($)</label><input type="number" id="ope-precio" value="0" min="0" step="0.01"></div>
+    <div class="fg" style="position:relative"><label>Proveedor <span class="req">*</span></label>
+      <input type="text" id="ope-prv-search" placeholder="🔍 Buscar proveedor..." autocomplete="off"
+        oninput="filtrarProvOp('ope')" onfocus="filtrarProvOp('ope')"
+        onblur="setTimeout(function(){var c=$('ope-prv-results');if(c)c.style.display='none';},150)">
+      <input type="hidden" id="ope-prv">
+      <div id="ope-prv-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:7px;margin-top:3px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.14);z-index:20"></div>
+    </div>
+    <div class="fg"><label>Precio unitario (Estandar)</label><input type="number" id="ope-precio" value="0" min="0" step="0.01"></div>
     <div class="fg"><label>Tiempo mínimo (días)</label><input type="number" id="ope-tdays" value="1" min="1"></div>
   </div>
   <div class="fg2" style="margin-top:4px">
@@ -1107,7 +1200,7 @@
     </div>
   </div>
   <div id="ope-mats-section" style="margin-top:12px;padding-top:11px;border-top:1px solid var(--color-border-tertiary)">
-    <div style="font-size:12px;font-weight:600;color:var(--color-text-secondary);margin-bottom:6px">Materias primas / insumos</div>
+    <div style="font-size:12px;font-weight:600;color:var(--color-text-secondary);margin-bottom:6px">Material/Producto como insumo</div>
     <div id="ope-mats"></div>
     <button class="btn btn-s" onclick="abrirBuscadorMaterial('ope')" style="margin-top:6px">+ Buscar material</button>
     <div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--color-border-tertiary)">
@@ -1237,11 +1330,17 @@
 
 
 <!-- VINCULAR MATERIAL A PROVEEDOR -->
-<div class="ov" id="mo-prov-mat"><div class="mo" style="width:390px">
+<div class="ov" id="mo-prov-mat"><div class="mo" style="width:440px">
   <div class="mh">Vincular material al proveedor <span class="mx" onclick="closeMo('mo-prov-mat')">×</span></div>
   <input type="hidden" id="lm-pid">
   <div class="fg2 f1">
-    <div class="fg"><label>Material <span class="req">*</span></label><select id="lm-mat"></select></div>
+    <div class="fg s2" id="lm-mat-row" style="position:relative"><label>Material <span class="req">*</span></label>
+      <input type="text" id="lm-mat-search" placeholder="Buscar por código o descripción..." autocomplete="off"
+        oninput="filtrarLMMat()" onfocus="filtrarLMMat()"
+        onblur="setTimeout(function(){var c=$('lm-mat-results');if(c)c.style.display='none';},150)">
+      <input type="hidden" id="lm-mat">
+      <div id="lm-mat-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:7px;margin-top:3px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.14);z-index:10"></div>
+    </div>
     <div class="fg"><label>Precio acordado ($)</label><input type="number" id="lm-pre" placeholder="0"></div>
     <div class="fg"><label>Plazo de entrega (días)</label><input type="number" id="lm-pla" value="3" min="1"></div>
     <div class="fg"><label>Rol</label><select id="lm-pri"><option value="1">Proveedor principal</option><option value="0">Proveedor alternativo</option></select></div>
@@ -1256,12 +1355,6 @@
   <div class="ma"><button class="btn" onclick="closeMo('mo-historial-compra')">Cerrar</button></div>
 </div></div>
 
-<!-- PRODUCTOS DEL CLIENTE -->
-<div class="ov" id="mo-cli-prod"><div class="mo" style="width:700px">
-  <div class="mh"><span id="cli-prod-titulo">Productos del cliente</span> <span class="mx" onclick="closeMo('mo-cli-prod')">×</span></div>
-  <div id="cli-prod-body" style="max-height:70vh;overflow-y:auto"></div>
-  <div class="ma"><button class="btn" onclick="closeMo('mo-cli-prod')">Cerrar</button></div>
-</div></div>
 
 <!-- VINCULAR PRODUCTO A CLIENTE -->
 <div class="ov" id="mo-prod-cli"><div class="mo" style="width:420px">
@@ -1281,7 +1374,8 @@
 
 <!-- PROVEEDOR -->
 <div class="ov" id="mo-prov"><div class="mo">
-  <div class="mh">Proveedor <span class="mx" onclick="closeMo('mo-prov')">×</span></div>
+  <div class="mh"><span id="prov-mh-title">Proveedor</span> <span class="mx" onclick="closeMo('mo-prov')">×</span></div>
+  <input type="hidden" id="prov-id">
   <div class="fg2">
     <div class="fg s2"><label>Razón social <span class="req">*</span></label><input id="prov-raz" placeholder="Ej: Acerinox SA"></div>
     <div class="fg"><label>CUIT</label><input id="prov-cui" placeholder="30-12345678-9"></div>
@@ -1291,6 +1385,13 @@
     <div class="fg"><label>Email</label><input type="email" id="prov-ema"></div>
     <div class="fg"><label>Plazo (días)</label><input type="number" id="prov-pla" value="3"></div>
     <div class="fg"><label>Calificación (1-5)</label><input type="number" id="prov-cal" value="5" min="1" max="5"></div>
+    <div class="fg"><label>Estado</label><select id="prov-est"><option value="Activo">Activo</option><option value="Inactivo">Inactivo</option></select></div>
+    <div class="fg"><label>Categoría de compra</label><select id="prov-catc">
+        <option value="">— Sin definir (heurístico automático) —</option>
+        <option value="TRATAMIENTO SUPERFICIAL">Tratamiento superficial</option>
+        <option value="MATERIA PRIMA">Materia prima</option>
+        <option value="PROCESO">Proceso</option>
+      </select></div>
     <div class="fg s2"><label>Observaciones</label><textarea id="prov-obs" style="min-height:45px"></textarea></div>
   </div>
   <div class="ma"><button class="btn" onclick="closeMo('mo-prov')">Cancelar</button><button class="btn btn-p" onclick="saveProv()">Guardar proveedor</button></div>
@@ -1382,11 +1483,12 @@
   <input type="hidden" id="reqent-id">
   <div id="reqent-info" style="font-size:12px;color:var(--color-text-secondary);margin-bottom:10px"></div>
   <div class="fg2">
-    <div class="fg"><label>Cantidad entregada</label><input type="number" id="reqent-cantidad" placeholder="0" min="0" step="0.01"></div>
+    <div class="fg"><label>Cantidad entregada</label><input type="number" id="reqent-cantidad" placeholder="0" min="0" step="0.01" oninput="reqEntCalcAprobada()"></div>
     <div class="fg"><label>Fecha de entrega <span class="req">*</span></label><input type="date" id="reqent-fecha"></div>
     <div class="fg"><label>Remito</label><input id="reqent-remito"></div>
     <div class="fg"><label>N° Factura</label><input id="reqent-factura"></div>
-    <div class="fg s2"><label>Cantidad no conforme</label><input type="number" id="reqent-noconforme" placeholder="0" min="0" step="0.01"></div>
+    <div class="fg"><label>Cantidad no conforme</label><input type="number" id="reqent-noconforme" placeholder="0" min="0" step="0.01" oninput="reqEntCalcAprobada()"></div>
+    <div class="fg"><label>Cantidad aprobada</label><input type="number" id="reqent-aprobada" placeholder="0" min="0" step="0.01"></div>
   </div>
   <div class="ma"><button class="btn" onclick="closeMo('mo-req-entrega')">Cancelar</button><button class="btn btn-p" onclick="saveEntregaReq()">Guardar entrega</button></div>
 </div></div>
@@ -1690,13 +1792,27 @@
   <div class="ma"><button class="btn" onclick="closeMo('mo-oc')">Cancelar</button><button class="btn btn-p" onclick="saveOC()">Emitir OC</button></div>
 </div></div>
 
-<!-- RECEPCIÓN OC -->
-<div class="ov" id="mo-recv"><div class="mo">
-  <div class="mh">Recepción de mercadería <span class="mx" onclick="closeMo('mo-recv')">×</span></div>
-  <input type="hidden" id="recv-ocid">
-  <div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:10px" id="recv-prv"></div>
-  <div id="recv-items"></div>
-  <div class="ma"><button class="btn" onclick="closeMo('mo-recv')">Cancelar</button><button class="btn btn-p" onclick="saveRecv()">Confirmar recepción</button></div>
+<!-- RECEPCIÓN DE MATERIAL/INSUMO -->
+<div class="ov" id="mo-recepcion"><div class="mo" style="width:420px">
+  <div class="mh">Nueva recepción de material/insumo <span class="mx" onclick="closeMo('mo-recepcion')">×</span></div>
+  <div class="fg2 f1">
+    <div class="fg s2"><label>Material / Insumo <span class="req">*</span></label><select id="rec-mat"></select></div>
+    <div class="fg"><label>Cantidad <span class="req">*</span></label><input type="number" id="rec-qty" min="0.01" step="0.01" placeholder="0"></div>
+    <div class="fg"><label>Proveedor</label><select id="rec-prov"><option value="">— Ninguno —</option></select></div>
+    <div class="fg"><label>Remito / referencia</label><input id="rec-remito" placeholder="Ej: Remito 0001-00234"></div>
+    <div class="fg"><label>Precio unitario</label><input type="number" id="rec-precio" min="0" step="0.01" placeholder="0"></div>
+    <div class="fg s2"><label>Observaciones</label><input id="rec-obs" placeholder="Opcional"></div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-recepcion')">Cancelar</button><button class="btn btn-p" onclick="saveRecepcion()">Registrar recepción</button></div>
+</div></div>
+
+<!-- RECEPCIÓN DE OC (Compras) -->
+<div class="ov" id="mo-oc-recibir"><div class="mo">
+  <div class="mh">Recepción de mercadería — OC <span class="mx" onclick="closeMo('mo-oc-recibir')">×</span></div>
+  <input type="hidden" id="recoc-ocid">
+  <div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:10px" id="recoc-prv"></div>
+  <div id="recoc-items"></div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-oc-recibir')">Cancelar</button><button class="btn btn-p" onclick="saveRecOC()">Confirmar recepción</button></div>
 </div></div>
 
 <!-- OT DETAIL: operaciones y materiales -->
@@ -1717,7 +1833,8 @@
   <div class="mh">Editar material <span class="mx" onclick="closeMo('mo-edit-mat')">×</span></div>
   <input type="hidden" id="emat-id">
   <div class="fg2">
-    <div class="fg"><label>Código</label><input id="emat-cod" readonly style="background:var(--color-background-secondary)"></div>
+    <div class="fg"><label>Código</label><input id="emat-cod"></div>
+    <div class="fg" id="emat-cod-hint" style="display:none;grid-column:1/-1;font-size:11px;color:var(--color-text-secondary);margin-top:-6px">Código vinculado al producto — para cambiarlo, edítelo desde el módulo Productos.</div>
     <div class="fg"><label>Tipo</label><select id="emat-tip"><option>Material</option><option>Insumo</option><option>Herramienta</option><option>Producto terminado</option></select></div>
     <div class="fg s2"><label>Descripción <span class="req">*</span></label><input id="emat-des"></div>
     <div class="fg"><label>Categoría de producto</label><select id="emat-cp"></select></div>
@@ -1838,7 +1955,7 @@
     <div class="fg"><label>Orden</label><input type="text" id="otop-ord" inputmode="numeric" style="width:70px"></div>
     <div class="fg s2"><label>Nombre</label><input type="text" id="otop-nom" placeholder="Nombre de la operación"></div>
     <div class="fg"><label>Setup (min)</label><input type="number" id="otop-set" min="0" step="0.5" placeholder="min"></div>
-    <div class="fg"><label>Ciclo (seg)</label><input type="number" id="otop-cic" min="0" step="1" placeholder="seg"></div>
+    <div class="fg"><label>Ciclo (seg)</label><input type="number" id="otop-cic" min="0" step="0.1" placeholder="seg"></div>
     <div class="fg"><label>Cant. requerida</label><input type="number" id="otop-req" min="0" step="0.01"></div>
     <div class="fg"><label>Estado</label>
       <select id="otop-est">
@@ -1984,6 +2101,34 @@ async function updateSCBadge(){
 updateSCBadge();
 setInterval(updateSCBadge,60000); // refresco automático cada 60s
 
+async function loadIndicadoresCompras(){
+  const anioSel=$('ic-anio');
+  if(anioSel && !anioSel.options.length){
+    const cur=new Date().getFullYear();
+    for(let y=cur;y>=cur-4;y--){const o=document.createElement('option');o.value=y;o.textContent=y;anioSel.appendChild(o);}
+    anioSel.value=cur;
+  }
+  const anio=anioSel?anioSel.value:new Date().getFullYear();
+  const body=$('ic-body');
+  body.innerHTML='<div class="ld">Cargando...</div>';
+  const d=await api('/api/dashboard/indicadores_compras?anio='+anio);
+  if(!d.categorias||!d.categorias.length){body.innerHTML='<div class="em">Sin datos para el año seleccionado.</div>';return;}
+  const pct=v=>v==null?'—':Math.round(v*100)+'%';
+  let h='';
+  d.categorias.forEach(cat=>{
+    h+='<div class="card" style="margin-bottom:16px"><div class="ch"><span class="ct">'+cat.categoria+'</span></div>';
+    h+='<table><tr><th>Proveedor</th><th>Entregados</th><th>A tiempo</th><th>Aprobados</th><th>Incidentes</th><th>Pend. calidad</th><th>CE</th><th>IC</th><th>IPP</th></tr>';
+    cat.proveedores.forEach(p=>{
+      const t=p.total;
+      h+='<tr><td><b>'+p.proveedor+'</b></td><td>'+t.entregados+'</td><td>'+t.a_tiempo+'</td><td>'+t.aprobados+'</td><td>'+t.incidentes+'</td>'
+        +'<td>'+(t.pendientes?'<span style="color:var(--color-text-secondary)">'+t.pendientes+'</span>':'0')+'</td>'
+        +'<td>'+pct(t.ce)+'</td><td>'+pct(t.ic)+'</td><td>'+pct(t.ipp)+'</td></tr>';
+    });
+    h+='</table></div>';
+  });
+  body.innerHTML=h;
+}
+
 // Nav
 document.querySelectorAll('.ni').forEach(el=>el.addEventListener('click',()=>{
   const p=el.dataset.p;
@@ -1997,8 +2142,10 @@ function load(p){
   const map={
     ott:loadOTT,
   dash_operativo:loadDashOperativo, dash_economico:loadDashEconomico, ordenes:loadOT, procesos:loadProd, mrp:loadMRP,
-    requerimientos_productivos:loadReq,
+    requerimientos_productivos:loadReq, dash_requerimientos:loadDashRequerimientos,
+    indicadores_compras:loadIndicadoresCompras,
     maquinas:loadMaqView, inventario:loadInv, proveedores:loadProv,
+    recepciones:loadRecepciones,
     presupuestos:loadPres, clientes:loadCli, usuarios:loadUsr,
     rrhh:loadRRHH, ctrl_prod:loadCtrlProd,
     oc_clientes:loadOCClientes, solicitudes:loadComprasView,
@@ -2077,8 +2224,8 @@ function setupRoles(){
   [['b-ot',['admin','operario','vendedor']],['b-prod',['admin','operario']],
    ['b-maq',['admin','operario']],['b-mant',['admin','operario']],['b-tkt',['admin','operario']],
    ['b-mat',['admin','almacen','operario','logistica']],['b-stock-ins',['admin','almacen']],['b-prov',['admin','almacen','vendedor']],
-   ['b-pres',['admin','vendedor']],['b-cli',['admin','vendedor']],
-   ['b-req',['admin','almacen','vendedor']]].forEach(([id,roles])=>{
+   ['b-recepcion',['admin','almacen']],
+   ['b-pres',['admin','vendedor']],['b-cli',['admin','vendedor']]].forEach(([id,roles])=>{
     const el=$(id);if(el&&roles.includes(ROL))el.style.display='inline-block';
   });
   if(ROL==='admin'){const be=$('b-emp');if(be)be.style.display='inline-block';}
@@ -2927,6 +3074,7 @@ const MODULOS_SISTEMA = [
   {k:'novedades_ot',      l:'Novedades por OT'},
   {k:'mrp',               l:'Planificación MRP'},
   {k:'requerimientos_productivos', l:'Requerimientos productivos'},
+  {k:'dash_requerimientos', l:'Dashboard Requerimientos'},
   {k:'maquinas',          l:'Máquinas'},
   {k:'rrhh',              l:'Recursos humanos'},
   {k:'rendimiento',       l:'Rendimiento operarios'},
@@ -3043,7 +3191,6 @@ async function loadOTT(){
       +(cerrada?'':(
         '<button class="btn btn-s" onclick="abrirPrecioOTT('+r.id+')">Editar</button>'
         +(r.estado==='Pendiente'||r.estado==='Remito emitido'||r.estado==='En proceso'||r.estado==='Recibido'?'<button class="btn btn-s btn-p" onclick="abrirEnvioOTT('+r.id+')">Emitir remito</button>':'')
-        +(r.estado==='Remito emitido'||r.estado==='En proceso'?'<button class="btn btn-s btn-p" onclick="abrirRetornoOTT('+r.id+','+r.es_ultimo_nivel+')">Registrar retorno</button>':'')
         +((r.rechazado_pendiente_devolver||0)>0.0001?'<button class="btn btn-s" style="background:#D85A30;color:#fff" onclick="abrirDevolucionOTT('+r.id+')">Devolver piezas</button>':'')
         +(r.estado==='Recibido'&&r.lote_retorno_estado==='Aprobado'?'<button class="btn btn-s" onclick="completarOTT('+r.id+')">Completar</button>':'')
       ))
@@ -3089,7 +3236,7 @@ async function abrirEnvioOTT(ottId){
   const r=await api('/api/ott/'+ottId);
   if(r&&!r.error){
     const disp=r.cantidad_disponible||0;
-    const origenTxt={stock:' (stock actual)',produccion_previa:' (producido en la operación anterior)',qty_requerida:' (cantidad planificada de la operación)'};
+    const origenTxt={stock:' (stock actual)',produccion_previa:' (producido en la operación anterior)',qty_requerida:' (cantidad planificada de la operación)',insumo:' (limitado por stock de insumo requerido)'};
     $('ott-env-disp').textContent='Disponible para remitir: '+disp+(origenTxt[r.cantidad_disponible_origen]||'');
     $('ott-env-qty').max=disp;
     $('ott-env-qty').placeholder=disp;
@@ -3110,6 +3257,12 @@ async function confirmarEnvioOTT(){
   })});
   if(res.ok){
     toast('Remito '+res.remito_numero+' emitido — piezas en tránsito'+(res.stock_descontado?' (stock descontado)':''));
+    (res.solicitudes_compra_insumo||[]).forEach(function(s){
+      toast((s.actualizada?'SC ampliada':'SC '+s.numero+' generada')+' por faltante de '+s.material+' ('+s.cantidad+')','w');
+    });
+    (res.ots_auxiliares_insumo||[]).forEach(function(o){
+      toast((o.actualizada?'OT '+o.numero+' ampliada':'OT auxiliar '+o.numero+' generada')+' por faltante de '+o.producto+' ('+o.cantidad+')','w');
+    });
     closeMo('mo-ott-envio');
     loadOTT();
   } else toast(res.error||'Error','e');
@@ -3137,6 +3290,8 @@ async function confirmarRetornoOTT(){
     toast(res.mensaje+(res.lote_numero?' — Lote '+res.lote_numero:''));
     closeMo('mo-ott-retorno');
     loadOTT();
+    if(typeof loadRecOTTPend==='function') loadRecOTTPend();
+    if(typeof loadRecepciones==='function' && $('recepciones-list')) loadRecepciones();
   } else toast(res.error||'Error','e');
 }
 
@@ -3363,11 +3518,12 @@ async function calcOTCostos(){
     });
   }
   if(costoMat===0&&prod.costo_mat) costoMat=prod.costo_mat*qty;
-  // Tiempo std: setup por op + ciclo x cantidad, por cada operacion
+  // Tiempo std en MINUTOS: setup por op (ya en minutos) + ciclo x cantidad
+  // (el ciclo se carga en segundos, por eso se divide por 60).
   let tiempoStd=0;
   if(prod.operaciones&&prod.operaciones.length){
     sortOpsNumeric(prod.operaciones).forEach(function(op){
-      tiempoStd+=(op.tiempo_setup_min||0)+((op.tiempo_ciclo_min||0)*qty);
+      tiempoStd+=(op.tiempo_setup_min||0)+((op.tiempo_ciclo_seg||0)/60*qty);
     });
   } else {
     tiempoStd=Math.round((prod.tiempo_total_hs||0)*60*qty);
@@ -3468,16 +3624,28 @@ async function loadProd(){
   }):rowsAll;
   if(!rowsAll.length){$('prod-list').innerHTML='<div class="em">No hay productos terminados.</div>';return;}
   if(!rows.length){$('prod-list').innerHTML='<div class="em">No se encontraron productos para "'+q+'".</div>';return;}
-  let h='<table><tr><th>Código</th><th>Nombre</th><th>Cliente</th><th>Categoría</th><th>Ciclo total</th><th>Peso (kg)</th><th>Precio venta</th><th>Estado</th><th></th></tr>';
+  let h='<table><tr><th>Código</th><th>Nombre</th><th>Cliente</th><th>Categoría</th><th>Precio venta</th><th>Costo total</th><th>Costo MO</th><th>Costo mat.</th><th>Costo terc.</th><th>Ciclo total</th><th>Peso (kg)</th><th>Rend. ponderado</th><th>Estado</th><th></th></tr>';
   rows.forEach(r=>{
+    const rend=r.rendimiento_ponderado;
+    let rendCls='bk';
+    if(rend!=null){
+      if(rend<80) rendCls='br';
+      else if(rend<100) rendCls='ba';
+      else rendCls='bg';
+    }
     h+=`<tr>
     <td><b>${r.codigo}</b></td>
     <td>${r.nombre}</td>
     <td style="font-size:11px">${r.cliente_nombre||'—'}</td>
     <td><span class="b bt">${r.categoria_nombre||'—'}</span></td>
+    <td><b>${fmtM(r.precio_venta)}</b></td>
+    <td><b>${fmtM(r.costo_total)}</b></td>
+    <td>${fmtM(r.costo_mo)}</td>
+    <td>${fmtM(r.costo_mat)}</td>
+    <td>${(r.costo_terc||0)>0?fmtM(r.costo_terc):'—'}</td>
     <td>${r.tiempo_ciclo_total_min!=null?r.tiempo_ciclo_total_min+'<span style="font-size:10px;color:var(--color-text-secondary)"> min</span>':"—"}</td>
     <td>${(r.peso_kg||0)>0?(r.peso_kg+' kg'):"—"}</td>
-    <td><b>${fmtM(r.precio_venta)}</b></td>
+    <td><span class="b ${rendCls}">${rend!=null?rend+'%':'—'}</span></td>
     <td>${r.activo?'<span class="b bg">Activo</span>':'<span class="b bk">Inactivo</span>'}</td>
     <td style="display:flex;gap:4px">
       <button class="btn btn-s btn-p" onclick="verProc(${r.id})">Ver proceso</button>
@@ -3537,7 +3705,7 @@ async function verProc(pid,nom){
         html+='<div class="opm">'+(op.cat_maq_nombre||'Cualquier máquina')+(op.maquina_nombre?' · '+op.maquina_nombre:'')+'</div>';
       }
       html+='</div><div style="text-align:right;font-size:11px;color:var(--color-text-secondary)">';
-      html+='Setup: '+op.tiempo_setup_min+' min &nbsp; Ciclo: '+Math.round((op.tiempo_ciclo_min||0)*60)+' seg ('+op.tiempo_ciclo_min+' min)';
+      html+='Setup: '+op.tiempo_setup_min+' min &nbsp; Ciclo: '+(op.tiempo_ciclo_seg||0)+' seg';
       if(canEdit){
         html+='<br><span style="display:flex;gap:4px;justify-content:flex-end;margin-top:4px">';
         html+='<button class="btn btn-s" onclick="openOpEditById('+op.id+','+pid+')">Editar</button>';
@@ -3594,7 +3762,7 @@ async function openOp(pid){
   _mat_cache=new Map(_mat.map(function(r){return[r.id,r];}));
   await selLoad('op-catm',[{id:'',nombre:'— Cualquiera —'},..._catM],null,'— Cualquiera —');
   await selLoad('op-maq',[{id:'',nombre:'— Cualquiera del tipo —'},..._maq.map(m=>({...m,nombre:m.codigo+' — '+m.nombre}))],null,'— Cualquiera del tipo —');
-  await selLoad('op-prv',[{id:'',nombre:'— Sin proveedor —'},..._prov.map(function(p){return{id:p.id,nombre:p.razon};})],null,'— Sin proveedor —');
+  setProvOp('op',null);
   openMo('mo-op');
 }
 
@@ -3637,8 +3805,8 @@ async function saveOp(){
     categoria_maquina_id:esTerc?null:($('op-catm').value||null),
     maquina_id:esTerc?null:($('op-maq').value||null),
     tiempo_setup_min:esTerc?0:(parseFloat($('op-set').value)||0),
-    tiempo_ciclo_min:esTerc?0:Math.round((parseFloat($('op-cic').value)||0)/60*1000)/1000,
-    obs:esTerc?'':$('op-obs').value,materiales:esTerc?[]:mats,
+    tiempo_ciclo_seg:esTerc?0:(parseFloat($('op-cic').value)||0),
+    obs:esTerc?'':$('op-obs').value,materiales:mats,
     es_tercerizada:esTerc?1:0,
     proveedor_id:esTerc?provId:null,
     precio_tercerizado:esTerc?precio:0,
@@ -3860,7 +4028,7 @@ function verVersionProcesoCompleto() {
       html += `<div class="opm">${op.cat_maq_nombre || 'Cualquier máquina'}${op.maquina_nombre ? ' · ' + op.maquina_nombre : ''}</div>`;
     }
     html += '</div><div style="text-align:right;font-size:11px;color:var(--color-text-secondary)">';
-    html += `Setup: ${op.tiempo_setup_min || 0} min &nbsp; Ciclo: ${Math.round((op.tiempo_ciclo_min || 0) * 60)} seg (${op.tiempo_ciclo_min || 0} min)`;
+    html += `Setup: ${op.tiempo_setup_min || 0} min &nbsp; Ciclo: ${op.tiempo_ciclo_seg || 0} seg`;
     html += '</div></div>';
     html += `<div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:5px"><strong>Descripción:</strong> ${op.descripcion || '—'}</div>`;
     html += `<div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:5px"><strong>Observaciones:</strong> ${op.obs || '—'}</div>`;
@@ -4177,10 +4345,10 @@ function parseDecimalComa(v){
   return parseFloat(String(v).trim().replace(',','.'));
 }
 
-function fmtCicloXCant(tiempoCicloMin,qty){
-  const ciclo=Number(tiempoCicloMin)||0;
+function fmtCicloXCant(tiempoCicloSeg,qty){
+  const ciclo=Number(tiempoCicloSeg)||0;   // segundos por pieza
   const cant=Number(qty)||0;
-  const totalMin=ciclo*cant;
+  const totalMin=ciclo*cant/60;
   if(totalMin<=0)return '—';
   if(totalMin<60)return Math.round(totalMin)+' min';
   const hrs=Math.floor(totalMin/60);
@@ -4477,6 +4645,145 @@ async function saveStockInsumo(){
   else toast(res.error||'Error','e');
 }
 
+// ── Recepción de material/insumo ────────────────────────────────────────────────
+// Módulo central de recepción: acá se aprueban TODOS los ingresos a planta
+// — directos, de Compras (OC) y de Terceros (OTT). Los botones "Recibir" y
+// "Registrar retorno" ya no están en Órdenes de compra ni en OTT: la acción
+// vive acá.
+async function loadRecepciones(){
+  loadRecOCPend();
+  loadRecOTTPend();
+  const rows=await api('/api/recepciones');
+  if(!Array.isArray(rows)||!rows.length){
+    $('recepciones-list').innerHTML='<div class="em">No hay recepciones registradas.</div>';
+    return;
+  }
+  let h='<table><tr><th>Origen</th><th>N°</th><th>Fecha</th><th>Material</th><th>Cantidad</th><th>Proveedor</th><th>Remito</th><th>Precio unit.</th><th>Lote</th><th>Usuario</th></tr>';
+  rows.forEach(function(r){
+    const origenCls=r.origen==='OC'?'bt':(r.origen==='OTT'?'ba':'bk');
+    h+='<tr>'
+      +'<td><span class="b '+origenCls+'">'+r.origen+'</span></td>'
+      +'<td><b>'+r.numero+'</b></td>'
+      +'<td>'+fmtD(r.fecha)+'</td>'
+      +'<td><b>'+r.mat_codigo+'</b><div style="font-size:11px;color:var(--color-text-secondary)">'+(r.mat_descripcion||'')+'</div></td>'
+      +'<td>'+r.cantidad+' '+(r.mat_unidad||'')+'</td>'
+      +'<td>'+(r.proveedor_nombre||'—')+'</td>'
+      +'<td>'+(r.remito||'—')+'</td>'
+      +'<td>'+(r.precio_unit?fmtM(r.precio_unit):'—')+'</td>'
+      +'<td>'+(r.lote_numero?r.lote_numero+' <span class="b '+(r.lote_estado==='Aprobado'?'bg':(r.lote_estado==='Rechazado'?'br':'ba'))+'">'+r.lote_estado+'</span>':'—')+'</td>'
+      +'<td style="font-size:11px">'+(r.usuario||'—')+'</td>'
+      +'</tr>';
+  });
+  $('recepciones-list').innerHTML=h+'</table>';
+}
+
+// ── Pendientes de OC (Compras) — reemplaza el botón "Recibir" que antes
+// estaba en Órdenes de compra. Reutiliza el mismo endpoint de recepción
+// (/api/ordenes_compra/:id/recibir), solo que ahora se dispara desde acá.
+let _recOcCache=new Map();
+async function loadRecOCPend(){
+  const ocs=await api('/api/ordenes_compra');
+  const pend=(ocs||[]).filter(function(r){
+    return ['Aprobada','Enviada','Recibida parcial','Cerrada'].includes(r.estado)
+      && (r.items||[]).some(function(i){return (i.cantidad-i.cantidad_recibida)>0.0001;});
+  });
+  _recOcCache=new Map(pend.map(function(r){return [r.id,r];}));
+  if(!pend.length){$('rec-oc-pend-list').innerHTML='<div class="em">No hay OC pendientes de recibir.</div>';return;}
+  let h='<table><tr><th>N°</th><th>Proveedor</th><th>Estado</th><th>Pendiente</th><th></th></tr>';
+  pend.forEach(function(r){
+    const pendCant=(r.items||[]).reduce(function(a,i){return a+Math.max(0,i.cantidad-i.cantidad_recibida);},0);
+    h+='<tr><td><b>'+r.numero+'</b></td><td>'+r.proveedor_nombre+'</td><td>'+sb(r.estado)+'</td>'
+      +'<td><b>'+pendCant+'</b></td>'
+      +'<td><button class="btn btn-s btn-p" onclick="openRecOC('+r.id+')">Recibir</button></td></tr>';
+  });
+  $('rec-oc-pend-list').innerHTML=h+'</table>';
+}
+
+function openRecOC(id){
+  const r=_recOcCache.get(id);
+  if(!r){toast('OC no encontrada','e');return;}
+  $('recoc-ocid').value=id;
+  $('recoc-prv').textContent='Proveedor: '+r.proveedor_nombre;
+  let h='<table><tr><th>Descripción</th><th>Pedido</th><th>Recibido</th><th>A recibir ahora</th></tr>';
+  (r.items||[]).forEach(function(i){
+    const pend=Math.max(0,i.cantidad-i.cantidad_recibida);
+    if(pend<=0.0001) return;
+    h+='<tr><td>'+i.descripcion+'</td><td>'+i.cantidad+'</td><td>'+i.cantidad_recibida+'</td>'
+      +'<td><input type="number" data-iid="'+i.id+'" value="'+pend+'" min="0" max="'+pend+'" step="0.01" style="width:80px;font-size:12px;padding:3px 6px;border:1px solid var(--color-border-tertiary);border-radius:5px;background:var(--color-background-primary);color:var(--color-text-primary)"></td></tr>';
+  });
+  $('recoc-items').innerHTML=h+'</table>';
+  openMo('mo-oc-recibir');
+}
+
+async function saveRecOC(){
+  const ocid=$('recoc-ocid').value;
+  const items=[...$('recoc-items').querySelectorAll('input[data-iid]')].map(function(inp){
+    return {item_id:parseInt(inp.dataset.iid),cantidad:parseFloat(inp.value)||0};
+  }).filter(function(i){return i.cantidad>0;});
+  if(!items.length){toast('Ingresá al menos una cantidad a recibir','w');return;}
+  const res=await api('/api/ordenes_compra/'+ocid+'/recibir',{method:'POST',body:JSON.stringify({items})});
+  if(res.ok){
+    toast('Recepción registrada — stock actualizado');
+    closeMo('mo-oc-recibir');
+    loadRecOCPend();loadRecepciones();
+  } else toast(res.error||'Error','e');
+}
+
+// ── Pendientes de OTT (Terceros) — reemplaza el botón "Registrar retorno"
+// que antes estaba en OTT. El modal y las funciones abrirRetornoOTT /
+// confirmarRetornoOTT siguen siendo las mismas (ver más abajo, sección OTT),
+// solo que ahora se disparan desde acá.
+async function loadRecOTTPend(){
+  const rows=await api('/api/ott');
+  const pend=(rows||[]).filter(function(r){return r.estado==='Remito emitido'||r.estado==='En proceso';});
+  if(!pend.length){$('rec-ott-pend-list').innerHTML='<div class="em">No hay OTT pendientes de retorno.</div>';return;}
+  let h='<table><tr><th>N°</th><th>OT origen</th><th>Producto</th><th>Proveedor</th><th>Nivel</th><th>En espera</th><th></th></tr>';
+  pend.forEach(function(r){
+    const enEspera=Math.max((r.cantidad_enviada||0)-(r.cantidad_recibida||0),0);
+    h+='<tr><td><b>'+r.numero+'</b></td><td>'+(r.ot_numero||'—')+'</td><td style="font-size:11px">'+(r.producto_codigo||'—')+'</td>'
+      +'<td>'+(r.proveedor_nombre||'—')+'</td>'
+      +'<td>'+(r.es_ultimo_nivel?'<span class="b bg" style="font-size:10px">PT</span>':'<span class="b ba" style="font-size:10px">Semi</span>')+'</td>'
+      +'<td>'+(enEspera>0?'<b>'+enEspera+'</b>':'<span style="color:var(--color-text-secondary)">—</span>')+'</td>'
+      +'<td><button class="btn btn-s btn-p" onclick="abrirRetornoOTT('+r.id+','+r.es_ultimo_nivel+')">Registrar retorno</button></td></tr>';
+  });
+  $('rec-ott-pend-list').innerHTML=h+'</table>';
+}
+
+async function openRecepcion(){
+  if(!_mat.length)_mat=await api('/api/materiales');
+  if(!_prov.length)_prov=await api('/api/proveedores');
+  const selMat=$('rec-mat');
+  selMat.innerHTML='<option value="">— Seleccionar material/insumo —</option>'+_mat.map(function(m){
+    return '<option value="'+m.id+'">'+m.codigo+' — '+m.descripcion+' ('+(m.categoria||'')+')</option>';
+  }).join('');
+  const selProv=$('rec-prov');
+  selProv.innerHTML='<option value="">— Ninguno —</option>'+_prov.map(function(p){
+    return '<option value="'+p.id+'">'+p.razon+'</option>';
+  }).join('');
+  $('rec-qty').value='';$('rec-remito').value='';$('rec-precio').value='';$('rec-obs').value='';
+  openMo('mo-recepcion');
+}
+
+async function saveRecepcion(){
+  const material_id=$('rec-mat').value;
+  const cantidad=parseFloat($('rec-qty').value);
+  if(!material_id){toast('Seleccioná un material o insumo','w');return;}
+  if(!cantidad||cantidad<=0){toast('Ingresá una cantidad válida','w');return;}
+  const body={
+    material_id:parseInt(material_id),
+    cantidad,
+    proveedor_id:$('rec-prov').value?parseInt($('rec-prov').value):null,
+    remito:$('rec-remito').value||null,
+    precio_unit:$('rec-precio').value?parseFloat($('rec-precio').value):null,
+    obs:$('rec-obs').value||null,
+  };
+  const res=await api('/api/recepciones',{method:'POST',body:JSON.stringify(body)});
+  if(res.ok){
+    toast('Recepción '+res.numero+' registrada'+(res.lote?' — lote '+res.lote+' pendiente de aprobación de Calidad':' — stock actualizado'));
+    closeMo('mo-recepcion');_mat=[];_mat_cache=new Map();loadRecepciones();
+  } else toast(res.error||'Error','e');
+}
+
 // ── Proveedores ───────────────────────────────────────────────────────────────
 async function toggleProvMats(provId, cachedProv){
   const row=document.getElementById('provmats-'+provId);
@@ -4546,6 +4853,8 @@ async function loadProv(){
       +'<td style="display:flex;gap:4px;flex-wrap:wrap"></td>';
     // Action buttons via DOM
     const tdBtn=tr.querySelector('td:last-child');
+    const bEd=document.createElement('button'); bEd.className='btn btn-s'; bEd.textContent='Editar';
+    bEd.onclick=function(){ editProv(r); }; tdBtn.appendChild(bEd);
     const bAdd=document.createElement('button'); bAdd.className='btn btn-s'; bAdd.textContent='+ Mat.';
     bAdd.onclick=function(){ openLM(r.id); }; tdBtn.appendChild(bAdd);
     const bHist=document.createElement('button'); bHist.className='btn btn-s'; bHist.textContent='Historial';
@@ -4571,27 +4880,32 @@ async function loadProv(){
 
 async function openLM(pid){
   $('lm-pid').value=pid;
+  $('lm-mat').value='';
+  $('lm-mat-search').value='';
   $('lm-pre').value='';
   $('lm-pla').value='3';
   $('lm-pri').value='1';
   // Always refresh materials from API
   _mat=await api('/api/materiales');
-  const matSel=$('lm-mat');
-  matSel.innerHTML='<option value="">— Seleccionar material —</option>';
   if(!_mat.length){
-    matSel.innerHTML='<option value="">Sin materiales cargados en inventario</option>';
     toast('No hay materiales en inventario. Cargá materiales primero.','w');
-    openMo('mo-prov-mat');
-    return;
   }
-  _mat.forEach(function(m){
-    const o=document.createElement('option');
-    o.value=m.id;
-    o.textContent=m.codigo+' — '+m.descripcion+(m.unidad?' ('+m.unidad+')':'');
-    matSel.appendChild(o);
-  });
   openMo('mo-prov-mat');
-  setTimeout(function(){matSel.focus();},80);
+  setTimeout(function(){$('lm-mat-search').focus();},80);
+}
+
+function filtrarLMMat(){
+  const q=($('lm-mat-search').value||'').toLowerCase().trim();
+  const cont=$('lm-mat-results');
+  const lista = q ? _mat.filter(function(m){
+    const full=((m.codigo||'')+' '+(m.descripcion||'')).toLowerCase();
+    return full.includes(q);
+  }) : _mat;
+  _novotResultsRender(cont,lista,function(m){return m.codigo+' — '+m.descripcion+(m.unidad?' ('+m.unidad+')':'');},function(m){
+    $('lm-mat').value=m.id;
+    $('lm-mat-search').value=m.codigo+' — '+m.descripcion;
+    cont.style.display='none';cont.innerHTML='';
+  });
 }
 
 async function saveLM(){
@@ -4665,13 +4979,36 @@ async function openHistorialCompra(pid, razonSocial){
   }
 }
 
+function nuevoProv(){
+  $('prov-id').value='';
+  $('prov-mh-title').textContent='Proveedor';
+  $('prov-raz').value=''; $('prov-cui').value=''; $('prov-mat').value='';
+  $('prov-con').value=''; $('prov-tel').value=''; $('prov-ema').value='';
+  $('prov-pla').value='3'; $('prov-cal').value='5'; $('prov-est').value='Activo';
+  $('prov-catc').value=''; $('prov-obs').value='';
+  openMo('mo-prov');
+}
+
+function editProv(r){
+  $('prov-id').value=r.id;
+  $('prov-mh-title').textContent='Editar proveedor';
+  $('prov-raz').value=r.razon||''; $('prov-cui').value=r.cuit||''; $('prov-mat').value=r.materiales||'';
+  $('prov-con').value=r.contacto||''; $('prov-tel').value=r.telefono||''; $('prov-ema').value=r.email||'';
+  $('prov-pla').value=r.plazo_dias||3; $('prov-cal').value=r.calificacion||5; $('prov-est').value=r.estado||'Activo';
+  $('prov-catc').value=r.categoria_compra||''; $('prov-obs').value=r.obs||'';
+  openMo('mo-prov');
+}
+
 async function saveProv(){
+  const id=$('prov-id').value;
   const body={razon:$('prov-raz').value,cuit:$('prov-cui').value,contacto:$('prov-con').value,
     telefono:$('prov-tel').value,email:$('prov-ema').value,materiales:$('prov-mat').value,
-    plazo_dias:$('prov-pla').value||3,calificacion:$('prov-cal').value||5,obs:$('prov-obs').value};
+    plazo_dias:$('prov-pla').value||3,calificacion:$('prov-cal').value||5,estado:$('prov-est').value,
+    categoria_compra:$('prov-catc').value,obs:$('prov-obs').value};
   if(!body.razon){toast('Razón social requerida','w');return;}
-  const res=await api('/api/proveedores',{method:'POST',body:JSON.stringify(body)});
-  if(res.ok){toast('Proveedor agregado');closeMo('mo-prov');_prov=[];loadProv();}
+  const res=id?await api('/api/proveedores/'+id,{method:'PUT',body:JSON.stringify(body)})
+             :await api('/api/proveedores',{method:'POST',body:JSON.stringify(body)});
+  if(res.ok){toast(id?'Proveedor actualizado':'Proveedor agregado');closeMo('mo-prov');_prov=[];loadProv();}
   else toast(res.error||'Error','e');
 }
 
@@ -4977,41 +5314,113 @@ async function confirmarConsolidarPronostico(){
 
 async function loadCli(){
   _cli=await api('/api/clientes');
-  if(!_cli.length){$('cli-list').innerHTML='<div class="em">No hay clientes.</div>';return;}
+  _cliProdCache={};
+  const el=$('cli-list');
+  if(!_cli.length){el.innerHTML='<div class="em">No hay clientes.</div>';return;}
   const cm={Premium:'bb',Institucional:'bp',Regular:'bk',Nuevo:'bg'};
-  let h='<table><tr><th>Razón social</th><th>CUIT</th><th>Contacto</th><th>Teléfono</th><th>Email</th><th>Categoría</th><th>Plazo pago</th><th></th></tr>';
   const canEditCli=['admin','operario'].includes(ROL);
-  _cli.forEach(r=>{h+=`<tr><td><b>${r.razon}</b></td><td>${r.cuit||'—'}</td><td>${r.contacto||'—'}<br><span style="font-size:11px;color:var(--color-text-secondary)">${r.cargo||''}</span></td><td>${r.telefono||'—'}</td><td>${r.email||'—'}</td><td><span class="b ${cm[r.categoria]||'bk'}">${r.categoria}</span></td><td>${r.plazo_pago||'—'}</td><td style="display:flex;gap:4px;flex-wrap:wrap"><button class="btn btn-s" onclick="openProductosCliente(${r.id},'${(r.razon||'').replace(/'/g,"\\'")}')">Productos</button>${canEditCli?`<button class="btn btn-s" onclick='editCli(${JSON.stringify(r).replace(/'/g,"&#39;")})'>Editar</button>`:''}</td></tr>`;});
-  $('cli-list').innerHTML=h+'</table>';
+  const tbl=document.createElement('table');
+  tbl.innerHTML='<tr><th></th><th>Razón social</th><th>CUIT</th><th>Contacto</th><th>Teléfono</th><th>Email</th><th>Categoría</th><th>Plazo pago</th><th></th></tr>';
+  const tbody=document.createElement('tbody');
+  _cli.forEach(r=>{
+    const tr=document.createElement('tr');
+    tr.id='clirow-'+r.id;
+    tr.innerHTML='<td><button class="btn btn-s" style="padding:2px 5px;font-size:11px">▶</button></td>'
+      +'<td><b>'+r.razon+'</b></td>'
+      +'<td>'+(r.cuit||'—')+'</td>'
+      +'<td>'+(r.contacto||'—')+'<br><span style="font-size:11px;color:var(--color-text-secondary)">'+(r.cargo||'')+'</span></td>'
+      +'<td>'+(r.telefono||'—')+'</td>'
+      +'<td>'+(r.email||'—')+'</td>'
+      +'<td><span class="b '+(cm[r.categoria]||'bk')+'">'+r.categoria+'</span></td>'
+      +'<td>'+(r.plazo_pago||'—')+'</td>'
+      +'<td style="display:flex;gap:4px;flex-wrap:wrap"></td>';
+    const tdBtn=tr.querySelector('td:last-child');
+    if(canEditCli){
+      const bEd=document.createElement('button'); bEd.className='btn btn-s'; bEd.textContent='Editar';
+      bEd.onclick=function(){ editCli(r); }; tdBtn.appendChild(bEd);
+    }
+    const bExp=tr.querySelector('td:first-child button');
+    bExp.onclick=function(){ toggleProductosCliente(r.id); };
+    tbody.appendChild(tr);
+    // Hidden detail row
+    const trDet=document.createElement('tr');
+    trDet.id='cliprod-'+r.id; trDet.style.display='none';
+    const tdDet=document.createElement('td'); tdDet.colSpan=9; tdDet.style.padding='0';
+    const div=document.createElement('div');
+    div.id='cliprod-body-'+r.id;
+    div.style.cssText='padding:8px 12px 10px 32px;background:var(--color-background-secondary);font-size:11px';
+    div.innerHTML='<div class="ld">Cargando...</div>';
+    tdDet.appendChild(div); trDet.appendChild(tdDet); tbody.appendChild(trDet);
+  });
+  tbl.appendChild(tbody);
+  el.innerHTML=''; el.appendChild(tbl);
 }
 
-async function openProductosCliente(cid, razonSocial){
-  $('cli-prod-titulo').textContent='Productos — '+razonSocial;
-  const body=$('cli-prod-body');
-  body.innerHTML='<div class="ld">Cargando...</div>';
-  openMo('mo-cli-prod');
+let _cliProdCache={};
+
+async function toggleProductosCliente(cid){
+  const row=document.getElementById('cliprod-'+cid);
+  const btn=document.querySelector('#clirow-'+cid+' td:first-child button');
+  if(!row) return;
+  const vis=row.style.display==='none'||row.style.display==='';
+  row.style.display=vis?'table-row':'none';
+  if(btn) btn.textContent=vis?'▼':'▶';
+  if(!vis) return;
+  const body=document.getElementById('cliprod-body-'+cid);
+  if(body.dataset.loaded==='1') return; // ya cargado, no reconsultar
   try{
     const prods=await api('/api/productos?cliente_id='+cid);
+    _cliProdCache[cid]=prods||[];
     if(!prods||!prods.length){
       body.innerHTML='<div class="em">Este cliente no tiene productos asociados.</div>';
+      body.dataset.loaded='1';
       return;
     }
-    let h='<table><tr><th>Código</th><th>Nombre</th><th>Categoría</th><th>Unidad</th><th>Precio venta</th><th>Estado</th></tr>';
-    prods.forEach(function(p){
-      h+='<tr>'
-        +'<td>'+p.codigo+'</td>'
-        +'<td>'+p.nombre+'</td>'
-        +'<td>'+(p.categoria_nombre||'—')+'</td>'
-        +'<td>'+(p.unidad||'—')+'</td>'
-        +'<td><b>'+fmtM(p.precio_venta||0)+'</b></td>'
-        +'<td>'+(p.activo?'<span class="b bg">Activo</span>':'<span class="b bk">Inactivo</span>')+'</td>'
-        +'</tr>';
-    });
-    body.innerHTML=h+'</table>';
+    body.innerHTML='<input type="text" id="cliprod-search-'+cid+'" placeholder="🔍 Buscar por código, nombre o categoría..." oninput="renderProductosCliente('+cid+')" style="margin-bottom:8px;padding:6px 10px;font-size:11px;border:1.5px solid #c7c7c0;border-radius:6px;outline:none;background:#fff;width:100%;max-width:320px">'
+      +'<div id="cliprod-table-'+cid+'"></div>';
+    renderProductosCliente(cid);
+    body.dataset.loaded='1';
   }catch(e){
     body.innerHTML='<div class="al al-e"><strong>Error</strong> al cargar los productos del cliente</div>';
     console.error(e);
   }
+}
+
+function renderProductosCliente(cid){
+  const cont=document.getElementById('cliprod-table-'+cid);
+  if(!cont) return;
+  const all=_cliProdCache[cid]||[];
+  const searchEl=document.getElementById('cliprod-search-'+cid);
+  const q=(searchEl?searchEl.value:'').trim().toLowerCase();
+  const prods=q?all.filter(function(p){
+    return (p.codigo||'').toLowerCase().includes(q)
+      ||(p.nombre||'').toLowerCase().includes(q)
+      ||(p.categoria_nombre||'').toLowerCase().includes(q);
+  }):all;
+  if(!prods.length){
+    cont.innerHTML='<div class="em">No se encontraron productos para "'+q+'".</div>';
+    return;
+  }
+  let h='<table style="font-size:11px"><tr><th>Código</th><th>Nombre</th><th>Categoría</th><th>Precio venta</th><th>Costo total</th><th>Costo MO</th><th>Costo mat.</th><th>Costo terc.</th><th>Ciclo total</th><th>Peso (kg)</th><th>Rend. ponderado</th><th>Estado</th></tr>';
+  prods.forEach(function(p){
+    const rend=p.rendimiento_ponderado;
+    const rendCls=rend==null?'bk':(rend<80?'br':(rend<100?'ba':'bg'));
+    h+='<tr>'
+      +'<td><b>'+p.codigo+'</b></td>'
+      +'<td>'+p.nombre+'</td>'
+      +'<td>'+(p.categoria_nombre||'—')+'</td>'
+      +'<td><b>'+fmtM(p.precio_venta||0)+'</b></td>'
+      +'<td><b>'+fmtM(p.costo_total||0)+'</b></td>'
+      +'<td>'+fmtM(p.costo_mo||0)+'</td>'
+      +'<td>'+fmtM(p.costo_mat||0)+'</td>'
+      +'<td>'+((p.costo_terc||0)>0?fmtM(p.costo_terc):'—')+'</td>'
+      +'<td>'+(p.tiempo_ciclo_total_min!=null?p.tiempo_ciclo_total_min+' min':'—')+'</td>'
+      +'<td>'+((p.peso_kg||0)>0?(p.peso_kg+' kg'):'—')+'</td>'
+      +'<td><span class="b '+rendCls+'">'+(rend!=null?rend+'%':'—')+'</span></td>'
+      +'<td>'+(p.activo?'<span class="b bg">Activo</span>':'<span class="b bk">Inactivo</span>')+'</td>'
+      +'</tr>';
+  });
+  cont.innerHTML=h+'</table>';
 }
 
 async function saveCli(){
@@ -5236,6 +5645,8 @@ async function loadConfig(){
   $('cfg-costos').checked  = data.pdf_mostrar_costos?.valor  === '1';
   $('cfg-precios').checked = data.pdf_mostrar_precios?.valor === '1';
   $('cfg-nota-pie').value  = data.pdf_nota_pie?.valor || '';
+  $('cfg-valor-hora-mo').value = data.valor_hora_mo?.valor || '';
+  $('cfg-valor-hora-mo-actual').textContent = '$' + (data.valor_hora_mo?.valor || '0');
 
   $('cfg-msg').textContent = 'Configuración cargada ✓';
   setTimeout(function(){ $('cfg-msg').textContent = ''; }, 2000);
@@ -5255,6 +5666,7 @@ async function saveConfig(){
     pdf_mostrar_costos:  $('cfg-costos').checked  ? '1' : '0',
     pdf_mostrar_precios: $('cfg-precios').checked ? '1' : '0',
     pdf_nota_pie:        $('cfg-nota-pie').value,
+    valor_hora_mo:       $('cfg-valor-hora-mo').value || '0',
   };
   const res = await api('/api/config', {method:'POST', body:JSON.stringify(payload)});
   if(res.ok){
@@ -5263,6 +5675,20 @@ async function saveConfig(){
     setTimeout(function(){ $('cfg-msg').textContent = ''; }, 3000);
   } else {
     toast(res.error || 'Error al guardar','e');
+  }
+}
+
+async function saveValorHoraMO(){
+  var valor = $('cfg-valor-hora-mo').value || '0';
+  const res = await api('/api/config', {method:'POST', body:JSON.stringify({valor_hora_mo: valor})});
+  if(res.ok){
+    toast('Mano de obra guardada');
+    $('cfg-valor-hora-mo-actual').textContent = '$' + valor;
+    $('cfg-mo-msg').textContent = 'Guardado ✓';
+    setTimeout(function(){ $('cfg-mo-msg').textContent = ''; }, 3000);
+  } else {
+    toast(res.error || 'Error al guardar','e');
+    $('cfg-mo-msg').textContent = 'Error al guardar';
   }
 }
 
@@ -5796,7 +6222,7 @@ async function loadCtrlOps(oid){
       :sb(op.estado);
     const nombreCol=esAlternativa
       ?('<select onchange="onCtrlAltChange(\''+oid+'\',\''+k+'\',this)" style="font-family:inherit;font-size:12px;padding:3px 6px;border-radius:5px;border:1px solid var(--color-border-tertiary)">'
-        +grupo.map(function(o){return '<option value="'+o.id+'"'+(String(o.id)===String(op.id)?' selected':'')+'>'+o.nombre+' (ciclo: '+o.tiempo_ciclo_min+' min)</option>';}).join('')
+        +grupo.map(function(o){return '<option value="'+o.id+'"'+(String(o.id)===String(op.id)?' selected':'')+'>'+o.nombre+' (ciclo: '+o.tiempo_ciclo_seg+' seg)</option>';}).join('')
         +'</select>')
       :op.nombre;
     const warnTerc=op.depende_terc_previa
@@ -5975,7 +6401,7 @@ function filtrarNovMaquinas(){
 function checkNovCiclo(op){
   const warn=$('nov-cic-warn');
   if(!warn) return;
-  const sinCiclo = op && (!op.tiempo_ciclo_min || op.tiempo_ciclo_min<=0);
+  const sinCiclo = op && (!op.tiempo_ciclo_seg || op.tiempo_ciclo_seg<=0);
   warn.style.display = sinCiclo ? 'block' : 'none';
 }
 
@@ -5987,7 +6413,7 @@ async function openNovOp(opId, ordId){
   s.innerHTML='';
   if(op){
     const o=document.createElement('option');o.value=op.id;
-    o.textContent=op.orden+'. '+op.nombre+' (ciclo: '+op.tiempo_ciclo_min+' min)';
+    o.textContent=op.orden+'. '+op.nombre+' (ciclo: '+op.tiempo_ciclo_seg+' seg)';
     s.appendChild(o);
   }
   // La operación ya viene determinada por la tarjeta seleccionada en Control
@@ -6052,7 +6478,7 @@ async function openNovedad(){
   const s=$('nov-op');s.innerHTML='<option value="">— Seleccionar operación —</option>';
   _ctrlOps.filter(op=>op.estado!='Completada').forEach(op=>{
     const o=document.createElement('option');o.value=op.id;
-    o.textContent=op.orden+'. '+op.nombre+' (ciclo: '+op.tiempo_ciclo_min+' min)';s.appendChild(o);
+    o.textContent=op.orden+'. '+op.nombre+' (ciclo: '+op.tiempo_ciclo_seg+' seg)';s.appendChild(o);
   });
   s.onchange=function(){
     loadNovLotes(s.value);
@@ -6943,7 +7369,6 @@ async function saveOCC(){
   Object.keys(onScreen).forEach(function(id){ _occItems[id]=onScreen[id]; });
   const grid=_occItems;
   const items=[];
-  const preciosActualizar=[];
 
   _occProd.forEach(function(p){
     const rows=grid[p.id]||[];
@@ -6958,10 +7383,12 @@ async function saveOCC(){
         obs:row.obs||null,
         unidad:'unid',
       });
-      // If price changed from product's price, update product
-      if(row.precio && parseFloat(row.precio)!==parseFloat(p.precio_venta||0)){
-        preciosActualizar.push({id:p.id,precio:parseFloat(row.precio)});
-      }
+      // El precio de venta del producto se sincroniza en el propio backend
+      // (ver _sync_precio_venta_producto en /api/ordenes_cliente) cuando el
+      // precio unitario cargado acá difiere del precio_venta actual. Antes
+      // se hacía con una segunda llamada desde acá a /api/productos, pero
+      // esa ruta exige rol admin/operario y un vendedor no lo tiene: el
+      // pedido se guardaba bien pero el precio del producto no cambiaba.
     });
   });
 
@@ -6988,11 +7415,6 @@ async function saveOCC(){
     res=await api('/api/ordenes_cliente',{method:'POST',body:JSON.stringify(body)});
   }
   if(!res.ok){toast(res.error||'Error','e');return;}
-
-  // Update product prices if changed
-  for(const pp of preciosActualizar){
-    await api('/api/productos/'+pp.id,{method:'PUT',body:JSON.stringify({precio_venta:pp.precio})});
-  }
 
   toast(eid?'OC actualizada':'OC '+res.numero+' registrada');
   closeMo('mo-occ');
@@ -7485,7 +7907,7 @@ async function loadOCs(){
     ${needsAprov&&['admin','vendedor'].includes(ROL)?`<button class="btn btn-s btn-p" onclick="aprobarOC(${r.id})">Aprobar</button>`:''}
     <button class="btn btn-s" onclick="emitirOC(${r.id})">Emitir OC</button>
     ${(r.rechazado_pendiente_devolver||0)>0.0001?`<button class="btn btn-s" style="background:#D85A30;color:#fff" onclick="devolverRechazoOC(${r.id})">Devolver piezas</button>`:''}
-    ${r.estado==='Aprobada'||r.estado==='Enviada'||r.estado==='Recibida parcial'?`<button class="btn btn-s" onclick="openRecvById(${r.id})">${r.estado==='Recibida parcial'?'Recibir resto':'Recibir'}</button>`:''}
+    ${r.estado==='Aprobada'||r.estado==='Enviada'||r.estado==='Recibida parcial'?`<button class="btn btn-s" style="background:#8a8a8a;color:#fff" onclick="cerrarOC(${r.id})" title="Cerrar la OC sin esperar el saldo pendiente">Cerrar OC</button>`:''}
     </td></tr>
     <tr id="oc-det-${r.id}" style="display:none"><td colspan="10" style="background:var(--color-background-secondary);padding:10px 14px">
     ${ocDetailTable(r.items||[])}
@@ -7516,6 +7938,26 @@ async function devolverRechazoOC(ocId){
     toast('Remito '+res.remito_numero+' emitido — '+res.cantidad_devuelta+' pieza(s) devuelta(s) al proveedor');
     loadOCs();
   } else toast(res.error||'Error','e');
+}
+
+// Cierre manual de la OC: se usa cuando quedó una recepción parcial (o
+// nada recibido aún) y el saldo pendiente NO va a llegar más — el
+// proveedor no va a entregar el resto. No toca lo ya recibido ni el lote;
+// solo saca a la OC de la lista de "pendientes de recibir". Si más
+// adelante el proveedor manda ese saldo igual, alcanza con volver a
+// "Recibir": la OC se reabre sola y el lote vuelve a crecer.
+async function cerrarOC(ocId){
+  const r=_oc_cache.get(parseInt(ocId));
+  if(!r){toast('OC no encontrada','e');return;}
+  const items=r.items||[];
+  const pendiente=items.reduce((a,i)=>a+Math.max(0,(i.cantidad||0)-(i.cantidad_recibida||0)),0);
+  const msg=pendiente>0.0001?
+    'Vas a cerrar la OC '+r.numero+' con '+pendiente.toFixed(2)+' unidad(es) todavía pendientes de recibir.\n\nEsto asume que el proveedor NO va a entregar el resto. Lo ya recibido no se modifica.\n\nSi más adelante llega igual, podés volver a "Recibir" y la OC se reabre sola.\n\n¿Confirmar cierre?':
+    '¿Cerrar la OC '+r.numero+'?';
+  if(!confirm(msg)) return;
+  const res=await api('/api/ordenes_compra/'+ocId+'/cerrar',{method:'POST',body:JSON.stringify({})});
+  if(res.ok){toast('OC '+r.numero+' cerrada');loadOCs();}
+  else toast(res.error||'Error','e');
 }
 
 function ocDetailTable(items){
@@ -7635,29 +8077,6 @@ async function saveOC(){
 }
 
 
-function openRecv(id,prv,items){
-  $('recv-ocid').value=id;
-  $('recv-prv').textContent='Proveedor: '+prv;
-  let h='<table><tr><th>Descripción</th><th>Pedido</th><th>Recibido</th><th>A recibir ahora</th></tr>';
-  items.forEach(i=>{
-    const pend=Math.max(0,i.cantidad-i.cantidad_recibida);
-    h+=`<tr><td>${i.descripcion}</td><td>${i.cantidad}</td><td>${i.cantidad_recibida}</td>
-    <td><input type="number" data-iid="${i.id}" value="${pend}" min="0" max="${pend}" step="0.01" style="width:80px;font-size:12px;padding:3px 6px;border:1px solid var(--color-border-tertiary);border-radius:5px;background:var(--color-background-primary);color:var(--color-text-primary)"></td></tr>`;
-  });
-  $('recv-items').innerHTML=h+'</table>';
-  openMo('mo-recv');
-}
-
-async function saveRecv(){
-  const ocid=$('recv-ocid').value;
-  const items=[...$('recv-items').querySelectorAll('input[data-iid]')].map(inp=>({
-    item_id:parseInt(inp.dataset.iid),cantidad:parseFloat(inp.value)||0
-  })).filter(i=>i.cantidad>0);
-  const res=await api('/api/ordenes_compra/'+ocid+'/recibir',{method:'POST',body:JSON.stringify({items})});
-  if(res.ok){toast('Recepción registrada — stock actualizado');closeMo('mo-recv');loadOCs();}
-  else toast(res.error||'Error','e');
-}
-
 async function agregarSCDesdeMRP(matId,codigo,desc,cant,unidad){
   if(!cant||cant<=0){toast('No hay faltante para generar SC','w');return;}
   if(!confirm('¿Generar Solicitud de Compra por '+cant+' '+unidad+' de "'+codigo+' — '+desc+'"?')) return;
@@ -7753,6 +8172,241 @@ async function consolidarOCs(){
 
 
 
+// ── Dashboard Requerimientos productivos ──────────────────────────────────────
+function irAReqFiltrado(estado){
+  document.querySelectorAll('.ni').forEach(n=>n.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  const nav=document.querySelector('[data-p=requerimientos_productivos]');if(nav)nav.classList.add('active');
+  const pg=$('p-requerimientos_productivos');if(pg)pg.classList.add('active');
+  document.querySelectorAll('#req-tabs .tab').forEach(x=>x.classList.remove('active'));
+  const tab=document.querySelector('#req-tabs .tab[data-e="'+estado+'"]');if(tab)tab.classList.add('active');
+  reqF=estado;loadReq();
+}
+
+async function loadDashRequerimientos(){
+  const d=await api('/api/dashboard/requerimientos');
+  const pctStr=function(v){return v==null?'—':v+'%';};
+  $('dreq-metrics').innerHTML=
+    '<div class="metric"><div class="ml">Vencidos</div><div class="mv"'+(d.vencidos>0?' style="color:#A32D2D"':'')+'>'+d.vencidos+'</div></div>'
+   +'<div class="metric"><div class="ml">Próximos (7 días)</div><div class="mv"'+(d.proximos_7d>0?' style="color:#854F0B"':'')+'>'+d.proximos_7d+'</div></div>'
+   +'<div class="metric"><div class="ml">Activos totales</div><div class="mv">'+d.activos+'</div></div>'
+   +'<div class="metric"><div class="ml">Entregados este mes</div><div class="mv" style="color:var(--color-text-success)">'+d.entregados_mes+'</div></div>'
+   +'<div class="metric"><div class="ml">Cumple fecha</div><div class="mv">'+pctStr(d.cumple_fecha_pct)+'</div></div>'
+   +'<div class="metric"><div class="ml">Cumple cantidad</div><div class="mv">'+pctStr(d.cumple_cantidad_pct)+'</div></div>'
+   +'<div class="metric"><div class="ml">Cumple calidad</div><div class="mv">'+pctStr(d.cumple_calidad_pct)+'</div></div>'
+   +'<div class="metric"><div class="ml">Pend. clasificación calidad</div><div class="mv"'+(d.pendientes_calidad>0?' style="color:#854F0B"':'')+'>'+(d.pendientes_calidad||0)+'</div></div>';
+
+  if(!d.top_vencidos.length){$('dreq-vencidos').innerHTML='<div class="al al-g">Sin requerimientos vencidos ✓</div>';}
+  else{
+    let h='<table><tr><th>Número</th><th>Cliente</th><th>Proveedor</th><th>F. Estimada</th><th>Días vencido</th></tr>';
+    d.top_vencidos.forEach(function(r){
+      h+='<tr><td><b>'+r.numero+'</b></td><td>'+(r.cliente||'—')+'</td><td>'+(r.proveedor||'—')+'</td>'
+       +'<td style="color:#A32D2D;font-weight:600">'+fmtD(r.f_estimada)+'</td><td>'+r.dias_vencido+'</td></tr>';
+    });
+    $('dreq-vencidos').innerHTML=h+'</table>';
+  }
+
+  if(!d.top_proximos.length){$('dreq-proximos').innerHTML='<div class="al al-g">Sin vencimientos en los próximos 7 días</div>';}
+  else{
+    let h='<table><tr><th>Número</th><th>Cliente</th><th>Proveedor</th><th>F. Estimada</th></tr>';
+    d.top_proximos.forEach(function(r){
+      h+='<tr><td><b>'+r.numero+'</b></td><td>'+(r.cliente||'—')+'</td><td>'+(r.proveedor||'—')+'</td><td>'+fmtD(r.f_estimada)+'</td></tr>';
+    });
+    $('dreq-proximos').innerHTML=h+'</table>';
+  }
+
+  if(!d.por_proveedor.length){$('dreq-proveedor').innerHTML='<div class="em">Sin requerimientos pendientes.</div>';}
+  else{
+    let h='<table><tr><th>Proveedor</th><th>Pendientes</th></tr>';
+    d.por_proveedor.forEach(function(r){h+='<tr><td>'+r.proveedor+'</td><td><b>'+r.cantidad+'</b></td></tr>';});
+    $('dreq-proveedor').innerHTML=h+'</table>';
+  }
+
+  const g=d.graficos||{};
+  renderReqLineChart('dreq-chart-calidad', g.meses||[], g.indice_calidad||{}, g.objetivo_pct);
+  renderReqLineChart('dreq-chart-entrega', g.meses||[], g.cumplimiento_entrega||{}, g.objetivo_pct);
+  renderReqBarChart('dreq-chart-barras', g.cantidad_pedida_vs_entregada||[]);
+  renderReqProveedorPerfChart('dreq-chart-performance-prov', g.performance_por_proveedor||[]);
+}
+
+// Paleta fija por categoría — misma lógica de agrupación que el Excel original
+// (TRATAMIENTO SUPERFICIAL / MATERIA PRIMA / PROCESO), consistente entre ambos gráficos de línea
+const REQ_CHART_CAT_COLORS = {
+  'TRATAMIENTO SUPERFICIAL': '#2C5F8A',
+  'MATERIA PRIMA':           '#A32D2D',
+  'PROCESO':                 '#1B5E20',
+  'SIN CATEGORÍA':           '#854F0B',
+};
+const REQ_CHART_COLORS = ['#2C5F8A','#A32D2D','#1B5E20','#854F0B','#6A3D9A','#0E7C86'];
+const REQ_CHART_PROM_COLOR = '#E08A00';
+const REQ_CHART_OBJ_COLOR = '#888';
+
+function reqChartColor(cat, ci){
+  return REQ_CHART_CAT_COLORS[cat] || REQ_CHART_COLORS[ci % REQ_CHART_COLORS.length];
+}
+
+function renderReqLineChart(containerId, meses, series, objetivoPct){
+  const el=$(containerId);
+  if(!el) return;
+  // Orden fijo, mostrando sólo las series presentes
+  const ORDEN = ['TRATAMIENTO SUPERFICIAL','MATERIA PRIMA','PROCESO','SIN CATEGORÍA','PROMEDIO MENSUAL'];
+  const cats = ORDEN.filter(function(c){return Object.prototype.hasOwnProperty.call(series||{}, c);});
+  if(!meses.length || !cats.length){el.innerHTML='<div class="em">Sin datos suficientes para graficar.</div>';return;}
+
+  let h='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px">';
+  cats.forEach(function(cat,ci){
+    const isProm = cat==='PROMEDIO MENSUAL';
+    const color = isProm ? REQ_CHART_PROM_COLOR : reqChartColor(cat, ci);
+    h+='<div>'
+      +'<div style="font-size:11.5px;font-weight:700;margin-bottom:4px;color:'+color+'">'+cat+'</div>'
+      +renderReqLineChartSingle(meses, series[cat]||[], objetivoPct, color, isProm)
+      +'</div>';
+  });
+  h+='</div>';
+  el.innerHTML = h;
+}
+
+function renderReqLineChartSingle(meses, vals, objetivoPct, color, isProm){
+  const W=340, H=170, padL=32, padR=10, padT=12, padB=22;
+  const plotW=W-padL-padR, plotH=H-padT-padB;
+  const n=meses.length;
+  const xStep = n>1 ? plotW/(n-1) : 0;
+  const x=function(i){return padL + i*xStep;};
+  const y=function(pct){return padT + plotH - (Math.max(0,Math.min(100,pct))/100)*plotH;};
+
+  let svg='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;font-family:inherit;background:var(--color-bg-secondary);border-radius:6px" xmlns="http://www.w3.org/2000/svg">';
+
+  // Grilla horizontal (0/50/100%)
+  [0,50,100].forEach(function(p){
+    const yy=y(p);
+    svg+='<line x1="'+padL+'" y1="'+yy+'" x2="'+(W-padR)+'" y2="'+yy+'" stroke="var(--color-border-tertiary)" stroke-width="1"/>';
+    svg+='<text x="'+(padL-5)+'" y="'+(yy+3)+'" font-size="8.5" text-anchor="end" fill="var(--color-text-secondary)">'+p+'%</text>';
+  });
+
+  // Eje X: etiquetas de mes (todas si hay pocas, alternadas si hay muchas)
+  const skip = n>8 ? 2 : 1;
+  meses.forEach(function(m,i){
+    if(i%skip!==0 && i!==n-1) return;
+    svg+='<text x="'+x(i)+'" y="'+(H-6)+'" font-size="8" text-anchor="middle" fill="var(--color-text-secondary)">'+m+'</text>';
+  });
+
+  // Línea objetivo
+  if(objetivoPct!=null){
+    const oy=y(objetivoPct);
+    svg+='<line x1="'+padL+'" y1="'+oy+'" x2="'+(W-padR)+'" y2="'+oy+'" stroke="'+REQ_CHART_OBJ_COLOR+'" stroke-width="1.25" stroke-dasharray="4,3"/>';
+  }
+
+  // Serie
+  let path='', started=false;
+  vals.forEach(function(v,i){
+    if(v==null){started=false;return;}
+    const cmd=started?'L':'M';
+    path+=cmd+x(i)+' '+y(v)+' ';
+    started=true;
+  });
+  if(path) svg+='<path d="'+path.trim()+'" fill="none" stroke="'+color+'" stroke-width="'+(isProm?2.75:2.25)+'" '+(isProm?'stroke-dasharray="6,2.5"':'')+' stroke-linecap="round"/>';
+  vals.forEach(function(v,i){
+    if(v==null) return;
+    svg+='<circle cx="'+x(i)+'" cy="'+y(v)+'" r="3" fill="'+color+'"><title>'+meses[i]+': '+v+'%</title></circle>';
+    svg+='<text x="'+x(i)+'" y="'+(y(v)-7)+'" font-size="8" text-anchor="middle" fill="'+color+'" font-weight="600">'+v+'</text>';
+  });
+
+  svg+='</svg>';
+  return svg;
+}
+
+// Barras agrupadas por proveedor: % cumplimiento fecha / cantidad / calidad.
+// Misma paleta que renderReqLineChart (colores fijos por eje, no por categoría),
+// y mismo criterio visual de svg-en-fondo-var(--color-bg-secondary) que los otros gráficos.
+const REQ_PERF_EJES = [
+  {key:'cumple_fecha_pct',    label:'Fecha',    color:'#2C5F8A'},
+  {key:'cumple_cantidad_pct', label:'Cantidad', color:'#1B5E20'},
+  {key:'cumple_calidad_pct',  label:'Calidad',  color:'#854F0B'},
+];
+
+function renderReqProveedorPerfChart(containerId, data){
+  const el=$(containerId);
+  if(!el) return;
+  if(!data.length){el.innerHTML='<div class="em">Sin requerimientos entregados con datos de cumplimiento.</div>';return;}
+
+  const n = data.length;
+  const groupW = 150, barW = 26, barGap = 6, H = 210, padT = 14, padB = 46, padL = 34, padR = 10;
+  const plotH = H - padT - padB;
+  const W = padL + padR + n*groupW;
+  const y = function(pct){return padT + plotH - (Math.max(0,Math.min(100,pct))/100)*plotH;};
+
+  let svg='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;min-width:'+Math.max(W,340)+'px;font-family:inherit;background:var(--color-bg-secondary);border-radius:6px" xmlns="http://www.w3.org/2000/svg">';
+
+  // Grilla horizontal (0/50/100%)
+  [0,50,100].forEach(function(p){
+    const yy=y(p);
+    svg+='<line x1="'+padL+'" y1="'+yy+'" x2="'+(W-padR)+'" y2="'+yy+'" stroke="var(--color-border-tertiary)" stroke-width="1"/>';
+    svg+='<text x="'+(padL-5)+'" y="'+(yy+3)+'" font-size="8.5" text-anchor="end" fill="var(--color-text-secondary)">'+p+'%</text>';
+  });
+
+  data.forEach(function(prov, gi){
+    const gx = padL + gi*groupW + (groupW - (REQ_PERF_EJES.length*barW + (REQ_PERF_EJES.length-1)*barGap))/2;
+    REQ_PERF_EJES.forEach(function(eje, ei){
+      const v = prov[eje.key];
+      const bx = gx + ei*(barW+barGap);
+      if(v==null){
+        svg+='<text x="'+(bx+barW/2)+'" y="'+(y(0)-4)+'" font-size="8" text-anchor="middle" fill="var(--color-text-secondary)">s/d</text>';
+        return;
+      }
+      const by = y(v);
+      svg+='<rect x="'+bx+'" y="'+by+'" width="'+barW+'" height="'+(y(0)-by)+'" rx="2" fill="'+eje.color+'"><title>'+prov.proveedor+' — '+eje.label+': '+v+'%</title></rect>';
+      svg+='<text x="'+(bx+barW/2)+'" y="'+(by-4)+'" font-size="8" text-anchor="middle" fill="'+eje.color+'" font-weight="600">'+v+'</text>';
+    });
+    // Etiqueta de proveedor (multi-línea simple si es largo)
+    const cx = padL + gi*groupW + groupW/2;
+    const nombre = prov.proveedor.length>18 ? prov.proveedor.slice(0,17)+'…' : prov.proveedor;
+    svg+='<text x="'+cx+'" y="'+(H-padB+14)+'" font-size="9" text-anchor="middle" fill="var(--color-text-primary)" font-weight="600">'+nombre+'</text>';
+    svg+='<text x="'+cx+'" y="'+(H-padB+26)+'" font-size="8" text-anchor="middle" fill="var(--color-text-secondary)">'+prov.entregados+' entreg.</text>';
+  });
+
+  svg+='</svg>';
+
+  let leg='<div style="display:flex;flex-wrap:wrap;gap:14px;margin-top:8px;font-size:11.5px">';
+  REQ_PERF_EJES.forEach(function(eje){
+    leg+='<div style="display:flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:2px;background:'+eje.color+';display:inline-block"></span><b>'+eje.label+'</b></div>';
+  });
+  leg+='</div>';
+
+  el.innerHTML = svg + leg;
+}
+
+function renderReqBarChart(containerId, data){
+  const el=$(containerId);
+  if(!el) return;
+  if(!data.length){el.innerHTML='<div class="em">Sin requerimientos con cantidad pedida registrada.</div>';return;}
+  const maxVal = Math.max.apply(null, data.map(function(d){return Math.max(d.cantidad_pedida, d.cantidad_entregada||0);}), 1);
+  const fmtN=function(v){return (Math.round(v*100)/100).toLocaleString('es-AR');};
+  let h='<div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:10px;font-size:11.5px">'
+    +'<div style="display:flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:2px;background:#2C5F8A;display:inline-block"></span><b>Pedida</b></div>'
+    +'<div style="display:flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:2px;background:#1B5E20;display:inline-block"></span><b>Entregada</b></div>'
+    +'</div>';
+  h+='<div style="display:flex;flex-direction:column;gap:12px">';
+  data.forEach(function(r){
+    const pctPed = Math.round((r.cantidad_pedida/maxVal)*100);
+    const pctEnt = Math.round(((r.cantidad_entregada||0)/maxVal)*100);
+    const cumplioCant = (r.cantidad_entregada||0) >= r.cantidad_pedida;
+    h+='<div>';
+    h+='<div style="font-size:11.5px;font-weight:600;margin-bottom:4px">'+r.numero+(r.codigo?' — '+r.codigo:'')
+      +(cumplioCant?' <span style="color:var(--color-text-success);font-weight:400">✓ completo</span>':' <span style="color:#A32D2D;font-weight:400">faltante</span>')+'</div>';
+    h+='<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">';
+    h+='<div style="width:66px;font-size:10.5px;color:var(--color-text-secondary)">Pedida</div>';
+    h+='<div style="flex:1;background:var(--color-border-tertiary);border-radius:3px;height:12px"><div style="background:#2C5F8A;height:12px;border-radius:3px;width:'+pctPed+'%;min-width:2px"></div></div>';
+    h+='<div style="width:70px;font-size:10.5px;text-align:right;font-weight:600">'+fmtN(r.cantidad_pedida)+'</div></div>';
+    h+='<div style="display:flex;align-items:center;gap:6px">';
+    h+='<div style="width:66px;font-size:10.5px;color:var(--color-text-secondary)">Entregada</div>';
+    h+='<div style="flex:1;background:var(--color-border-tertiary);border-radius:3px;height:12px"><div style="background:'+(cumplioCant?'#1B5E20':'#B08900')+';height:12px;border-radius:3px;width:'+pctEnt+'%;min-width:2px"></div></div>';
+    h+='<div style="width:70px;font-size:10.5px;text-align:right;font-weight:600">'+fmtN(r.cantidad_entregada||0)+'</div></div>';
+    h+='</div>';
+  });
+  h+='</div>';
+  el.innerHTML=h;
+}
+
 // ── Requerimientos productivos ─────────────────────────────────────────────────
 let _reqRows=[], reqF='';
 document.querySelectorAll('#req-tabs .tab').forEach(t=>t.addEventListener('click',()=>{
@@ -7768,6 +8422,11 @@ async function loadReq(){
   renderReq();
 }
 
+// La auto-carga por PDF/foto (autoCargarReq) fue reemplazada: los requerimientos
+// productivos ahora se generan y actualizan solos desde las OTT (ver backend
+// _sync_requerimiento_desde_ott). Se mantiene la carga manual (openReqModal)
+// solo como excepción para casos que no pasan por una OTT.
+
 function renderReq(){
   const q=($('req-buscar')?$('req-buscar').value:'').toLowerCase().trim();
   const filtradas=q?_reqRows.filter(function(r){
@@ -7775,13 +8434,29 @@ function renderReq(){
   }):_reqRows;
   if(!filtradas.length){$('req-list').innerHTML='<div class="em">No hay requerimientos.</div>';return;}
   let h='<table><tr><th>Número</th><th>Cliente</th><th>Código</th><th>Material / Proceso</th><th>Proveedor</th>'
-    +'<th>Cant. pedida</th><th>F. Estimada</th><th>F. Entrega</th><th>Estado</th><th></th></tr>';
+    +'<th>Cant. pedida</th><th>F. Estimada</th><th>F. Entrega</th><th>Estado</th><th>Calidad</th><th></th></tr>';
   filtradas.forEach(r=>{
+    const c=r._calidad;
+    let calidadBadge='—';
+    if(c && r.f_entrega){
+      const loteTitle=c.lote_pct!=null?' title="'+Math.round(c.lote_pct*100)+'% aprobado del lote"':'';
+      if(!c.evaluable){
+        calidadBadge='<span class="b ba" title="Lote de stock todavía sin decisión de Calidad">Pend. clasificación</span>';
+      } else if(c.origen==='manual'){
+        calidadBadge='<span class="b bk" title="Sin lote de stock vinculado — calidad cargada a mano (cant. no conforme)">Calidad manual</span>'
+          +(c.aprobado===0?' <span class="b br">Incidente</span>':'');
+      } else if(c.aprobado===0){
+        calidadBadge='<span class="b br"'+loteTitle+'>Incidente</span>';
+      } else {
+        calidadBadge='<span class="b bg"'+loteTitle+'>Aprobado</span>';
+      }
+    }
     h+='<tr><td><b>'+r.numero+'</b></td><td>'+(r.cliente_nombre||'—')+'</td><td>'+(r.codigo||'—')+'</td>'
       +'<td>'+(r.material_proceso||'—')+(r.provision?' <span style="color:var(--color-text-secondary)">— '+r.provision+'</span>':'')+'</td>'
       +'<td>'+(r.proveedor_nombre||'—')+'</td>'
-      +'<td>'+r.cantidad_pedida+' '+(r.unidad||'')+(r.cantidad_entregada!=null?' <span style="color:var(--color-text-secondary)">(ent. '+r.cantidad_entregada+')</span>':'')+'</td>'
+      +'<td>'+r.cantidad_pedida+' '+(r.unidad||'')+(r.cantidad_entregada!=null?' <span style="color:var(--color-text-secondary)">(ent. '+r.cantidad_entregada+(r.cantidad_aprobada!=null?' / apr. '+r.cantidad_aprobada:'')+')</span>':'')+'</td>'
       +'<td>'+fmtD(r.f_estimada)+'</td><td>'+fmtD(r.f_entrega)+'</td><td>'+sb(r.estado)+'</td>'
+      +'<td>'+calidadBadge+'</td>'
       +'<td style="white-space:nowrap">'
       +'<button class="btn btn-s" onclick=\'openReqModal('+r.id+')\'>Editar</button> '
       +(r.estado!=='ENTREGADO'&&r.estado!=='ANULADO'?'<button class="btn btn-s" onclick=\'openEntregaReq('+r.id+')\'>Registrar entrega</button> ':'')
@@ -7815,9 +8490,8 @@ async function openReqModal(id){
     $('req-estado').value=r.estado==='ANULADO'?'ANULADO':'';
     $('req-ubicacion').value=r.ubicacion_remito||'';$('req-obs').value=r.obs||'';
   } else {
-    $('mo-req-title').innerHTML='Nuevo requerimiento <span class="mx" onclick="closeMo(\'mo-req\')">×</span>';
-    const maxNum=_reqRows.reduce((m,r)=>{const n=parseInt(r.numero);return !isNaN(n)&&n>m?n:m;},0);
-    if(maxNum>0)$('req-numero').value=maxNum+1;
+    toast('Los requerimientos se generan automáticamente; no se pueden crear a mano','w');
+    return;
   }
   openMo('mo-req');
 }
@@ -7852,7 +8526,17 @@ function openEntregaReq(id){
   $('reqent-cantidad').value=r.cantidad_entregada!=null?r.cantidad_entregada:r.cantidad_pedida;
   $('reqent-fecha').value='';$('reqent-remito').value=r.remito||'';
   $('reqent-factura').value=r.nro_factura||'';$('reqent-noconforme').value='';
+  $('reqent-aprobada').value=r.cantidad_aprobada!=null?r.cantidad_aprobada:'';
   openMo('mo-req-entrega');
+}
+
+// Recalcula "Cantidad aprobada" = entregada - no conforme a medida que se
+// tipean esos dos campos. Queda igual editable a mano si el usuario la toca
+// después (no se vuelve a pisar salvo que cambien entregada/no conforme).
+function reqEntCalcAprobada(){
+  const ent=$('reqent-cantidad').value?parseFloat($('reqent-cantidad').value):null;
+  const noConf=$('reqent-noconforme').value?parseFloat($('reqent-noconforme').value):0;
+  $('reqent-aprobada').value=ent!=null?(ent-noConf):'';
 }
 
 async function saveEntregaReq(){
@@ -7863,7 +8547,8 @@ async function saveEntregaReq(){
     f_entrega:fecha,
     cantidad_entregada:$('reqent-cantidad').value?parseFloat($('reqent-cantidad').value):null,
     remito:$('reqent-remito').value.trim(), nro_factura:$('reqent-factura').value.trim(),
-    cant_no_conforme:$('reqent-noconforme').value?parseFloat($('reqent-noconforme').value):null
+    cant_no_conforme:$('reqent-noconforme').value?parseFloat($('reqent-noconforme').value):null,
+    cantidad_aprobada:$('reqent-aprobada').value?parseFloat($('reqent-aprobada').value):null
   };
   const res=await api('/api/requerimientos_productivos/'+id+'/entrega',{method:'PUT',body:JSON.stringify(d)});
   if(res.ok){toast('Entrega registrada');closeMo('mo-req-entrega');loadReq();}
@@ -7894,7 +8579,7 @@ async function openOpEdit(op, pid){
   $('ope-nom').value=op.nombre;
   $('ope-desc').value=op.descripcion||'';
   $('ope-set').value=op.tiempo_setup_min||0;
-  $('ope-cic').value=Math.round((op.tiempo_ciclo_min||0)*60);
+  $('ope-cic').value=op.tiempo_ciclo_seg||0;
   const isTerc=!!(op.es_tercerizada);
   $('ope-terc').checked=isTerc;
   const tercFields=document.getElementById('ope-campos-terc');
@@ -7903,7 +8588,7 @@ async function openOpEdit(op, pid){
   // operación ya es tercerizada, para que esté disponible si el usuario
   // tilda "Tercerizada" recién en esta edición.
   if(!_prov.length)_prov=await api('/api/proveedores');
-  await selLoad('ope-prv',[{id:'',nombre:'— Sin proveedor —'},..._prov.map(function(p){return{id:p.id,nombre:p.razon};})],op.proveedor_id||null,'— Sin proveedor —');
+  setProvOp('ope',op.proveedor_id||null);
   if($('ope-precio')) $('ope-precio').value=op.precio_tercerizado||0;
   if($('ope-tdays')) $('ope-tdays').value=op.tiempo_minimo_dias||1;
   $('ope-obs').value=op.obs||'';
@@ -7920,7 +8605,7 @@ async function openOpEdit(op, pid){
   await selLoad('ope-maq',[{id:'',nombre:'— Cualquiera —'},..._maq.map(function(m){return{...m,nombre:m.codigo+' — '+m.nombre};})],op.maquina_id);
   // Load proveedores for tercerizada
   await loadTercProv('ope');
-  $('ope-prv').value=op.proveedor_id||'';
+  setProvOp('ope',op.proveedor_id||null);
   $('ope-precio').value=op.precio_tercerizado||0;
   $('ope-tdays').value=op.tiempo_minimo_dias||1;
   // Load existing materials
@@ -8062,7 +8747,7 @@ async function saveOpEdit(){
   // "Terciarizado" solo se guarda como tal si, además de tildar el check,
   // se cargó alguna información en sus campos (proveedor o precio).
   const esTerc=tercChecked && (!!provId || precio>0);
-  const materiales=esTerc?[]:[...$('ope-mats').querySelectorAll('.mr')].map(function(row){
+  const materiales=[...$('ope-mats').querySelectorAll('.mr')].map(function(row){
     const hidId=row.querySelector('.mat-id-field');
     const numInputs=row.querySelectorAll('input[type="number"]');
     const mid=hidId?hidId.value:null;
@@ -8086,7 +8771,7 @@ async function saveOpEdit(){
     categoria_maquina_id:esTerc?null:($('ope-catm').value||null),
     maquina_id:esTerc?null:($('ope-maq').value||null),
     tiempo_setup_min:esTerc?0:(parseFloat($('ope-set').value)||0),
-    tiempo_ciclo_min:esTerc?0:Math.round((parseFloat($('ope-cic').value)||0)/60*1000)/1000,
+    tiempo_ciclo_seg:esTerc?0:(parseFloat($('ope-cic').value)||0),
     proveedor_id:esTerc?provId:null,
     precio_tercerizado:esTerc?precio:0,
     tiempo_minimo_dias:esTerc?(parseInt($('ope-tdays').value)||1):0
@@ -8213,7 +8898,7 @@ async function openOTDetail(oid,num){
         +'<td>'+op.nombre+'</td>'
         +'<td>'+sector+'</td>'
         +'<td>'+op.tiempo_setup_min+' min</td>'
-        +'<td>'+Math.round((op.tiempo_ciclo_min||0)*60)+' seg</td>'
+        +'<td>'+(op.tiempo_ciclo_seg||0)+' seg</td>'
         +'<td>'+op.qty_requerida+'</td>'
         +'<td>'+op.qty_producida+'</td>'
         +'<td>'+sb(op.estado)+' <span style="font-size:10px;color:var(--color-text-secondary)">'+pct+'%</span></td>'
@@ -8310,7 +8995,7 @@ async function openEditOTOp(opId, oid){
   $('otop-ord').value = op.orden;
   $('otop-nom').value = op.nombre;
   $('otop-set').value = op.tiempo_setup_min||0;
-  $('otop-cic').value = Math.round((op.tiempo_ciclo_min||0)*60);
+  $('otop-cic').value = op.tiempo_ciclo_seg||0;
   $('otop-req').value = op.qty_requerida||0;
   $('otop-est').value = op.estado||'Pendiente';
   $('otop-obs').value = op.obs||'';
@@ -8352,7 +9037,7 @@ async function saveOTOp(){
     orden: $('otop-ord').value || '1',
     nombre: $('otop-nom').value,
     tiempo_setup_min: (parseFloat($('otop-set').value)||0),
-    tiempo_ciclo_min: Math.round((parseFloat($('otop-cic').value)||0)/60*1000)/1000,
+    tiempo_ciclo_seg: (parseFloat($('otop-cic').value)||0),
     qty_requerida: parseFloat($('otop-req').value)||0,
     estado: $('otop-est').value,
     categoria_maquina_id: $('otop-catm').value||null,
@@ -8500,11 +9185,6 @@ function unlinkMenuById(id){
   if(!r){toast('Proveedor no encontrado','e');return;}
   unlinkMenu(id,r.razon,r.mat_vinculados||[]);
 }
-function openRecvById(id){
-  const r=_oc_cache.get(parseInt(id));
-  if(!r){toast('OC no encontrada','e');return;}
-  openRecv(id,r.proveedor_nombre,r.items||[]);
-}
 
 
 // ── Edit material ─────────────────────────────────────────────────────────────
@@ -8513,6 +9193,10 @@ async function openEditMat(id){
   if(!r){toast('Artículo no encontrado','e');return;}
   $('emat-id').value=r.id;
   $('emat-cod').value=r.codigo;
+  const esEspejoProducto=!!r.producto_id;
+  $('emat-cod').readOnly=esEspejoProducto;
+  $('emat-cod').style.background=esEspejoProducto?'var(--color-background-secondary)':'';
+  $('emat-cod-hint').style.display=esEspejoProducto?'':'none';
   $('emat-des').value=r.descripcion;
   $('emat-tip').value=r.categoria||'Material';
   $('emat-uni').value=r.unidad||'kg';
@@ -8533,6 +9217,7 @@ async function saveEditMat(){
   const id=$('emat-id').value;
   const puedeEditarPrecio=(ROL==='admin');
   const body={
+    codigo:$('emat-cod').value.trim(),
     descripcion:$('emat-des').value,
     categoria:$('emat-tip').value,
     categoria_producto_id:$('emat-cp').value||null,
@@ -8573,18 +9258,6 @@ async function openMatMovimientos(id){
 
 // ── Módulo Movimientos (página completa) ──────────────────────────────────────
 async function loadMovimientos(){
-  // Populate material filter if empty
-  if($('mov-mat-fil').options.length<=1){
-    if(_mat_cache.size===0){
-      const allM=await api('/api/materiales');
-      _mat_cache=new Map(allM.map(function(r){return[r.id,r];}));
-    }
-    _mat_cache.forEach(function(m){
-      const o=document.createElement('option');o.value=m.id;
-      o.textContent=m.codigo+' — '+m.descripcion;
-      $('mov-mat-fil').appendChild(o);
-    });
-  }
   const mid=$('mov-mat-fil').value;
   const tipo=$('mov-tipo-fil').value;
   let url='/api/movimientos';
@@ -8594,6 +9267,10 @@ async function loadMovimientos(){
   if(params.length) url+='?'+params.join('&');
 
   $('mov-list').innerHTML='<div class="ld">Cargando...</div>';
+  if(_mat_cache.size===0){
+    const allM=await api('/api/materiales');
+    _mat_cache=new Map(allM.map(function(r){return[r.id,r];}));
+  }
   const rows=await api(url);
   if(!rows.length){$('mov-list').innerHTML='<div class="em">No hay movimientos para los filtros seleccionados.</div>';return;}
 
@@ -8621,12 +9298,51 @@ function goToMatMov(matId){
   if(navEl)navEl.classList.add('active');
   $('p-movimientos').classList.add('active');
   // Set filter and load
-  const sel=$('mov-mat-fil');
-  if(sel.options.length<=1){
-    loadMovimientos().then(function(){sel.value=matId;loadMovimientos();});
-  } else {
-    sel.value=matId;loadMovimientos();
+  const mat=_mat_cache.get(parseInt(matId));
+  $('mov-mat-fil').value=matId;
+  $('mov-mat-fil-txt').value=mat?(mat.codigo+' — '+mat.descripcion):'';
+  loadMovimientos();
+}
+
+function filtrarMovMatFil(){
+  const q=($('mov-mat-fil-txt').value||'').toLowerCase().trim();
+  const drop=$('mov-mat-fil-drop');
+  if(!q){
+    drop.style.display='none';
+    if($('mov-mat-fil').value){ $('mov-mat-fil').value=''; loadMovimientos(); }
+    return;
   }
+  if(!_mat.length){
+    drop.innerHTML='<div style="padding:8px 12px;font-size:12px;color:var(--color-text-secondary)">Cargando...</div>';
+    drop.style.display='block';
+    api('/api/materiales').then(function(rows){ _mat=rows; filtrarMovMatFil(); });
+    return;
+  }
+  const lista=_mat.filter(function(m){
+    return (m.codigo&&m.codigo.toLowerCase().includes(q)) || (m.descripcion&&m.descripcion.toLowerCase().includes(q));
+  }).slice(0,40);
+  if(!lista.length){
+    drop.innerHTML='<div style="padding:8px 12px;font-size:12px;color:var(--color-text-secondary)">Sin resultados.</div>';
+    drop.style.display='block';
+    return;
+  }
+  drop.innerHTML='';
+  lista.forEach(function(m){
+    const row=document.createElement('div');
+    row.style.cssText='padding:7px 12px;font-size:12px;cursor:pointer;border-bottom:1px solid var(--color-border-tertiary)';
+    row.onmouseenter=function(){this.style.background='var(--color-background-secondary)';};
+    row.onmouseleave=function(){this.style.background='';};
+    row.innerHTML='<span style="font-weight:600">'+m.codigo+'</span> <span style="color:var(--color-text-secondary)">— '+m.descripcion+'</span>';
+    row.onmousedown=function(e){ e.preventDefault(); seleccionarMovMatFil(m.id, m.codigo+' — '+m.descripcion); };
+    drop.appendChild(row);
+  });
+  drop.style.display='block';
+}
+function seleccionarMovMatFil(id, texto){
+  $('mov-mat-fil').value=id;
+  $('mov-mat-fil-txt').value=texto;
+  $('mov-mat-fil-drop').style.display='none';
+  loadMovimientos();
 }
 
 // Inventory codes are clickable via goToMatMov inline in the table row
@@ -8642,7 +9358,11 @@ function toggleTercOp(prefix){
   const mats=document.getElementById(prefix+'-mats-section');
   if(propios) propios.style.display=checked?'none':'grid';
   if(terc)    terc.style.display=checked?'grid':'none';
-  if(mats)    mats.style.display=checked?'none':'block';
+  // La sección de materiales/productos como insumo se muestra siempre,
+  // tercerizada o no: una operación tercerizada también puede necesitar
+  // especificar qué material o producto semielaborado se le manda al
+  // proveedor como insumo para que haga el trabajo.
+  if(mats)    mats.style.display='block';
 
   // Si es tercerizada, el formulario debe mostrar solo: N° de orden, Nombre,
   // Descripción, Precio acordado, Proveedor y Plazo de entrega. El resto de
@@ -8672,13 +9392,43 @@ function toggleVolAgrupOp(prefix, force){
   }
 }
 
+// El proveedor de una operacion tercerizada se elige con un buscador
+// (input de texto + lista filtrada), no con un select: la lista de
+// proveedores es larga y buscar por razon social es mas rapido que scrollear.
+// El id elegido queda en el input hidden '<prefix>-prv', asi que el resto del
+// codigo lo sigue leyendo igual que antes.
 async function loadTercProv(prefix){
-  const sel=document.getElementById(prefix+'-prv');
-  if(!sel) return;  // element may not exist in this modal
+  if(!document.getElementById(prefix+'-prv')) return;  // no existe en este modal
   if(!_prov.length)_prov=await api('/api/proveedores');
-  sel.innerHTML='<option value="">— Seleccionar proveedor —</option>';
-  _prov.forEach(function(p){
-    const o=document.createElement('option');o.value=p.id;o.textContent=p.razon;sel.appendChild(o);
+}
+
+// Deja el buscador mostrando el proveedor 'id' (o vacio si es null).
+function setProvOp(prefix,id){
+  const hid=document.getElementById(prefix+'-prv');
+  const txt=document.getElementById(prefix+'-prv-search');
+  if(!hid||!txt) return;
+  const p=id?_prov.find(function(r){return r.id==id;}):null;
+  hid.value=p?p.id:'';
+  txt.value=p?p.razon:'';
+  const cont=document.getElementById(prefix+'-prv-results');
+  if(cont){cont.style.display='none';cont.innerHTML='';}
+}
+
+function filtrarProvOp(prefix){
+  const txt=document.getElementById(prefix+'-prv-search');
+  const cont=document.getElementById(prefix+'-prv-results');
+  if(!txt||!cont) return;
+  const q=(txt.value||'').toLowerCase().trim();
+  // Si el usuario borro el texto, se borra tambien el proveedor elegido.
+  if(!q) document.getElementById(prefix+'-prv').value='';
+  const lista=q?_prov.filter(function(r){
+    return (r.razon||'').toLowerCase().includes(q)
+      ||(r.contacto||'').toLowerCase().includes(q);
+  }):_prov;
+  _novotResultsRender(cont,lista,function(r){return r.razon;},function(r){
+    document.getElementById(prefix+'-prv').value=r.id;
+    txt.value=r.razon;
+    cont.style.display='none';cont.innerHTML='';
   });
 }
 
@@ -9006,7 +9756,7 @@ async function openNovEdit(novId){
   ops.forEach(function(op){
     const opt=document.createElement('option');
     opt.value=op.id;
-    opt.textContent=op.orden+'. '+op.nombre+' (ciclo: '+op.tiempo_ciclo_min+' min)';
+    opt.textContent=op.orden+'. '+op.nombre+' (ciclo: '+op.tiempo_ciclo_seg+' seg)';
     sel.appendChild(opt);
   });
   sel.value = nov.operacion_id||'';
