@@ -1,0 +1,209 @@
+CLASIFICACION DE LAS 202 RUTAS
+
+== 403 con @solo_con_monetario (10) ==
+  GET     /api/cotizaciones_compra                           get_cotizaciones
+  POST    /api/cotizaciones_compra                           create_cotizacion
+  PUT     /api/cotizaciones_compra/<int:cid>                 update_cotizacion
+  POST    /api/cotizaciones_compra/<int:cid>/deseleccionar   deseleccionar_cotizacion
+  POST    /api/cotizaciones_compra/<int:cid>/seleccionar     seleccionar_cotizacion
+  GET     /api/dashboard/economico                           dashboard_economico
+  GET     /api/dashboard/facturacion_por_cliente             dashboard_facturacion_por_cliente
+  POST    /api/ordenes_compra                                create_oc
+  PUT     /api/ordenes_compra/<int:ocid>                     update_oc
+  GET     /api/ordenes_compra/<int:ocid>/pdf                 emitir_oc_pdf
+
+== STRIP: el after_request les saca claves monetarias (33) ==
+  GET     /api/dashboard                                     dashboard                          facturacion
+  POST    /api/materiales                                    create_material                    precio_unit
+  PUT     /api/materiales/<int:mid>                          update_material                    precio_unit
+  POST    /api/mrp/consolidar                                mrp_consolidar                     costo_mat,costo_mat_item,costo_mo,precio_venta
+  POST    /api/mrp/consolidar_pronostico                     mrp_consolidar_pronostico          costo_mat,costo_mat_item,costo_mo,precio_venta
+  POST    /api/operaciones                                   create_operacion                   precio,precio_tercerizado
+  PUT     /api/operaciones/<int:oid>                         update_operacion                   precio,precio_tercerizado
+  GET     /api/ordenes                                       get_ordenes                        costo_mat,costo_terciarizado,costo_total,precio_acordado
+  POST    /api/ordenes                                       create_orden                       costo_mat,costo_mo,precio_venta
+  PUT     /api/ordenes/<int:oid>                             update_orden                       costo_mat,costo_mo,precio_venta
+  GET     /api/ordenes_cliente                               get_ordenes_cliente                monto,monto_entregado,monto_pedido,precio,precio_unit
+  POST    /api/ordenes_cliente                               create_orden_cliente               precio_unit
+  PUT     /api/ordenes_cliente/<int:ocid>                    update_orden_cliente               precio_unit
+  GET     /api/ordenes_cliente/<int:ocid>/avance             get_oc_avance                      importe,monto,monto_entregado,monto_pedido,precio…
+  POST    /api/ordenes_cliente/<int:ocid>/explotar           explotar_orden_cliente             costo_mat,precio_venta
+  POST    /api/ordenes_compra/<int:ocid>/recibir             recibir_oc                         monto_total,precio,precio_unit
+  POST    /api/ott                                           create_ott                         precio_acordado
+  PUT     /api/ott/<int:oid>                                 update_ott                         precio_acordado
+  POST    /api/ott/<int:oid>/emitir_remito                   ott_emitir_remito                  precio
+  POST    /api/ott/<int:oid>/registrar_retorno               ott_registrar_retorno              precio_unit
+  POST    /api/presupuestos                                  create_presupuesto                 subtotal
+  GET     /api/productos                                     get_productos                      costo_mat,costo_mo,costo_terc,costo_total,oc_precio_reciente…
+  POST    /api/productos                                     create_producto                    costo_mat,costo_mo,precio_venta
+  PUT     /api/productos/<int:pid>                           update_producto                    costo_mat,costo_mo,precio,precio_venta
+  POST    /api/productos/<int:pid>/copiar                    copiar_producto                    costo_mat,costo_mo,precio_tercerizado,precio_venta
+  GET     /api/pronosticos_venta/<int:pid>/tabla             get_pronostico_venta_tabla         precio_venta
+  GET     /api/proveedores                                   get_proveedores                    precio_unit
+  GET     /api/proveedores/<int:pid>/materiales              get_proveedor_materiales           precio_unit
+  POST    /api/proveedores/<int:pid>/materiales              link_mat                           precio_unit
+  GET     /api/recepciones                                   get_recepciones                    precio_unit
+  POST    /api/recepciones                                   create_recepcion                   precio_unit
+  POST    /api/remitos                                       create_remito                      importe,valor_hora_mo
+  PUT     /api/tickets/<int:tid>                             update_ticket                      costo
+
+== SIN CAMBIOS: no tocan importes (159) ==
+  GET     /                                                  index
+  GET     /api/auditoria                                     get_auditoria
+  GET     /api/auditoria/<int:aid>                           get_auditoria_detalle
+  GET     /api/auditoria/opciones                            get_auditoria_opciones
+  POST    /api/bulk/import                                   bulk_import
+  GET     /api/bulk/schema                                   get_bulk_schema
+  GET     /api/categorias_maquina                            get_cat_maq
+  POST    /api/categorias_maquina                            create_cat_maq
+  DELETE  /api/categorias_maquina/<int:cid>                  delete_cat_maq
+  PUT     /api/categorias_maquina/<int:cid>                  update_cat_maq
+  GET     /api/categorias_producto                           get_cat_prod
+  POST    /api/categorias_producto                           create_cat_prod
+  DELETE  /api/categorias_producto/<int:cid>                 delete_cat_prod
+  PUT     /api/categorias_producto/<int:cid>                 update_cat_prod
+  GET     /api/clientes                                      get_clientes
+  POST    /api/clientes                                      create_cliente
+  PUT     /api/clientes/<int:cid>                            update_cliente
+  GET     /api/config                                        get_config
+  POST    /api/config                                        save_config
+  GET     /api/dashboard/indicadores_compras                 dashboard_indicadores_compras
+  GET     /api/dashboard/operativo                           dashboard_operativo
+  GET     /api/dashboard/rendimiento_semanal                 dashboard_rendimiento_semanal
+  GET     /api/dashboard/requerimientos                      dashboard_requerimientos
+  GET     /api/debug/pt_materiales                           debug_pt_materiales
+  GET     /api/empleados                                     get_empleados
+  POST    /api/empleados                                     create_empleado
+  PUT     /api/empleados/<int:eid>                           update_empleado
+  GET     /api/lotes                                         get_lotes
+  POST    /api/lotes                                         create_lote
+  PUT     /api/lotes/<int:lid>                               update_lote
+  GET     /api/lotes/<int:lid>/trazabilidad                  trazabilidad_lote
+  GET     /api/mantenimiento                                 get_mantenimiento
+  POST    /api/mantenimiento                                 create_mantenimiento
+  DELETE  /api/mantenimiento/<int:pid>                       delete_mantenimiento
+  PUT     /api/mantenimiento/<int:pid>                       update_mantenimiento
+  GET     /api/maquinas                                      get_maquinas
+  POST    /api/maquinas                                      create_maquina
+  PUT     /api/maquinas/<int:mid>                            update_maquina
+  GET     /api/materiales                                    get_materiales
+  GET     /api/materiales/<int:mid>/lotes                    get_lotes_by_material
+  GET     /api/materiales/<int:mid>/lotes_aprobados          get_lotes_aprobados
+  POST    /api/materiales/<int:mid>/movimiento               movimiento
+  GET     /api/materiales/productos_terminados               get_productos_terminados_stock
+  GET     /api/me                                            me
+  GET     /api/movimientos                                   get_movimientos
+  GET     /api/mrp                                           mrp
+  POST    /api/mrp/pronostico_meses                          mrp_pronostico_meses
+  GET     /api/novedades                                     get_novedades
+  POST    /api/novedades                                     create_novedad
+  GET     /api/novedades-eliminadas                          get_novedades_eliminadas
+  POST    /api/novedades-eliminadas/<int:eid>/restaurar      restaurar_novedad_eliminada
+  DELETE  /api/novedades/<int:nid>                           delete_novedad
+  GET     /api/novedades/<int:nid>                           get_novedad
+  PUT     /api/novedades/<int:nid>                           update_novedad
+  GET     /api/novedades/corregir_rendimiento                preview_corregir_novedades
+  POST    /api/novedades/corregir_rendimiento                aplicar_corregir_novedades
+  DELETE  /api/operaciones/<int:oid>                         delete_operacion
+  GET     /api/operaciones/<int:opid>/herramientas           get_herramientas
+  POST    /api/operaciones/<int:opid>/herramientas           add_herramienta
+  DELETE  /api/operaciones/<int:opid>/herramientas/<int:hid> delete_herramienta
+  PUT     /api/operaciones/<int:opid>/herramientas/<int:hid> update_herramienta
+  GET     /api/operaciones_pendientes                        get_operaciones_pendientes
+  PUT     /api/orden_operaciones/<int:ooid>                  update_orden_operacion
+  GET     /api/orden_operaciones/<int:ooid>/materiales       get_ot_op_materiales
+  PUT     /api/orden_operaciones/<int:ooid>/materiales       set_ot_op_materiales
+  GET     /api/orden_operaciones/<int:ooid>/materiales_requeridos get_materiales_requeridos_op
+  GET     /api/ordenes/<int:oid>                             get_orden
+  GET     /api/ordenes/<int:oid>/materiales                  get_orden_materiales
+  POST    /api/ordenes/<int:oid>/materiales/<int:mid>/asignar asignar_material_ot
+  POST    /api/ordenes/<int:oid>/materiales/<int:mid>/asignar_lote asignar_lote_a_ot
+  PUT     /api/ordenes/<int:oid>/materiales/<int:mid>/lotes/<int:lote_id> modificar_cantidad_lote_asignado
+  GET     /api/ordenes/<int:oid>/materiales/alerta           alerta_materiales_ot
+  POST    /api/ordenes/<int:oid>/materiales/populate         populate_orden_materiales
+  GET     /api/ordenes/<int:oid>/operaciones                 get_orden_operaciones
+  POST    /api/ordenes/<int:oid>/operaciones                 add_ot_operacion
+  DELETE  /api/ordenes/<int:oid>/operaciones/<int:opid>      delete_ot_operacion
+  PUT     /api/ordenes/<int:oid>/operaciones/<int:opid>      update_ot_operacion
+  GET     /api/ordenes/<int:oid>/operaciones/<int:opid>/pdf  emitir_op_pdf
+  POST    /api/ordenes/<int:oid>/operaciones/populate        populate_orden_operaciones
+  GET     /api/ordenes/<int:oid>/pdf                         emitir_ot_pdf
+  GET     /api/ordenes/vinculables                           get_ordenes_vinculables
+  DELETE  /api/ordenes_cliente_items/<int:item_id>/desvincular_ot/<int:ot_id> desvincular_ot_item
+  GET     /api/ordenes_cliente_items/<int:item_id>/ots_vinculadas get_ots_vinculadas_item
+  POST    /api/ordenes_cliente_items/<int:item_id>/vincular_ot vincular_ot_item
+  GET     /api/ordenes_compra                                get_ocs
+  POST    /api/ordenes_compra/<int:ocid>/anular              anular_oc
+  POST    /api/ordenes_compra/<int:ocid>/aprobar             aprobar_oc
+  POST    /api/ordenes_compra/<int:ocid>/cerrar              cerrar_oc
+  POST    /api/ordenes_compra/<int:ocid>/completar           completar_oc
+  POST    /api/ordenes_compra/<int:ocid>/devolver_rechazo    oc_devolver_rechazo
+  GET     /api/ordenes_compra/<int:ocid>/remitos             oc_remitos_recibidos
+  GET     /api/ordenes_compra/proveedor/<int:pid>            get_ocs_by_proveedor
+  GET     /api/ott                                           get_ott_list
+  GET     /api/ott/<int:oid>                                 get_ott
+  POST    /api/ott/<int:oid>/completar                       ott_completar
+  POST    /api/ott/<int:oid>/devolver_rechazo                ott_devolver_rechazo
+  GET     /api/presupuestos                                  get_presupuestos
+  GET     /api/productos/<int:pid>                           get_producto
+  GET     /api/productos/<int:pid>/archivos                  list_archivos
+  POST    /api/productos/<int:pid>/archivos                  upload_archivo
+  DELETE  /api/productos/<int:pid>/archivos/<path:nombre>    delete_archivo
+  GET     /api/productos/<int:pid>/archivos/<path:nombre>    download_archivo
+  DELETE  /api/productos/<int:pid>/carpetas                  delete_carpeta_archivos
+  POST    /api/productos/<int:pid>/carpetas                  create_carpeta_archivos
+  GET     /api/productos/<int:pid>/clientes                  get_producto_clientes
+  POST    /api/productos/<int:pid>/clientes                  link_producto_cliente
+  DELETE  /api/productos/<int:pid>/clientes/<int:cid>        unlink_producto_cliente
+  GET     /api/productos/<int:pid>/versiones                 list_versiones
+  DELETE  /api/productos/<int:pid>/versiones/<int:vid>       delete_version
+  GET     /api/productos/<int:pid>/versiones/<int:vid>       get_version
+  GET     /api/productos_by_cliente/<int:cid>                get_productos_by_cliente
+  GET     /api/pronosticos_venta                             get_pronosticos_venta
+  POST    /api/pronosticos_venta                             create_pronostico_venta
+  DELETE  /api/pronosticos_venta/<int:pid>                   delete_pronostico_venta
+  PUT     /api/pronosticos_venta/<int:pid>                   update_pronostico_venta
+  PUT     /api/pronosticos_venta/<int:pid>/items             update_pronostico_venta_items
+  POST    /api/proveedores                                   create_proveedor
+  PUT     /api/proveedores/<int:pid>                         update_proveedor
+  DELETE  /api/proveedores/<int:pid>/materiales/<int:mid>    unlink_mat
+  GET     /api/pt_disponible                                 get_pt_disponible
+  GET     /api/remitos                                       get_remitos
+  GET     /api/rendimiento_operario                          get_rendimiento_operario
+  GET     /api/rendimiento_operario_dias                     get_rendimiento_operario_dias
+  GET     /api/rendimiento_operarios                         rendimiento_operarios
+  GET     /api/requerimientos_productivos                    get_requerimientos_productivos
+  POST    /api/requerimientos_productivos                    create_requerimiento_productivo
+  DELETE  /api/requerimientos_productivos/<int:rid>          delete_requerimiento_productivo
+  PUT     /api/requerimientos_productivos/<int:rid>          update_requerimiento_productivo
+  PUT     /api/requerimientos_productivos/<int:rid>/entrega  registrar_entrega_requerimiento
+  POST    /api/requerimientos_productivos/auto_carga         auto_carga_requerimiento
+  GET     /api/roles                                         get_roles
+  POST    /api/roles                                         create_rol
+  DELETE  /api/roles/<int:rid>                               delete_rol
+  PUT     /api/roles/<int:rid>                               update_rol
+  POST    /api/roles/<int:rid>/aplicar_permisos              aplicar_permisos_rol
+  GET     /api/solicitudes_compra                            get_solicitudes
+  POST    /api/solicitudes_compra                            create_solicitud
+  PUT     /api/solicitudes_compra/<int:sid>                  update_solicitud
+  GET     /api/solicitudes_compra/pendientes_count           get_sc_pendientes_count
+  GET     /api/tickets                                       get_tickets
+  POST    /api/tickets                                       create_ticket
+  GET     /api/trabajo-no-productivo                         get_trabajo_no_productivo
+  POST    /api/trabajo-no-productivo                         create_trabajo_no_productivo
+  DELETE  /api/trabajo-no-productivo/<int:tid>               delete_trabajo_no_productivo
+  PUT     /api/trabajo-no-productivo/<int:tid>               update_trabajo_no_productivo
+  GET     /api/usuarios                                      get_usuarios
+  POST    /api/usuarios                                      create_usuario
+  DELETE  /api/usuarios/<int:uid>                            delete_usuario
+  PUT     /api/usuarios/<int:uid>                            update_usuario
+  GET     /api/usuarios/<int:uid>/permisos                   get_permisos
+  POST    /api/usuarios/<int:uid>/permisos                   save_permisos
+  GET     /api/version                                       api_version
+  GET     /app                                               react_app
+  GET     /app/<path:path>                                   react_app
+  GET     /diagnostico                                       diagnostico_page
+  GET,POST /login                                             login
+  GET     /logout                                            logout
+  GET     /manual                                            manual_usuario
+  GET     /manual/<fmt>                                      manual_descarga

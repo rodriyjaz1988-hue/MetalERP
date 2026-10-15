@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """MetalERP v3.0 - Sistema ERP Taller Metalurgico"""
-import os, re, socket, sqlite3, hashlib, secrets, math
+import os, re, socket, sqlite3, hashlib, secrets, math, threading
+import json as _json
 
 # --- Parche compatibilidad Windows Server viejo / OpenSSL sin 'usedforsecurity' ---
 # reportlab moderno llama hashlib.md5(usedforsecurity=False), pero el build de
@@ -14,7 +15,8 @@ hashlib.md5 = _md5_compat
 
 from datetime import datetime, date, timedelta
 from functools import wraps
-from flask import Flask, render_template, request, jsonify, session, redirect, g, send_from_directory
+from flask import (Flask, render_template, request, jsonify, session, redirect, g,
+                   send_from_directory, has_request_context)
 
 # ── Permisos predeterminados por rol ──────────────────────────────────────────
 DEFAULT_PERMISIONES = {
@@ -38,7 +40,7 @@ DEFAULT_PERMISIONES = {
     }
 }
 
-# ── Logo Mecanizados Ituzaingo (embebido en base64 para el PDF de OT) ───────
+# ── Logo Mecanizado Ituzaingo (embebido en base64 para el PDF de OT) ───────
 _LOGO_ITUZAINGO_B64 = (
     "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAUDBAQEAwUEBAQFBQUGBwwIBwcHBw8LCwkMEQ8SEhEPERETFhwXExQaFRERGCEYGh0d"
     "Hx8fExciJCIeJBweHx7/2wBDAQUFBQcGBw4ICA4eFBEUHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4e"
@@ -438,11 +440,381 @@ app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = secrets.token_hex(32)
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
+# ── Bitácora de auditoría ─────────────────────────────────────────────────────
+# Toda alta/modificación/baja de datos queda registrada en la tabla `auditoria`
+# SIN tocar los controladores: se intercepta en la capa de conexión. Por acá
+# pasan tanto los helpers query()/execute() como los db.execute(...) sueltos
+# que hay repartidos por el archivo, así que no hay forma de escribir en la
+# base sin dejar rastro.
+#
+# Reglas:
+#   · El registro nunca puede voltear la operación principal: todo el trabajo
+#     de auditoría va envuelto en try/except y, si falla, solo se avisa por
+#     consola (SQLite hace rollback a nivel sentencia, no de transacción).
+#   · Origen "usuario" cuando hay sesión HTTP; "sistema" para procesos
+#     automáticos (arranque, backfills, cálculos) o cuando un bloque se marca
+#     explícitamente con auditoria_proceso("nombre").
+#   · Nunca se guardan contraseñas ni columnas de marca de tiempo técnica.
+
+AUDITORIA_TABLAS_EXCLUIDAS = {"auditoria"}
+# Nombres exactos que nunca se guardan.
+AUDITORIA_COLUMNAS_EXCLUIDAS = {"password", "passwd", "pwd", "clave", "updated_at", "modificado_en"}
+# Fragmentos: cualquier columna que los contenga tampoco se guarda.
+AUDITORIA_COLUMNAS_FRAGMENTOS = ("password", "contrasena", "contraseña", "updated_at", "token", "secret")
+# Tope de filas inspeccionadas por sentencia (un UPDATE masivo no debe hacer
+# que la auditoría cueste más que la operación en sí).
+AUDITORIA_MAX_FILAS = 500
+# Los valores muy largos (ej. imágenes en base64 en `configuracion`) se cortan.
+AUDITORIA_MAX_LARGO_VALOR = 2000
+
+_aud_local = threading.local()
+
+
+def _aud_estado(nombre, default=None):
+    return getattr(_aud_local, nombre, default)
+
+
+def _aud_aviso(e):
+    try:
+        print(f"[auditoria] No se pudo registrar el cambio: {e}")
+    except Exception:
+        pass
+
+
+class auditoria_proceso:
+    """Marca un bloque como cambio hecho por el sistema y no por el usuario.
+
+    Sirve tanto de context manager como de decorador:
+
+        with auditoria_proceso("MRP"):
+            ...
+        @auditoria_proceso("backfill requerimientos")
+        def _backfill(): ...
+
+    Es el único punto de extensión pensado para el resto del código: todo lo
+    demás se audita solo.
+    """
+
+    def __init__(self, nombre):
+        self.nombre = nombre
+
+    def __enter__(self):
+        self._previo = _aud_estado("proceso")
+        _aud_local.proceso = self.nombre
+        return self
+
+    def __exit__(self, *exc):
+        _aud_local.proceso = self._previo
+        return False
+
+    def __call__(self, f):
+        @wraps(f)
+        def _envuelto(*a, **kw):
+            with auditoria_proceso(self.nombre):
+                return f(*a, **kw)
+        return _envuelto
+
+
+def _aud_identidad():
+    """(origen, usuario_id, actor) de quien está haciendo el cambio."""
+    proceso = _aud_estado("proceso")
+    if proceso:
+        return "sistema", None, proceso
+    try:
+        if has_request_context():
+            if session.get("user_id"):
+                nombre = session.get("nombre") or session.get("username") or f"usuario #{session['user_id']}"
+                return "usuario", session["user_id"], nombre
+            return "sistema", None, "solicitud sin sesión"
+    except Exception:
+        pass
+    return "sistema", None, "proceso interno"
+
+
+def _aud_ruta():
+    try:
+        if has_request_context():
+            return f"{request.method} {request.path}"
+    except Exception:
+        pass
+    return None
+
+
+# ── Lectura del SQL ───────────────────────────────────────────────────────────
+_AUD_DML = re.compile(r"^\s*(INSERT|REPLACE|UPDATE|DELETE)\b", re.I)
+_AUD_TABLA = re.compile(
+    r"^\s*(?:INSERT(?:\s+OR\s+[A-Za-z]+)?\s+INTO"
+    r"|REPLACE(?:\s+INTO)?"
+    r"|UPDATE(?:\s+OR\s+[A-Za-z]+)?"
+    r"|DELETE\s+FROM)\s+[\"'`\[]?([A-Za-z_][A-Za-z0-9_]*)", re.I)
+
+
+def _aud_mascara(sql):
+    """Copia del SQL con literales y comentarios pisados por espacios, más la
+    profundidad de paréntesis de cada carácter (misma longitud que `sql`).
+
+    Hace falta para encontrar el WHERE *de la sentencia* y no el de una
+    subconsulta, y para contar los '?' que corresponden al SET.
+    """
+    out, prof = [], []
+    nivel, estado, cierre, i, n = 0, None, "", 0, len(sql)
+    while i < n:
+        c = sql[i]
+        if estado is None:
+            if c in "'\"`[":
+                estado, cierre = "lit", ("]" if c == "[" else c)
+                out.append(" "); prof.append(nivel)
+            elif c == "-" and i + 1 < n and sql[i + 1] == "-":
+                estado = "lin"; out.append(" "); prof.append(nivel)
+            elif c == "/" and i + 1 < n and sql[i + 1] == "*":
+                estado = "blk"; out.append(" "); prof.append(nivel)
+            elif c == "(":
+                nivel += 1; out.append(c); prof.append(nivel)
+            elif c == ")":
+                out.append(c); prof.append(nivel); nivel -= 1
+            else:
+                out.append(c); prof.append(nivel)
+        elif estado == "lit":
+            out.append(" "); prof.append(nivel)
+            if c == cierre:
+                if c != "]" and i + 1 < n and sql[i + 1] == c:
+                    i += 1; out.append(" "); prof.append(nivel)   # '' = comilla escapada
+                else:
+                    estado = None
+        elif estado == "lin":
+            out.append("\n" if c == "\n" else " "); prof.append(nivel)
+            if c == "\n":
+                estado = None
+        else:  # blk
+            out.append(" "); prof.append(nivel)
+            if c == "/" and i > 0 and sql[i - 1] == "*":
+                estado = None
+        i += 1
+    return "".join(out), prof
+
+
+def _aud_partes(sql, params):
+    """(verbo, tabla, where_sql, params_del_where) o (None, ...) si no aplica."""
+    m = _AUD_TABLA.match(sql)
+    if not m:
+        return None, None, None, None
+    verbo = re.match(r"^\s*([A-Za-z]+)", sql).group(1).upper()
+    tabla = m.group(1)
+    if verbo in ("INSERT", "REPLACE"):
+        return verbo, tabla, None, ()
+    if isinstance(params, dict):
+        return None, None, None, None          # parámetros nombrados: no se usan acá
+    seq = tuple(params or ())
+    mascara, prof = _aud_mascara(sql)
+    pos = -1
+    for w in re.finditer(r"\bWHERE\b", mascara, re.I):
+        if prof[w.start()] == 0:
+            pos = w.start()
+    if pos < 0:
+        return verbo, tabla, "", ()            # sin WHERE: afecta a toda la tabla
+    where_sql = sql[pos:]
+    fin = re.search(r"\bRETURNING\b", mascara[pos:], re.I)
+    if fin:
+        where_sql = where_sql[:fin.start()]
+    return verbo, tabla, where_sql, seq[mascara.count("?", 0, pos):]
+
+
+# ── Metadatos de las tablas (se leen una vez por proceso) ─────────────────────
+_aud_meta = {}
+
+
+def _aud_tabla_meta(conn, tabla):
+    meta = _aud_meta.get(tabla)
+    if meta is None:
+        cols, pks = [], []
+        for c in conn._crudo(f'PRAGMA table_info("{tabla}")').fetchall():
+            nombre = c[1]
+            cols.append(nombre)
+            if c[5]:
+                pks.append(nombre)
+        excluidas = {c for c in cols
+                     if c.lower() in AUDITORIA_COLUMNAS_EXCLUIDAS
+                     or any(f in c.lower() for f in AUDITORIA_COLUMNAS_FRAGMENTOS)}
+        meta = {"cols": cols, "pk": pks[0] if len(pks) == 1 else None, "excluidas": excluidas}
+        _aud_meta[tabla] = meta
+    return meta
+
+
+def _aud_valor(v):
+    if isinstance(v, (bytes, bytearray)):
+        return f"<binario, {len(v)} bytes>"
+    if isinstance(v, str) and len(v) > AUDITORIA_MAX_LARGO_VALOR:
+        return v[:AUDITORIA_MAX_LARGO_VALOR] + f"… (+{len(v) - AUDITORIA_MAX_LARGO_VALOR} caracteres)"
+    return v
+
+
+def _aud_fila(fila, excluidas):
+    return {k: _aud_valor(fila[k]) for k in fila.keys()
+            if k != "_aud_rowid" and k not in excluidas}
+
+
+def _aud_enmascarar(d):
+    """Reemplaza los importes por un marcador. La bitácora sigue mostrando QUÉ
+    campo cambió, pero no el valor, para quien no puede ver importes."""
+    if not d:
+        return d
+    return {k: ("\u2014 (oculto)" if k in CAMPOS_MONETARIOS else v) for k, v in d.items()}
+
+
+def _aud_leer(conn, tabla, where_sql, where_params, meta):
+    """Filas afectadas, con su rowid, antes de ejecutar la sentencia."""
+    try:
+        cur = conn._crudo(f'SELECT rowid AS _aud_rowid, * FROM "{tabla}" {where_sql or ""}', where_params)
+    except sqlite3.Error:
+        cur = conn._crudo(f'SELECT * FROM "{tabla}" {where_sql or ""}', where_params)
+    cur.row_factory = sqlite3.Row
+    filas = cur.fetchmany(AUDITORIA_MAX_FILAS + 1)
+    truncado = len(filas) > AUDITORIA_MAX_FILAS
+    out = []
+    for f in filas[:AUDITORIA_MAX_FILAS]:
+        claves = f.keys()
+        out.append({
+            "rowid": f["_aud_rowid"] if "_aud_rowid" in claves else None,
+            "id": f[meta["pk"]] if meta["pk"] and meta["pk"] in claves else (
+                f["_aud_rowid"] if "_aud_rowid" in claves else None),
+            "datos": _aud_fila(f, meta["excluidas"]),
+        })
+    return out, truncado
+
+
+def _aud_releer(conn, tabla, rowid, meta):
+    if rowid is None:
+        return None
+    try:
+        cur = conn._crudo(f'SELECT * FROM "{tabla}" WHERE rowid=?', (rowid,))
+        cur.row_factory = sqlite3.Row
+        f = cur.fetchone()
+    except sqlite3.Error:
+        return None
+    return _aud_fila(f, meta["excluidas"]) if f else None
+
+
+def _aud_json(d):
+    if d is None:
+        return None
+    return _json.dumps(d, ensure_ascii=False, default=str)
+
+
+def _aud_registrar(conn, tabla, accion, registro_id, antes, despues):
+    origen, uid, actor = _aud_identidad()
+    conn._crudo(
+        "INSERT INTO auditoria (fecha,origen,usuario_id,actor,entidad,registro_id,accion,ruta,valores_antes,valores_despues)"
+        " VALUES (datetime('now','localtime'),?,?,?,?,?,?,?,?,?)",
+        (origen, uid, actor, tabla, None if registro_id is None else str(registro_id),
+         accion, _aud_ruta(), _aud_json(antes), _aud_json(despues)))
+
+
+def _aud_antes(conn, sql, params):
+    verbo, tabla, where_sql, where_params = _aud_partes(sql, params)
+    if not tabla or tabla.lower() in AUDITORIA_TABLAS_EXCLUIDAS:
+        return None
+    meta = _aud_tabla_meta(conn, tabla)
+    if not meta["cols"]:
+        return None                                   # vista o tabla inexistente
+    ctx = {"verbo": verbo, "tabla": tabla, "meta": meta, "filas": [], "truncado": False}
+    if verbo not in ("INSERT", "REPLACE"):
+        if where_sql is None:
+            return None
+        ctx["filas"], ctx["truncado"] = _aud_leer(conn, tabla, where_sql, where_params, meta)
+    return ctx
+
+
+def _aud_despues(conn, cur, ctx):
+    if not ctx:
+        return
+    tabla, meta, verbo = ctx["tabla"], ctx["meta"], ctx["verbo"]
+    if verbo in ("INSERT", "REPLACE"):
+        nueva = _aud_releer(conn, tabla, cur.lastrowid, meta)
+        if nueva is None:
+            return
+        if (cur.rowcount or 1) > 1:
+            nueva = dict(nueva, _filas_insertadas=cur.rowcount)
+        rid = nueva.get(meta["pk"]) if meta["pk"] else cur.lastrowid
+        _aud_registrar(conn, tabla, "alta", rid, None, nueva)
+        return
+    if verbo == "UPDATE":
+        for f in ctx["filas"]:
+            despues = _aud_releer(conn, tabla, f["rowid"], meta)
+            antes = f["datos"]
+            if despues is None:
+                continue
+            # Solo los campos que efectivamente cambiaron.
+            dif_a, dif_d = {}, {}
+            for k in set(antes) | set(despues):
+                if antes.get(k) != despues.get(k):
+                    dif_a[k] = antes.get(k)
+                    dif_d[k] = despues.get(k)
+            if not dif_d:
+                continue                               # UPDATE que no cambió nada
+            _aud_registrar(conn, tabla, "modificacion", f["id"], dif_a, dif_d)
+        return
+    for f in ctx["filas"]:                             # DELETE
+        _aud_registrar(conn, tabla, "baja", f["id"], f["datos"], None)
+
+
+class _AuditConnection(sqlite3.Connection):
+    """Conexión que deja registrada toda escritura en la tabla `auditoria`."""
+
+    def _crudo(self, sql, params=()):
+        """Ejecuta sin auditar (uso interno de la auditoría)."""
+        return sqlite3.Connection.execute(self, sql, params)
+
+    def execute(self, sql, parameters=()):
+        if _aud_estado("dentro") or not isinstance(sql, str) or not _AUD_DML.match(sql):
+            return sqlite3.Connection.execute(self, sql, parameters)
+        ctx = None
+        _aud_local.dentro = True
+        try:
+            ctx = _aud_antes(self, sql, parameters)
+        except Exception as e:
+            _aud_aviso(e)
+        finally:
+            _aud_local.dentro = False
+        cur = sqlite3.Connection.execute(self, sql, parameters)
+        _aud_local.dentro = True
+        try:
+            _aud_despues(self, cur, ctx)
+        except Exception as e:
+            _aud_aviso(e)
+        finally:
+            _aud_local.dentro = False
+        return cur
+
+    def executemany(self, sql, seq_of_parameters):
+        if _aud_estado("dentro") or not isinstance(sql, str) or not _AUD_DML.match(sql):
+            return sqlite3.Connection.executemany(self, sql, seq_of_parameters)
+        filas = list(seq_of_parameters)
+        # Lote chico: se ejecuta fila por fila para que cada una quede
+        # auditada con su valor real. Lote grande: se prioriza la velocidad
+        # de la operación y se deja un único asiento con el resumen.
+        if len(filas) <= 200:
+            cur = None
+            for p in filas:
+                cur = self.execute(sql, p)
+            return cur if cur is not None else sqlite3.Connection.execute(self, "SELECT 1")
+        cur = sqlite3.Connection.executemany(self, sql, filas)
+        _aud_local.dentro = True
+        try:
+            tabla = (_AUD_TABLA.match(sql) or [None, None])[1]
+            if tabla and tabla.lower() not in AUDITORIA_TABLAS_EXCLUIDAS:
+                _aud_registrar(self, tabla, "alta", None, None, {"_filas_afectadas": len(filas)})
+        except Exception as e:
+            _aud_aviso(e)
+        finally:
+            _aud_local.dentro = False
+        return cur
+
+
 def get_db():
     if "db" not in g:
         # timeout=30 -> si la DB esta bloqueada por otra conexion (varios
         # operarios en simultaneo), espera hasta 30s en vez de fallar al toque
-        g.db = sqlite3.connect(DB_PATH, timeout=30)
+        g.db = sqlite3.connect(DB_PATH, timeout=30, factory=_AuditConnection)
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA foreign_keys = ON")
         # WAL permite que lecturas y escrituras convivan sin bloquearse entre si,
@@ -450,6 +822,13 @@ def get_db():
         g.db.execute("PRAGMA journal_mode = WAL")
         g.db.execute("PRAGMA busy_timeout = 30000")
     return g.db
+
+def _articulos_unificados(db=None):
+    """True si la base ya tiene productos y materiales unificados en la
+    tabla `materiales` (y `productos` es una vista de compatibilidad)."""
+    db = db or get_db()
+    r = db.execute("SELECT type FROM sqlite_master WHERE name='productos'").fetchone()
+    return bool(r) and r[0] == "view"
 
 @app.teardown_appcontext
 def close_db(e=None):
@@ -470,6 +849,23 @@ def execute(sql, params=()):
 def get_config_valor(clave, default=""):
     row = query("SELECT valor FROM configuracion WHERE clave=?", (clave,), one=True)
     return row["valor"] if row and row["valor"] not in (None, "") else default
+
+def _sc_automaticas_activas():
+    """¿El sistema puede crear Solicitudes de Compra por su cuenta?
+
+    Por defecto NO: las SC se cargan a mano desde Compras. Hay cuatro puntos
+    que históricamente las generaban solos — stock por debajo del mínimo,
+    faltante de insumo al remitir una OTT, envío a un tercero, y materiales
+    faltantes de una OT auxiliar — y todos preguntan acá antes de crear nada.
+
+    Para volver a habilitarlas: configuracion.sc_automaticas = '1'.
+    """
+    try:
+        return get_config_valor("sc_automaticas", "0") == "1"
+    except Exception:
+        # Ante la duda (sin contexto de base, por ejemplo) no se crea nada.
+        return False
+
 
 def next_numero_sc():
     # Genera el próximo numero de SC (SC-0001, SC-0002, ...) de forma segura
@@ -515,52 +911,25 @@ def next_numero_oc():
         raise
 
 def get_or_create_pt_material(prod):
-    """Devuelve (creando si hace falta) el material de categoría 'Producto
-    terminado' correspondiente a un producto.
+    """Devuelve el artículo de stock de un producto terminado.
 
-    Es la ÚNICA fuente de verdad para este mapeo producto -> material de
-    stock. Todo el código que necesite ese material (generación de PT al
-    completar una OT, novedades de producción, alta/copia de producto,
-    diagnósticos, etc.) debe llamar a esta función en vez de repetir la
-    consulta/insert a mano — así evitamos que cada punto del código diverja
-    y se generen inconsistencias.
+    Desde la unificación de productos y materiales (ver
+    migracion_unificacion.py) el producto ES el artículo de stock: la misma
+    fila de `materiales` tiene el proceso, el stock y los lotes, y conserva
+    el id que tenía en la vieja tabla `productos`. Ya no existe un "gemelo"
+    que crear ni sincronizar, así que esta función solo devuelve esa fila.
 
-    IMPORTANTE: productos.codigo y materiales.codigo son namespaces UNIQUE
-    independientes entre sí. Pueden coincidir por casualidad (ej. un
-    material de materia prima con el mismo código que un producto sin
-    ninguna relación real entre ambos).
-
-    El vínculo real y definitivo es materiales.producto_id (FK), NO el
-    código. Requiere que `prod` tenga "id". Si dos productos comparten
-    código y ambos terminan necesitando un material PT, cada uno obtiene
-    su propio material (identificado por producto_id) aunque el código
-    visible se tenga que desambiguar con un sufijo — así nunca se
-    mezcla el stock de un producto con el de otro material/producto
-    que casualmente comparte código.
+    Se conserva el nombre (y la firma) porque la usan muchos puntos del
+    código: generación de PT al completar una OT, novedades, insumos de tipo
+    producto, diagnósticos, etc. Requiere que `prod` tenga "id".
     """
     prod_keys = prod.keys() if hasattr(prod, "keys") else prod
     if "id" not in prod_keys or prod["id"] is None:
         raise ValueError("get_or_create_pt_material requiere prod['id'] (producto_id)")
-
-    # 1) Búsqueda por vínculo real (FK), no por string de código.
-    mat_pt = query("SELECT id,stock FROM materiales WHERE producto_id=? AND categoria='Producto terminado'", (prod["id"],), one=True)
-    if mat_pt:
-        return mat_pt
-
-    # 2) No existe vínculo todavía. Buscamos un código libre para crear el
-    #    material, evitando pisar cualquier material ya existente (sea cual
-    #    sea su categoría o a qué producto -si alguno- esté vinculado).
-    codigo_base = prod["codigo"]
-    candidato = codigo_base
-    intento = 1
-    while query("SELECT id FROM materiales WHERE codigo=?", (candidato,), one=True):
-        intento += 1
-        candidato = f"{codigo_base}-PT{intento}"
-
-    new_mid = execute(
-        "INSERT INTO materiales (codigo,descripcion,categoria,producto_id,unidad,stock,stock_min) VALUES (?,?,?,?,?,0,0)",
-        (candidato, prod["nombre"], "Producto terminado", prod["id"], prod["unidad"]))
-    return {"id": new_mid, "stock": 0}
+    art = query("SELECT id,stock FROM materiales WHERE id=?", (prod["id"],), one=True)
+    if art:
+        return art
+    raise ValueError(f"El artículo id={prod['id']} no existe")
 
 def _firma_insumos_operacion(proceso_op_id):
     """Firma de lo que se le manda al proveedor en una operación tercerizada.
@@ -637,6 +1006,68 @@ def _get_or_create_pse(proceso_op_id):
         (candidato, "%s — %s" % (op["prod_nombre"], op_nombre),
          "Semielaborado", op["producto_id"], proceso_op_id, firma,
          op["prod_unidad"] or "unid"))
+
+
+def _material_retorno_operacion(orden_operacion_id):
+    """v147 (punto 9): en una operación tercerizada el primer insumo de tipo
+    'material' es el material que se genera al ingresar el remito del proveedor.
+    v148: se lee de la copia propia de la OT (orden_operacion_materiales)."""
+    if not orden_operacion_id:
+        return None
+    r = query("""SELECT om.material_id FROM orden_operacion_materiales om
+        WHERE om.orden_operacion_id=? AND om.tipo='material' AND om.material_id IS NOT NULL
+        ORDER BY om.id LIMIT 1""", (orden_operacion_id,), one=True)
+    return r["material_id"] if r else None
+
+
+def _sincronizar_estado_paso(orden_operacion_id):
+    """Cierra (o reabre) un paso mirando su TOTAL, no cada ruta por separado.
+
+    Un paso puede tener rutas alternativas: varias orden_operaciones con el
+    mismo `orden` (p.ej. dos máquinas que hacen lo mismo). Si el trabajo se
+    reparte entre dos, ninguna llega sola a lo requerido y el paso no se
+    cerraba nunca, aunque entre las dos estuviera completo — y la OT quedaba
+    trabada. Lo requerido del paso es el mayor de sus rutas (cualquiera
+    podría hacerlo entero) y lo producido es la suma de todas. Es el mismo
+    criterio que ya usaba generar_pt_faltante_si_corresponde para el PT.
+    """
+    op = query("SELECT orden_id, orden FROM orden_operaciones WHERE id=?",
+               (orden_operacion_id,), one=True)
+    if not op:
+        return
+    rutas = query("""SELECT id, qty_requerida, qty_producida, estado
+        FROM orden_operaciones WHERE orden_id=? AND orden=?""",
+        (op["orden_id"], op["orden"]))
+    requerido = max([float(r["qty_requerida"] or 0) for r in rutas] or [0.0])
+    if requerido <= 0:
+        return
+    producido = sum(float(r["qty_producida"] or 0) for r in rutas)
+    completo = producido >= requerido - 0.0001
+    for r in rutas:
+        # Una ruta que nunca se usó no se marca como hecha: el paso se cierra
+        # con las que efectivamente trabajaron.
+        if float(r["qty_producida"] or 0) <= 0 and r["id"] != orden_operacion_id:
+            continue
+        if completo and r["estado"] != "Completada":
+            execute("UPDATE orden_operaciones SET estado='Completada' WHERE id=?", (r["id"],))
+        elif not completo and r["estado"] == "Completada":
+            execute("UPDATE orden_operaciones SET estado='En proceso' WHERE id=?", (r["id"],))
+
+
+def _copiar_materiales_a_ot_op(oo_id, proceso_op_id):
+    """v148 (punto 4): al generarse la OT se COPIA el proceso. Desde ahí la OT es
+    independiente: sus materiales se editan en la OT y no se validan contra el proceso."""
+    if not oo_id or not proceso_op_id:
+        return
+    execute("DELETE FROM orden_operacion_materiales WHERE orden_operacion_id=?", (oo_id,))
+    for r in query("SELECT material_id,producto_id,cantidad,unidad,tipo FROM operacion_materiales WHERE operacion_id=?", (proceso_op_id,)):
+        execute("""INSERT INTO orden_operacion_materiales (orden_operacion_id,material_id,producto_id,cantidad,unidad,tipo)
+                   VALUES (?,?,?,?,?,?)""", (oo_id, r["material_id"], r["producto_id"], r["cantidad"], r["unidad"], r["tipo"] or "material"))
+
+
+def _tiene_insumo_material(materiales):
+    return any((m.get("tipo", "material") == "material" and m.get("material_id") and m.get("cantidad"))
+               for m in (materiales or []))
 
 
 def _lotes_vinculados_material(orden_id, material_id):
@@ -737,6 +1168,33 @@ def _plan_devolucion(vinculos, a_devolver):
 def hash_pw(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 
+ROLES_BASE = ("admin", "operario", "vendedor", "almacen", "logistica")
+
+def _rol_row(nombre):
+    try:
+        return query("SELECT * FROM roles WHERE nombre=?", (nombre,), one=True)
+    except Exception:
+        return None
+
+def _rol_base(nombre):
+    """Rol base (define qué endpoints puede usar) de un rol, sea de sistema o creado
+    desde Configuración. Si el rol no existe (dato viejo) se usa el nombre tal cual."""
+    r = _rol_row(nombre)
+    return r["base_rol"] if r else nombre
+
+def _permisos_rol(nombre):
+    """Permisos predeterminados de un rol: los de la tabla roles, o los DEFAULT."""
+    import json as _j
+    r = _rol_row(nombre)
+    if r and r["permisos"]:
+        try:
+            p = _j.loads(r["permisos"])
+            if isinstance(p, dict) and p:
+                return {k: str(v) for k, v in p.items()}
+        except Exception:
+            pass
+    return dict(DEFAULT_PERMISIONES.get(_rol_base(nombre), {}))
+
 def login_required(roles=None):
     def decorator(f):
         @wraps(f)
@@ -758,6 +1216,152 @@ def login_required(roles=None):
     return decorator
 
 # ── Schema ────────────────────────────────────────────────────────────────────
+# ── Permiso "ver valores monetarios" ─────────────────────────────────────────
+# Regla única de todo el sistema: el servidor decide, y lo que no sale de acá
+# no puede filtrarse en el navegador. Antes esto vivía solo en app.html
+# (const VER_MONETARIO) y la API mandaba igual todos los importes: bastaba
+# abrir la pestaña Red del navegador para verlos.
+#
+# Para agregar un campo monetario nuevo alcanza con registrarlo en
+# CAMPOS_MONETARIOS: el after_request lo saca de todas las respuestas JSON y
+# el before_request lo descarta de los payloads de escritura. Si el campo es
+# ambiguo (un "total" que son unidades, un "valor" que es un texto), va en
+# NO_MONETARIO con el motivo, y tests/test_monetario_schema.py falla si
+# aparece una columna nueva que no esté en ninguna de las dos listas.
+
+CAMPOS_MONETARIOS = frozenset({
+    # Precios
+    "precio", "precio_unit", "precio_unitario", "precio_venta",
+    "precio_acordado", "precio_tercerizado", "oc_precio_reciente",
+    # Costos
+    "costo", "costo_mat", "costo_mo", "costo_total", "costo_terc",
+    "costo_terciarizado", "costo_mat_item", "costo_unitario",
+    # Montos / totales de dinero
+    "monto", "monto_total", "monto_pedido", "monto_entregado",
+    "monto_compras_pend", "total_monto_pedido", "total_monto_entregado",
+    "subtotal", "importe", "exceso_monto",
+    # Facturación
+    "facturacion", "facturacion_mes", "facturacion_historico",
+    "facturado", "total_facturado",
+    # Configuración con contenido monetario
+    "valor_hora_mo",
+})
+
+# Columnas/claves que el patrón de nombres marca como sospechosas pero NO son
+# importes. Si alguna de estas pasara a representar dinero, hay que moverla
+# a CAMPOS_MONETARIOS.
+NO_MONETARIO = {
+    "iva": "condición frente al IVA del cliente (texto: 'Responsable Inscripto'), no un importe",
+    "iva_pct": "alícuota en porcentaje del presupuesto, no un importe",
+    "nro_factura": "número de comprobante, no un importe",
+    "centro_costo": "código de centro de costo, no un importe",
+    "cantidad_activa": "unidades aprobadas de un lote; matchea el patrón por 'iva' dentro de 'activa'",
+    "cantidad_activa_actual": "idem cantidad_activa",
+    "nueva_activa": "idem cantidad_activa",
+    "nueva_activa_total": "idem cantidad_activa",
+    "cant_activa": "idem cantidad_activa",
+    "pdf_mostrar_costos": "bandera 0/1 de configuración; igual se filtra aparte en /api/config",
+    "pdf_mostrar_precios": "bandera 0/1 de configuración; igual se filtra aparte en /api/config",
+    "mostrar_costos": "bandera interna del PDF",
+    "mostrar_precios": "bandera interna del PDF",
+}
+
+# Nombres que NO se resuelven por nombre: cada endpoint decide. Se dejan
+# anotados para que nadie los agregue al filtro automático sin pensarlo.
+CAMPOS_AMBIGUOS = {
+    "total": "puede ser unidades (total_realizado) o plata; se resuelve por endpoint",
+    "valor": "configuracion.valor es texto genérico; se filtra por clave en /api/config",
+    "cantidad": "unidades",
+}
+
+
+def puede_ver_monetario():
+    """True si el usuario de la sesión puede ver importes. Cacheado por request."""
+    if has_request_context() and "ver_monetario" in g:
+        return g.ver_monetario
+    ok = _calcular_ver_monetario()
+    if has_request_context():
+        g.ver_monetario = ok
+    return ok
+
+
+def _calcular_ver_monetario():
+    if "user_id" not in session:
+        return False                     # sin sesión, lo más restrictivo
+    if _rol_base(session.get("rol_nombre") or session.get("rol", "")) == "logistica":
+        return False
+    try:
+        rows = query("SELECT clave, valor FROM usuario_permisos WHERE usuario_id=?",
+                     (session["user_id"],))
+        perms = {r["clave"]: r["valor"] for r in rows}
+    except Exception:
+        perms = {}
+    if not perms and session.get("rol") != "admin":
+        perms = _permisos_rol(session.get("rol_nombre") or session.get("rol", "operario"))
+    return perms.get("ver_monetario") != "0"
+
+
+def solo_con_monetario(f):
+    """Endpoint que no tiene nada que devolver sin el permiso: 403 directo."""
+    @wraps(f)
+    def _envuelto(*a, **kw):
+        if not puede_ver_monetario():
+            return jsonify({"error": "Sin permiso"}), 403
+        return f(*a, **kw)
+    return _envuelto
+
+
+def _sin_monetario(dato):
+    """Saca recursivamente toda clave monetaria de un JSON ya parseado."""
+    if isinstance(dato, dict):
+        for k in [k for k in dato if k in CAMPOS_MONETARIOS]:
+            del dato[k]
+        for v in dato.values():
+            _sin_monetario(v)
+    elif isinstance(dato, list):
+        for v in dato:
+            _sin_monetario(v)
+    return dato
+
+
+@app.before_request
+def _descartar_monetario_entrante():
+    """Un usuario restringido no puede escribir importes: se descartan del
+    payload antes de que el endpoint lo lea, así no pisa con 0 ni con null lo
+    que ya estaba guardado. Los costos que calcula el server siguen igual."""
+    if not request.path.startswith("/api/"):
+        return
+    if request.method not in ("POST", "PUT", "PATCH"):
+        return
+    if puede_ver_monetario():
+        return
+    try:
+        cuerpo = request.get_json(silent=True)
+    except Exception:
+        return
+    # get_json cachea: mutar el objeto devuelto alcanza para que el endpoint
+    # lo vea ya filtrado, sin tocar cada handler.
+    if cuerpo is not None:
+        _sin_monetario(cuerpo)
+
+
+@app.after_request
+def _descartar_monetario_saliente(resp):
+    """Saca los importes de toda respuesta JSON de /api/ para los restringidos."""
+    try:
+        if not request.path.startswith("/api/"):
+            return resp
+        if resp.direct_passthrough or not (resp.content_type or "").startswith("application/json"):
+            return resp
+        if puede_ver_monetario():
+            return resp
+        datos = _json.loads(resp.get_data(as_text=True))
+        resp.set_data(_json.dumps(_sin_monetario(datos), ensure_ascii=False, default=str))
+    except Exception as e:
+        print(f"[monetario] No se pudo filtrar la respuesta de {request.path}: {e}")
+    return resp
+
+
 SCHEMA = """
 PRAGMA foreign_keys = ON;
 
@@ -765,7 +1369,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL, password TEXT NOT NULL,
     nombre TEXT NOT NULL,
-    rol TEXT NOT NULL CHECK(rol IN ('admin','operario','vendedor','almacen','logistica')),
+    rol TEXT NOT NULL,
     activo INTEGER DEFAULT 1,
     creado TEXT DEFAULT (datetime('now','localtime')));
 
@@ -930,6 +1534,9 @@ CREATE TABLE IF NOT EXISTS lotes (
     estado TEXT DEFAULT 'Ingresado' CHECK(estado IN ('Ingresado','Aprobado','Agotado','Rechazado')),
     obs TEXT,
     creado_por INTEGER REFERENCES usuarios(id),
+    -- 1 = las piezas de este lote YA se sumaron a materiales.stock al crearlo
+    -- (entraron al deposito). Calidad no vuelve a moverlas al clasificarlas.
+    stock_computado INTEGER DEFAULT 0,
     creado TEXT DEFAULT (datetime('now','localtime')));
 
 CREATE TABLE IF NOT EXISTS remitos (
@@ -1005,6 +1612,23 @@ CREATE TABLE IF NOT EXISTS orden_operaciones (
     proveedor_id INTEGER REFERENCES proveedores(id),
     precio_tercerizado REAL DEFAULT 0,
     tiempo_minimo_dias INTEGER DEFAULT 0);
+
+-- Scheduling de producción: cada renglón es un bloque de trabajo (una jornada
+-- de 9 o 12 h) de una operación de OT en una máquina, con su operario.
+CREATE TABLE IF NOT EXISTS planificacion (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    orden_operacion_id INTEGER NOT NULL REFERENCES orden_operaciones(id) ON DELETE CASCADE,
+    maquina_id INTEGER NOT NULL REFERENCES maquinas(id),
+    empleado_id INTEGER REFERENCES empleados(id) ON DELETE SET NULL,
+    inicio TEXT NOT NULL,
+    fin TEXT NOT NULL,
+    jornada_horas INTEGER DEFAULT 9,
+    cantidad_plan REAL DEFAULT 0,
+    obs TEXT,
+    creado TEXT DEFAULT (datetime('now','localtime')));
+CREATE INDEX IF NOT EXISTS idx_planif_maq ON planificacion(maquina_id, inicio);
+CREATE INDEX IF NOT EXISTS idx_planif_emp ON planificacion(empleado_id, inicio);
+CREATE INDEX IF NOT EXISTS idx_planif_op  ON planificacion(orden_operacion_id);
 
 CREATE TABLE IF NOT EXISTS orden_materiales (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1204,6 +1828,24 @@ CREATE TABLE IF NOT EXISTS requerimientos_productivos (
     obs TEXT,
     creado TEXT DEFAULT (datetime('now','localtime')));
 
+-- Bitacora de auditoria: una fila por alta / modificacion / baja de datos.
+-- La escribe la capa de conexion (ver _AuditConnection), no los controladores.
+CREATE TABLE IF NOT EXISTS auditoria (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL,
+    origen TEXT NOT NULL,            -- 'usuario' | 'sistema'
+    usuario_id INTEGER,              -- NULL cuando origen='sistema'
+    actor TEXT NOT NULL,             -- nombre del usuario o del proceso
+    entidad TEXT NOT NULL,           -- tabla afectada
+    registro_id TEXT,                -- clave primaria del registro afectado
+    accion TEXT NOT NULL,            -- 'alta' | 'modificacion' | 'baja'
+    ruta TEXT,                       -- endpoint que origino el cambio
+    valores_antes TEXT,              -- JSON (solo los campos que cambiaron)
+    valores_despues TEXT);           -- JSON (solo los campos que cambiaron)
+CREATE INDEX IF NOT EXISTS ix_auditoria_fecha   ON auditoria(fecha);
+CREATE INDEX IF NOT EXISTS ix_auditoria_entidad ON auditoria(entidad, registro_id);
+CREATE INDEX IF NOT EXISTS ix_auditoria_actor   ON auditoria(actor);
+
 """
 
 # ── Seed data ─────────────────────────────────────────────────────────────────
@@ -1374,8 +2016,11 @@ def init_db():
     # producto vinculado (producto_id). Si el código del producto se editó
     # después de vincularlo, el material de inventario quedaba con el código
     # viejo. Se sincroniza una vez al arrancar para corregir datos existentes.
+    # Solo aplica al esquema viejo (productos como tabla aparte): con la
+    # tabla unificada el producto y su stock son la misma fila.
     try:
-        db.execute("""
+        if not _articulos_unificados(db):
+          db.execute("""
             UPDATE materiales SET codigo = (
                 SELECT p.codigo FROM productos p WHERE p.id = materiales.producto_id
             )
@@ -1583,6 +2228,81 @@ def init_db():
             db.execute("ALTER TABLE ordenes ADD COLUMN stock_descontado INTEGER DEFAULT 0")
     except Exception: pass
 
+    # El PT entra a inventario al entrar al deposito: el lote marca si su
+    # stock ya fue computado para que Calidad no lo sume de nuevo.
+    try:
+        if "stock_computado" not in _cols("lotes"):
+            db.execute("ALTER TABLE lotes ADD COLUMN stock_computado INTEGER DEFAULT 0")
+    except Exception: pass
+
+    # v147: circuito OTT (puntos 9 y 10)
+    for _tbl, _col, _ddl in (("solicitudes_compra","ott_id","INTEGER REFERENCES ordenes_tercerizado(id)"),
+                             ("solicitudes_compra","ott_remito","TEXT")):
+        try:
+            if _col not in _cols(_tbl):
+                db.execute(f"ALTER TABLE {_tbl} ADD COLUMN {_col} {_ddl}")
+        except Exception: pass
+
+    # v147: ordenes_compra — anulación / completado (punto 8)
+    for _col, _ddl in (("remito_numero","TEXT"),("fecha_completada","TEXT"),("motivo_anulacion","TEXT"),("fecha_anulada","TEXT")):
+        try:
+            if _col not in _cols("ordenes_compra"):
+                db.execute(f"ALTER TABLE ordenes_compra ADD COLUMN {_col} {_ddl}")
+        except Exception: pass
+
+    # v147: materiales.cliente_id (punto 6), codigo_barras en materiales/productos (punto 17)
+    for _tbl, _col, _ddl in (("materiales","cliente_id","INTEGER REFERENCES clientes(id)"),
+                             ("materiales","codigo_barras","TEXT"),
+                             ("productos","codigo_barras","TEXT")):
+        try:
+            if _col not in _cols(_tbl):
+                db.execute(f"ALTER TABLE {_tbl} ADD COLUMN {_col} {_ddl}")
+        except Exception: pass
+
+    # v148 (punto 4): la OT guarda su PROPIA copia de los materiales de cada
+    # operación (independiente del proceso del producto una vez generada).
+    try:
+        db.execute("CREATE TABLE IF NOT EXISTS configuracion (clave TEXT PRIMARY KEY, valor TEXT, descripcion TEXT)")
+        db.execute("""CREATE TABLE IF NOT EXISTS orden_operacion_materiales (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            orden_operacion_id INTEGER NOT NULL REFERENCES orden_operaciones(id) ON DELETE CASCADE,
+            material_id INTEGER REFERENCES materiales(id),
+            producto_id INTEGER REFERENCES productos(id),
+            cantidad REAL DEFAULT 0, unidad TEXT, tipo TEXT DEFAULT 'material')""")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_ooom_oo ON orden_operacion_materiales(orden_operacion_id)")
+        _ya = db.execute("SELECT valor FROM configuracion WHERE clave='ooom_backfill_v148'").fetchone()
+        if not _ya:
+            # OTs ya existentes: se les copia el proceso vigente una única vez.
+            _pcol = "om.producto_id" if "producto_id" in [r[1] for r in db.execute("PRAGMA table_info(operacion_materiales)")] else "NULL"
+            _tcol = "COALESCE(om.tipo,'material')" if "tipo" in [r[1] for r in db.execute("PRAGMA table_info(operacion_materiales)")] else "'material'"
+            db.execute(f"""INSERT INTO orden_operacion_materiales (orden_operacion_id,material_id,producto_id,cantidad,unidad,tipo)
+                SELECT oo.id, om.material_id, {_pcol}, om.cantidad, om.unidad, {_tcol}
+                FROM orden_operaciones oo JOIN operacion_materiales om ON om.operacion_id=oo.proceso_op_id
+                WHERE oo.proceso_op_id IS NOT NULL
+                  AND NOT EXISTS (SELECT 1 FROM orden_operacion_materiales x WHERE x.orden_operacion_id=oo.id)""")
+            db.execute("INSERT OR REPLACE INTO configuracion (clave,valor) VALUES ('ooom_backfill_v148','1')")
+    except Exception as e:
+        print(f"[init_db] Advertencia orden_operacion_materiales: {e}")
+
+    # v148: PT existentes toman el cliente de su producto (punto 6)
+    # (solo esquema viejo: con la tabla unificada el cliente es uno solo)
+    try:
+      if not _articulos_unificados(db):
+        db.execute("""UPDATE materiales SET cliente_id=(SELECT p.cliente_id FROM productos p WHERE p.id=materiales.producto_id)
+                      WHERE cliente_id IS NULL AND producto_id IS NOT NULL""")
+        db.execute("""UPDATE materiales SET cliente_id=(SELECT p.cliente_id FROM productos p WHERE p.codigo=materiales.codigo)
+                      WHERE cliente_id IS NULL AND categoria='Producto terminado'
+                      AND EXISTS (SELECT 1 FROM productos p WHERE p.codigo=materiales.codigo AND p.cliente_id IS NOT NULL)""")
+    except Exception: pass
+
+    # ordenes: requiere_material — si la OT no necesita materia prima (aunque el
+    # proceso la pida) no se pide asignar lotes (fix v147, punto 4)
+    try:
+        oc = _cols("ordenes")
+        if "requiere_material" not in oc:
+            db.execute("ALTER TABLE ordenes ADD COLUMN requiere_material INTEGER DEFAULT 1")
+    except Exception: pass
+
     # novedades_eliminadas: restaurado / restaurado_por / restaurado_por_nombre
     # — para poder marcar un registro como restaurado (ver POST
     # /api/novedades-eliminadas/<id>/restaurar) sin perder el historial.
@@ -1625,6 +2345,14 @@ def init_db():
     try:
         db.execute("ALTER TABLE remitos ADD COLUMN ott_id INTEGER REFERENCES ordenes_tercerizado(id)")
     except Exception: pass
+    # v147: columnas de ordenes_tercerizado que deben agregarse DESPUÉS de crear la tabla
+    # (en instalaciones nuevas material_se_id se intentaba agregar antes de existir la tabla).
+    for _col, _ddl in (("material_se_id","INTEGER REFERENCES materiales(id)"),
+                       ("cantidad_plan","REAL DEFAULT 0")):
+        try:
+            if _col not in [r[1] for r in db.execute("PRAGMA table_info(ordenes_tercerizado)").fetchall()]:
+                db.execute(f"ALTER TABLE ordenes_tercerizado ADD COLUMN {_col} {_ddl}")
+        except Exception: pass
     try:
         db.execute("ALTER TABLE ordenes_tercerizado ADD COLUMN cantidad_enviada REAL DEFAULT 0")
     except Exception: pass
@@ -1716,7 +2444,10 @@ def init_db():
         # sincronizaba el código, así que cualquier producto renombrado antes
         # de este fix dejó su material con el nombre viejo (se veía, por
         # ejemplo, en "Lotes asignados" de la OT). Se corrige una sola vez acá.
-        db.execute("""UPDATE materiales SET descripcion=(SELECT p.nombre FROM productos p WHERE p.id=materiales.producto_id),
+        # Solo esquema viejo: con la tabla unificada no hay copia que sincronizar
+        # (y pisaría la descripción de los semielaborados con la de su producto).
+        if not _articulos_unificados(db):
+          db.execute("""UPDATE materiales SET descripcion=(SELECT p.nombre FROM productos p WHERE p.id=materiales.producto_id),
             actualizado=datetime('now','localtime')
             WHERE producto_id IS NOT NULL
             AND descripcion != (SELECT p.nombre FROM productos p WHERE p.id=materiales.producto_id)""")
@@ -1902,7 +2633,7 @@ def init_db():
         descripcion TEXT
     )""")
     _cfg_defaults = [
-        ('empresa_nombre',      'Mecanizados Ituzaingo',    'Nombre del taller / empresa'),
+        ('empresa_nombre',      'Mecanizado Ituzaingo',    'Nombre del taller / empresa'),
         ('empresa_subtitulo',   'Taller de Mecanizados', 'Subtítulo o rubro'),
         ('empresa_direccion',   '',                   'Dirección'),
         ('empresa_telefono',    '',                   'Teléfono / WhatsApp'),
@@ -1912,29 +2643,55 @@ def init_db():
         ('pdf_mostrar_precios', '0',                  'Mostrar precio de venta en PDF (0/1)'),
         ('pdf_nota_pie',        '',                   'Nota al pie del PDF de OT'),
         ('valor_hora_mo',       '0',                  'Valor de mano de obra por hora ($)'),
+        ('sc_automaticas',      '0',                  'Generar Solicitudes de Compra automáticamente (0/1)'),
     ]
     for _k, _v, _d in _cfg_defaults:
         db.execute("INSERT OR IGNORE INTO configuracion (clave,valor,descripcion) VALUES (?,?,?)",
                    (_k, _v, _d))
 
 
-    # ── Migrate usuarios: add logistica to rol CHECK constraint ──────────────
-    # ── Migrate usuarios: add logistica to rol CHECK constraint ──────────────
+    # ── Migrate usuarios: quitar el CHECK de rol (v147, punto 12) ─────────────
+    # Los roles ahora se administran desde Configuración (tabla roles): la columna
+    # usuarios.rol guarda el NOMBRE del rol, que ya no está limitado a 5 valores.
     try:
+        import re as _re
         usr_ddl = db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='usuarios'").fetchone()
-        if usr_ddl and 'logistica' not in usr_ddl[0]:
-            db.execute("""CREATE TABLE IF NOT EXISTS usuarios_new (
+        if usr_ddl and _re.search(r"CHECK\s*\(\s*rol", usr_ddl[0]):
+            db.commit()
+            db.execute("PRAGMA foreign_keys=OFF")
+            db.execute("DROP TABLE IF EXISTS usuarios_new")
+            db.execute("""CREATE TABLE usuarios_new (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL, password TEXT NOT NULL,
                 nombre TEXT NOT NULL,
-                rol TEXT NOT NULL CHECK(rol IN ('admin','operario','vendedor','almacen','logistica')),
+                rol TEXT NOT NULL,
                 activo INTEGER DEFAULT 1,
                 creado TEXT DEFAULT (datetime('now','localtime')))""")
             db.execute("INSERT OR IGNORE INTO usuarios_new SELECT id,username,password,nombre,rol,activo,creado FROM usuarios")
             db.execute("DROP TABLE usuarios")
             db.execute("ALTER TABLE usuarios_new RENAME TO usuarios")
+            db.commit()
+            db.execute("PRAGMA foreign_keys=ON")
     except Exception as e:
         print(f"[WARN] Migración usuarios falló: {e}")
+
+    # ── Roles editables (v147, punto 12) ─────────────────────────────────────
+    db.execute("""CREATE TABLE IF NOT EXISTS roles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nombre TEXT UNIQUE NOT NULL,
+        descripcion TEXT,
+        base_rol TEXT NOT NULL,
+        permisos TEXT DEFAULT '{}',
+        es_sistema INTEGER DEFAULT 0,
+        creado TEXT DEFAULT (datetime('now','localtime')))""")
+    import json as _json
+    for _rn, _desc in (("admin","Administrador — acceso total"),
+                       ("operario","Producción — órdenes de trabajo, procesos, novedades"),
+                       ("vendedor","Comercial — clientes, presupuestos, pedidos, compras"),
+                       ("almacen","Almacén — inventario, lotes, recepción"),
+                       ("logistica","Logística — remitos y stock, sin valores monetarios")):
+        db.execute("INSERT OR IGNORE INTO roles (nombre,descripcion,base_rol,permisos,es_sistema) VALUES (?,?,?,?,1)",
+                   (_rn, _desc, _rn, _json.dumps(DEFAULT_PERMISIONES.get(_rn, {}))))
 
     # ── Versiones de proceso de productos ───────────────────────────────────
     db.execute("""CREATE TABLE IF NOT EXISTS producto_versiones (
@@ -1986,6 +2743,34 @@ def init_db():
                  # migrar_stock_sinlote_a_lote_origen() usa get_db()/query(), que abre
                  # una conexión sqlite3 aparte — si 'db' sigue con una transacción sin
                  # confirmar, esa segunda conexión choca con "database is locked".
+
+    # ── Unificación productos + materiales (una sola vez) ────────────────────
+    # Si la base todavía tiene la tabla `productos`, se unifica con
+    # `materiales` (ver migracion_unificacion.py): backup previo, una sola
+    # transacción, verificación completa antes de confirmar e informe en
+    # database/. Si algo no cierra se hace ROLLBACK y el server NO arranca,
+    # para no operar con el código nuevo sobre el esquema viejo.
+    # Una vez migrada la base, migracion_unificacion.py ya no se usa y se puede
+    # borrar: solo se importa si `productos` todavía es una tabla (base sin
+    # migrar o instalación nueva).
+    _r = db.execute("SELECT type FROM sqlite_master WHERE name='productos'").fetchone()
+    if _r and _r[0] == "table":
+        try:
+            import migracion_unificacion as _mu
+        except ImportError:
+            db.close()
+            raise SystemExit("La base todavía no está unificada y falta el archivo "
+                             "migracion_unificacion.py junto a server.py.")
+        print("[init_db] Unificando productos y materiales en una sola tabla de artículos...")
+        _res = _mu.migrar(DB_PATH, log=print)
+        if not _res["ok"]:
+            print(_res["informe"])
+            db.close()
+            raise SystemExit("La unificación de productos y materiales no se completó. "
+                             "La base quedó SIN cambios. Ver el informe en: "
+                             + str(_res.get("ruta_informe")))
+        print(f"[init_db] Unificación completa. Backup: {_res['ruta_backup']}")
+        print(f"[init_db] Informe: {_res['ruta_informe']}")
 
     try:
         with app.app_context():
@@ -2347,8 +3132,9 @@ def login():
         d = request.get_json(silent=True) or request.form
         user = query("SELECT * FROM usuarios WHERE username=? AND activo=1", (d.get("username",""),), one=True)
         if user and user["password"] == hash_pw(d.get("password","")):
-            session.update({"user_id":user["id"],"username":user["username"],"nombre":user["nombre"],"rol":user["rol"]})
-            if request.is_json: return jsonify({"ok":True,"rol":user["rol"],"nombre":user["nombre"]})
+            session.update({"user_id":user["id"],"username":user["username"],"nombre":user["nombre"],
+                            "rol":_rol_base(user["rol"]),"rol_nombre":user["rol"]})
+            if request.is_json: return jsonify({"ok":True,"rol":_rol_base(user["rol"]),"rol_nombre":user["rol"],"nombre":user["nombre"]})
             return redirect("/")
         if request.is_json: return jsonify({"ok":False,"error":"Usuario o contraseña incorrectos"}), 401
     return render_template("login.html")
@@ -2370,11 +3156,13 @@ def me():
     
     # Si no hay permisos explícitos y no es admin, usar permisos predeterminados del rol
     if not perms and session.get("rol") != "admin":
-        rol = session.get("rol", "operario")
-        if rol in DEFAULT_PERMISIONES:
-            perms = DEFAULT_PERMISIONES[rol].copy()
+        perms = _permisos_rol(session.get("rol_nombre") or session.get("rol", "operario"))
     
-    return jsonify({"auth":True,"nombre":session["nombre"],"rol":session["rol"],"perms":perms})
+    ver_mon = puede_ver_monetario()
+    perms = {k: v for k, v in perms.items() if k != "ver_monetario"}
+    return jsonify({"auth":True,"nombre":session["nombre"],"rol":session["rol"],
+                    "rol_nombre":session.get("rol_nombre") or session["rol"],
+                    "perms":perms,"ver_monetario":ver_mon})
 # ── Serve React SPA ──────────────────────────────────────────────────────────
 import os as _os
 
@@ -2392,14 +3180,18 @@ def index():
     
     # Si no hay permisos explícitos y no es admin, usar permisos predeterminados del rol
     if not perms and session.get("rol") != "admin":
-        rol = session.get("rol", "operario")
-        if rol in DEFAULT_PERMISIONES:
-            perms = DEFAULT_PERMISIONES[rol].copy()
+        perms = _permisos_rol(session.get("rol_nombre") or session.get("rol", "operario"))
     
+    ver_mon = puede_ver_monetario()
+    # La plantilla recibe el permiso ya resuelto por el servidor; sacarlo de
+    # perms evita que quede una segunda fuente de verdad en el navegador.
+    perms = {k: v for k, v in perms.items() if k != "ver_monetario"}
     return render_template("app.html",
                           nombre=session["nombre"],
                           rol=session["rol"],
-                          perms=perms)
+                          rol_nombre=session.get("rol_nombre") or session["rol"],
+                          perms=perms,
+                          ver_monetario=ver_mon)
 
 
 
@@ -2426,6 +3218,7 @@ def dashboard_rendimiento_semanal():
 # ── Dashboard económico — facturación por cliente por mes ─────────────────────
 @app.route("/api/dashboard/facturacion_por_cliente")
 @login_required()
+@solo_con_monetario
 def dashboard_facturacion_por_cliente():
     import datetime
     hoy = datetime.date.today()
@@ -2578,8 +3371,11 @@ def _clasificar_requerimiento(material_proceso, categoria_compra_proveedor):
 #
 # Regla:
 #   - Lote con decisión de Calidad (estado Aprobado/Rechazado/Agotado):
-#     % aprobado = lotes.cantidad_activa / lotes.cantidad_original
+#     % aprobado = 1 - lotes.cantidad_rechazada / lotes.cantidad_original
 #     aprobado=1 si % >= 0.95, si no incidente (aprobado=0). evaluable=True.
+#     Se mide por lo rechazado y NO por cantidad_activa: esa columna tambien
+#     se descuenta cuando el lote se consume (remito, novedad), con lo cual
+#     un lote sin un solo rechazo contaba como incidente apenas se usaba.
 #   - Lote todavía 'Ingresado' (sin decisión de Calidad): NO evaluable —
 #     queda "pendiente de calidad", no cuenta ni como aprobado ni incidente.
 #   - Sin lote vinculado (históricos del Excel, cargas manuales sin OC/OTT
@@ -2612,7 +3408,8 @@ def _calidad_requerimientos_bulk(rows):
     lotes_info = {}
     if lote_ids:
         ph = ",".join("?" * len(lote_ids))
-        for l in query(f"SELECT id, estado, cantidad_activa, cantidad_original FROM lotes WHERE id IN ({ph})", tuple(lote_ids)):
+        for l in query(f"SELECT id, estado, cantidad_activa, cantidad_original, "
+                       f"cantidad_rechazada FROM lotes WHERE id IN ({ph})", tuple(lote_ids)):
             lotes_info[l["id"]] = l
 
     out = {}
@@ -2622,7 +3419,13 @@ def _calidad_requerimientos_bulk(rows):
         if lote:
             if lote["estado"] in ("Aprobado", "Rechazado", "Agotado"):
                 orig = float(lote["cantidad_original"] or 0)
-                pct = (float(lote["cantidad_activa"] or 0) / orig) if orig > 0 else 0.0
+                # Se mide por lo RECHAZADO, no por lo que queda en stock:
+                # cantidad_activa tambien baja al consumir el lote (remitos,
+                # novedades), asi que usarla hacia que un lote impecable ya
+                # usado contara como incidente de calidad. cantidad_rechazada
+                # solo la mueve Calidad.
+                rech = float(lote["cantidad_rechazada"] or 0)
+                pct = max(0.0, 1.0 - (rech / orig)) if orig > 0 else 0.0
                 out[r["id"]] = {"evaluable": True, "aprobado": 1 if pct >= 0.95 else 0,
                                  "origen": "lote", "lote_estado": lote["estado"], "lote_pct": round(pct, 4)}
             else:  # 'Ingresado' — todavía sin decisión de Calidad
@@ -2911,6 +3714,7 @@ def dashboard_indicadores_compras():
 # ── Dashboard económico / financiero ──────────────────────────────────────────
 @app.route("/api/dashboard/economico")
 @login_required()
+@solo_con_monetario
 def dashboard_economico():
     return jsonify({
         # Métricas superiores
@@ -3194,9 +3998,11 @@ def get_materiales():
     # por lotes.estado: eso deja afuera lotes parcialmente aprobados.
     sql = """SELECT m.*,
                     p.razon proveedor_nombre, cp.nombre cat_prod_nombre,
+                    cli.razon cliente_nombre,
                     COALESCE((SELECT SUM(l.cantidad_activa) FROM lotes l
                               WHERE l.material_id=m.id), 0) AS stock_lotes
              FROM materiales m
+             LEFT JOIN clientes cli ON cli.id=m.cliente_id
              LEFT JOIN proveedores p ON p.id=m.proveedor_id
              LEFT JOIN categorias_producto cp ON cp.id=m.categoria_producto_id"""
     if categoria:
@@ -3221,12 +4027,12 @@ def get_materiales():
 @app.route("/api/materiales/productos_terminados", methods=["GET"])
 @login_required()
 def get_productos_terminados_stock():
-    rows = query("""SELECT m.*,pr.nombre producto_nombre,c.razon cliente_nombre,cp.nombre cat_prod_nombre
+    rows = query("""SELECT m.*,pr.nombre producto_nombre,c.razon cliente_nombre,cp.nombre cat_prod_nombre,
+            COALESCE(m.cliente_id, pr.cliente_id) cliente_id_efectivo
         FROM materiales m
-        LEFT JOIN productos pr ON pr.codigo=m.codigo
+        LEFT JOIN productos pr ON pr.id=m.id
         LEFT JOIN categorias_producto cp ON cp.id=m.categoria_producto_id
-        LEFT JOIN producto_clientes pc ON pc.producto_id=pr.id
-        LEFT JOIN clientes c ON c.id=pc.cliente_id
+        LEFT JOIN clientes c ON c.id=COALESCE(m.cliente_id, pr.cliente_id)
         WHERE m.categoria='Producto terminado'
         ORDER BY c.razon,m.codigo""")
     return jsonify([dict(r) for r in rows])
@@ -3236,7 +4042,8 @@ def get_productos_terminados_stock():
 def create_material():
     d = request.json
     if not d.get("codigo") or not d.get("descripcion"): return jsonify({"error":"Código y descripción requeridos"}), 400
-    if query("SELECT id FROM materiales WHERE codigo=?", (d["codigo"],), one=True): return jsonify({"error":"Código ya existe"}), 409
+    dup = _codigo_en_uso(d["codigo"])
+    if dup: return jsonify({"error": _msg_codigo_en_uso(dup)}), 409
     stock_inicial = float(d.get("stock", 0) or 0)
     lid = execute("INSERT INTO materiales (codigo,descripcion,categoria,categoria_producto_id,unidad,stock,stock_min,stock_max,precio_unit,proveedor_id,obs) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         (d["codigo"],d["descripcion"],d.get("categoria","Material"),d.get("categoria_producto_id"),d.get("unidad","kg"),stock_inicial,d.get("stock_min",0),d.get("stock_max",0),d.get("precio_unit",0),d.get("proveedor_id"),d.get("obs")))
@@ -3251,8 +4058,8 @@ def create_material():
         lote_num = f"LOTE-{year}-{ln:04d}"
         lote_id = execute("""INSERT INTO lotes
             (numero,material_id,cantidad_original,cantidad_disponible,
-             proveedor_id,referencia_proveedor,estado,obs,creado_por)
-            VALUES (?,?,?,?,?,?,?,?,?)""",
+             proveedor_id,referencia_proveedor,estado,obs,creado_por,stock_computado)
+            VALUES (?,?,?,?,?,?,?,?,?,1)""",
             (lote_num, lid, stock_inicial, stock_inicial,
              d.get("proveedor_id"), "Stock inicial al dar de alta",
              "Ingresado", "Creado automáticamente al dar de alta el material",
@@ -3262,30 +4069,47 @@ def create_material():
     elif stock_inicial > 0:
         execute("INSERT INTO movimientos (material_id,tipo,cantidad,referencia,usuario_id) VALUES (?,?,?,?,?)",
             (lid, "entrada", stock_inicial, "Stock inicial al dar de alta", session["user_id"]))
+    _aplicar_cliente_barras_material(lid, d, es_alta=True)
     return jsonify({"ok":True,"id":lid}), 201
+
+def _aplicar_cliente_barras_material(mid, d, es_alta=False):
+    """Cliente y código de barras/QR/DataMatrix (punto 17) del artículo.
+
+    Desde la unificación de productos y materiales el TIPO (categoria) es
+    explícito: lo elige el usuario y NO se deduce del cliente. Antes, asignar
+    un cliente forzaba 'Producto terminado' y quitarlo volvía a 'Material'."""
+    if "codigo_barras" in d:
+        execute("UPDATE materiales SET codigo_barras=? WHERE id=?", ((d.get("codigo_barras") or "").strip() or None, mid))
+    if "cliente_id" in d:
+        execute("UPDATE materiales SET cliente_id=? WHERE id=?", (d.get("cliente_id") or None, mid))
 
 @app.route("/api/materiales/<int:mid>", methods=["PUT"])
 @login_required(roles=["admin","almacen","logistica"])
 def update_material(mid):
     d = request.json
     rol_sesion = session.get("rol")
-    actual = query("SELECT codigo,producto_id FROM materiales WHERE id=?", (mid,), one=True)
+    actual = query("SELECT codigo,producto_id,categoria FROM materiales WHERE id=?", (mid,), one=True)
     if not actual:
         return jsonify({"error": "Material no encontrado"}), 404
     nuevo_codigo = actual["codigo"]
     if "codigo" in d and d.get("codigo") and d["codigo"] != actual["codigo"]:
-        if actual["producto_id"]:
-            return jsonify({"error": "Este código proviene de un producto vinculado — edítelo desde el módulo Productos."}), 400
-        dup = query("SELECT id FROM materiales WHERE codigo=? AND id!=?", (d["codigo"], mid), one=True)
+        # Tabla única: el código de un producto terminado se puede editar desde
+        # acá o desde Procesos (es la misma fila). Solo los semielaborados
+        # (producto_id apunta a OTRO artículo) tienen código generado por el
+        # sistema a partir del de su producto.
+        if actual["producto_id"] and actual["producto_id"] != mid:
+            return jsonify({"error": "Este código lo genera el sistema a partir del producto al que pertenece (semielaborado)."}), 400
+        dup = _codigo_en_uso(d["codigo"], excluir_id=mid)
         if dup:
-            return jsonify({"error": f"El código '{d['codigo']}' ya está en uso por otro material"}), 409
+            return jsonify({"error": _msg_codigo_en_uso(dup)}), 409
         nuevo_codigo = d["codigo"]
     if "precio_unit" in d and rol_sesion == "admin":
         execute("UPDATE materiales SET codigo=?,descripcion=?,categoria=?,categoria_producto_id=?,unidad=?,stock_min=?,stock_max=?,precio_unit=?,proveedor_id=?,obs=?,actualizado=datetime('now','localtime') WHERE id=?",
-            (nuevo_codigo,d["descripcion"],d.get("categoria"),d.get("categoria_producto_id"),d.get("unidad"),d.get("stock_min",0),d.get("stock_max",0),d["precio_unit"],d.get("proveedor_id"),d.get("obs"),mid))
+            (nuevo_codigo,d["descripcion"],d.get("categoria") or actual["categoria"],d.get("categoria_producto_id"),d.get("unidad"),d.get("stock_min",0),d.get("stock_max",0),d["precio_unit"],d.get("proveedor_id"),d.get("obs"),mid))
     else:
         execute("UPDATE materiales SET codigo=?,descripcion=?,categoria=?,categoria_producto_id=?,unidad=?,stock_min=?,stock_max=?,proveedor_id=?,obs=?,actualizado=datetime('now','localtime') WHERE id=?",
-            (nuevo_codigo,d["descripcion"],d.get("categoria"),d.get("categoria_producto_id"),d.get("unidad"),d.get("stock_min",0),d.get("stock_max",0),d.get("proveedor_id"),d.get("obs"),mid))
+            (nuevo_codigo,d["descripcion"],d.get("categoria") or actual["categoria"],d.get("categoria_producto_id"),d.get("unidad"),d.get("stock_min",0),d.get("stock_max",0),d.get("proveedor_id"),d.get("obs"),mid))
+    _aplicar_cliente_barras_material(mid, d)
     # Propagar la nueva descripción a las copias guardadas en compras
     # (solicitudes_compra y ordenes_compra_items no hacen JOIN en vivo con materiales,
     #  guardan una copia propia del texto al momento de crearse)
@@ -3293,6 +4117,33 @@ def update_material(mid):
         execute("UPDATE solicitudes_compra SET descripcion=? WHERE material_id=?", (d["descripcion"], mid))
         execute("UPDATE ordenes_compra_items SET descripcion=? WHERE material_id=?", (d["descripcion"], mid))
     return jsonify({"ok":True})
+
+# Clasificación de movimientos por origen (v148). Orden = prioridad al etiquetar.
+_MOV_ORIGENES = {
+    "ott":        ("Retorno de terceros (OTT)", ["Retorno OTT %", "Recepción OTT %"], []),
+    "directa":    ("Recepción sin OC", ["Recepción REC-%"], []),
+    "oc":         ("Recepción según OC", ["Recep. %", "Recepción de OC %"], []),
+    "devolucion": ("Devolución / reenvío", ["Devolución a proveedor%", "Reenvío a tercerizado%"], []),
+    "remitos":    ("Remito a cliente", ["Remito %"], []),
+    "consumos":   ("Consumo de producción", ["Consumo%", "Ajuste consumo%", "Reversión OT%", "Reversa%", "Restauración%", "Ajuste PT%", "Corrección de aprobaci%"], ["reserva"]),
+    "lotes":      ("Alta / aprobación de lote", ["OC % emitida%", "Generación automática%", "Ingreso lote%", "Aprobación de lote%", "Stock inicial%", "Migración inicial%", "Edición liberación%"], []),
+    "ajustes":    ("Ajuste manual", ["Ajuste%", "Edición libre%"], []),
+}
+def _mov_origen_cond(key):
+    _l, likes, tipos = _MOV_ORIGENES[key]
+    cond = [f"mv.referencia LIKE ?" for _ in likes] + [f"mv.tipo=?" for _ in tipos]
+    return "(" + " OR ".join(cond) + ")", list(likes) + list(tipos)
+def _mov_origen_label(ref, tipo):
+    import re as _re
+    ref = ref or ""
+    for k, (lbl, likes, tipos) in _MOV_ORIGENES.items():
+        for lk in likes:
+            rx = "^" + ".*".join(_re.escape(x) for x in lk.split("%")) + "$"
+            if _re.match(rx, ref, _re.S):
+                return lbl
+        if tipo in tipos:
+            return lbl
+    return "Otros"
 
 @app.route("/api/movimientos", methods=["GET"])
 @login_required()
@@ -3313,18 +4164,51 @@ def get_movimientos():
     if tipo:
         conditions.append("mv.tipo=?")
         params.append(tipo)
+    # v148 (punto 7): origen del movimiento = clasificación por tipo/referencia
+    origen = request.args.get("origen")
+    if origen == "recepciones":
+        parts = []
+        for k in ("directa", "oc", "ott"):
+            c_, p_ = _mov_origen_cond(k); parts.append(c_); params += p_
+        conditions.append("(" + " OR ".join(parts) + ")")
+    elif origen in _MOV_ORIGENES:
+        c_, p_ = _mov_origen_cond(origen)
+        conditions.append(c_); params += p_
+    desde = request.args.get("desde"); hasta = request.args.get("hasta")
+    if desde:
+        conditions.append("date(mv.fecha)>=date(?)"); params.append(desde)
+    if hasta:
+        conditions.append("date(mv.fecha)<=date(?)"); params.append(hasta)
+    q = (request.args.get("q") or "").strip()
+    if q:
+        conditions.append("(mv.referencia LIKE ? OR l.numero LIKE ?)"); params += [f"%{q}%", f"%{q}%"]
     if conditions:
         sql += " WHERE " + " AND ".join(conditions)
-    sql += " ORDER BY mv.id DESC LIMIT 500"
+    try: limite = min(int(request.args.get("limit", 500)), 5000)
+    except (TypeError, ValueError): limite = 500
+    sql += f" ORDER BY mv.id DESC LIMIT {limite}"
     rows = query(sql, params)
-    return jsonify([dict(r) for r in rows])
+    out = []
+    for r in rows:
+        d_ = dict(r); d_["origen"] = _mov_origen_label(d_.get("referencia"), d_.get("tipo")); out.append(d_)
+    return jsonify(out)
 
 @app.route("/api/materiales/<int:mid>/movimiento", methods=["POST"])
 @login_required(roles=["admin","almacen"])
 def movimiento(mid):
     d = request.json
     tipo = d.get("tipo")
-    qty  = float(d.get("cantidad", 0))
+    try:
+        qty = float(d.get("cantidad", 0))
+    except (TypeError, ValueError):
+        return jsonify({"error":"La cantidad tiene que ser un número"}), 400
+    # Una cantidad negativa no es una forma de invertir el movimiento: para
+    # sacar stock está el tipo 'salida'. Aceptarla hacía que una 'entrada'
+    # con cantidad -50 descontara stock sin dejar rastro de que fue una baja.
+    # El 'ajuste' es la excepción: ahí la cantidad es el stock resultante, y
+    # su propio chequeo (más abajo) decide si se permite dejarlo en negativo.
+    if qty < 0 and tipo in ("entrada", "salida"):
+        return jsonify({"error":"La cantidad no puede ser negativa. Para descontar stock usá un movimiento de salida."}), 400
     if tipo == "salida":
         mat = query("SELECT stock FROM materiales WHERE id=?", (mid,), one=True)
         if not mat or mat["stock"] < qty: return jsonify({"error":"Stock insuficiente"}), 400
@@ -3333,6 +4217,13 @@ def movimiento(mid):
     elif tipo == "entrada":
         execute("UPDATE materiales SET stock=stock+?,actualizado=datetime('now','localtime') WHERE id=?", (qty, mid))
     else:
+        # Ajuste: fija el stock en el valor indicado. No puede dejarlo en
+        # negativo salvo que quien lo hace lo pida explícitamente — el caso
+        # real es regularizar un conteo donde el sistema ya entregó más de lo
+        # que tenía registrado.
+        if qty < 0 and not d.get("permitir_negativo"):
+            return jsonify({"error":"El ajuste dejaría el stock en negativo. "
+                                    "Si es una regularización de conteo, confirmala explícitamente."}), 400
         execute("UPDATE materiales SET stock=?,actualizado=datetime('now','localtime') WHERE id=?", (qty, mid))
     execute("INSERT INTO movimientos (material_id,tipo,cantidad,referencia,usuario_id) VALUES (?,?,?,?,?)",
         (mid, tipo, qty, d.get("referencia"), session["user_id"]))
@@ -3400,16 +4291,22 @@ def unlink_mat(pid, mid):
 @login_required()
 def get_productos():
     cliente_id = request.args.get("cliente_id")
+    # `productos` es una vista sobre la tabla única de artículos (materiales):
+    # acá se listan los que se fabrican, es decir los de tipo "Producto
+    # terminado" y cualquier otro artículo que ya tenga un proceso cargado
+    # (por si se le cambió el tipo después de definirle el proceso).
+    filtro_fabricables = """(p.tipo_articulo='Producto terminado'
+        OR EXISTS (SELECT 1 FROM proceso_operaciones po WHERE po.producto_id=p.id))"""
     if cliente_id:
-        rows = query("""SELECT p.*,c.nombre categoria_nombre,cl.razon cliente_nombre FROM productos p
+        rows = query(f"""SELECT p.*,c.nombre categoria_nombre,cl.razon cliente_nombre FROM productos p
             LEFT JOIN categorias_producto c ON c.id=p.categoria_id
             LEFT JOIN clientes cl ON cl.id=p.cliente_id
-            WHERE p.cliente_id=? AND p.activo=1 ORDER BY p.codigo""", (cliente_id,))
+            WHERE p.cliente_id=? AND p.activo=1 AND {filtro_fabricables} ORDER BY p.codigo""", (cliente_id,))
     else:
-        rows = query("""SELECT p.*,c.nombre categoria_nombre,cl.razon cliente_nombre FROM productos p
+        rows = query(f"""SELECT p.*,c.nombre categoria_nombre,cl.razon cliente_nombre FROM productos p
             LEFT JOIN categorias_producto c ON c.id=p.categoria_id
             LEFT JOIN clientes cl ON cl.id=p.cliente_id
-            WHERE p.activo=1 ORDER BY p.codigo""")
+            WHERE p.activo=1 AND {filtro_fabricables} ORDER BY p.codigo""")
     result = []
     try:
         valor_hora_mo = float(get_config_valor("valor_hora_mo", "0") or 0)
@@ -3430,6 +4327,15 @@ def get_productos():
         # valor hora se configura por hora, así que se divide por 3600.
         d["costo_mo"] = round(_ciclo_total_seg / 3600.0 * valor_hora_mo, 2)
         d["costo_total"] = round((d["costo_mat"] or 0) + (d["costo_mo"] or 0) + (d["costo_terc"] or 0), 2)
+        if cliente_id:
+            # v147 (punto 5): precio del ítem en la OC de cliente más reciente
+            oc_r = query("""SELECT oci.precio_unit, oc.numero, oc.fecha
+                FROM ordenes_cliente_items oci JOIN ordenes_cliente oc ON oc.id=oci.orden_cliente_id
+                WHERE oci.producto_id=? AND oc.cliente_id=?
+                ORDER BY oc.fecha DESC, oc.id DESC LIMIT 1""", (d["id"], cliente_id), one=True)
+            d["oc_precio_reciente"] = oc_r["precio_unit"] if oc_r else None
+            d["oc_numero_reciente"] = oc_r["numero"] if oc_r else None
+            d["oc_fecha_reciente"] = oc_r["fecha"] if oc_r else None
         result.append(d)
     return jsonify(result)
 
@@ -3524,16 +4430,37 @@ def get_producto(pid):
         d["operaciones"].append(od)
     return jsonify(d)
 
+def _codigo_en_uso(codigo, excluir_id=None):
+    """Busca el código en la tabla ÚNICA de artículos (productos terminados,
+    materiales, insumos, herramientas y semielaborados comparten el mismo
+    espacio de códigos). Devuelve la fila que lo usa o None."""
+    if excluir_id:
+        return query("SELECT id,codigo,categoria FROM materiales WHERE codigo=? AND id!=?",
+                     (codigo, excluir_id), one=True)
+    return query("SELECT id,codigo,categoria FROM materiales WHERE codigo=?", (codigo,), one=True)
+
+def _msg_codigo_en_uso(row):
+    return f"El código '{row['codigo']}' ya está en uso por otro artículo ({row['categoria'] or 'Material'})"
+
 @app.route("/api/productos", methods=["POST"])
 @login_required(roles=["admin","operario"])
 def create_producto():
     d = request.json
     if not d.get("codigo") or not d.get("nombre"): return jsonify({"error":"Código y nombre requeridos"}), 400
-    if query("SELECT id FROM productos WHERE codigo=?", (d["codigo"],), one=True): return jsonify({"error":"Código ya existe"}), 409
-    lid = execute("INSERT INTO productos (codigo,nombre,descripcion,categoria_id,unidad,tiempo_total_hs,costo_mat,costo_mo,precio_venta,peso_kg,cliente_id,obs,capacidad_cajon) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (d["codigo"],d["nombre"],d.get("descripcion"),d.get("categoria_id"),d.get("unidad","unid"),d.get("tiempo_total_hs",0),d.get("costo_mat",0),d.get("costo_mo",0),d.get("precio_venta",0),d.get("peso_kg",0),d.get("cliente_id") or None,d.get("obs"),d.get("capacidad_cajon") or None))
-    # Auto-create matching material entry for stock tracking of finished product
-    get_or_create_pt_material({"id": lid, "codigo": d["codigo"], "nombre": d["nombre"], "unidad": d.get("unidad","unid")})
+    dup = _codigo_en_uso(d["codigo"])
+    if dup: return jsonify({"error": _msg_codigo_en_uso(dup)}), 409
+    # El producto es un artículo más de la tabla única (materiales), de tipo
+    # "Producto terminado": la misma fila lleva su proceso, stock y lotes.
+    # (El trigger trg_materiales_pt_alta completa producto_id = id.)
+    cb = (d.get("codigo_barras") or "").strip() or None
+    lid = execute("""INSERT INTO materiales
+        (codigo,descripcion,descripcion_larga,categoria,categoria_producto_id,unidad,
+         tiempo_total_hs,costo_mat,costo_mo,precio_venta,peso_kg,cliente_id,obs,
+         capacidad_cajon,codigo_barras,stock,stock_min,activo)
+        VALUES (?,?,?,'Producto terminado',?,?,?,?,?,?,?,?,?,?,?,0,0,1)""",
+        (d["codigo"],d["nombre"],d.get("descripcion"),d.get("categoria_id") or None,d.get("unidad","unid"),
+         d.get("tiempo_total_hs",0),d.get("costo_mat",0),d.get("costo_mo",0),d.get("precio_venta",0),
+         d.get("peso_kg",0),d.get("cliente_id") or None,d.get("obs"),d.get("capacidad_cajon") or None,cb))
     return jsonify({"ok":True,"id":lid}), 201
 
 
@@ -3546,8 +4473,9 @@ def copiar_producto(pid):
     nuevo_nombre = (d.get("nombre") or "").strip()
     if not nuevo_codigo:
         return jsonify({"error": "Código requerido"}), 400
-    if query("SELECT id FROM productos WHERE codigo=?", (nuevo_codigo,), one=True):
-        return jsonify({"error": f"El código '{nuevo_codigo}' ya existe"}), 409
+    dup = _codigo_en_uso(nuevo_codigo)
+    if dup:
+        return jsonify({"error": _msg_codigo_en_uso(dup)}), 409
 
     # Fetch original
     orig = query("SELECT * FROM productos WHERE id=?", (pid,), one=True)
@@ -3559,18 +4487,17 @@ def copiar_producto(pid):
 
     # Create new product
     nuevo_nombre_final = nuevo_nombre or (orig["nombre"] + " (copia)")
+    # Nuevo artículo "Producto terminado" en la tabla única (sin stock: el
+    # stock y los lotes no se copian, son del artículo original).
     new_pid = execute(
-        """INSERT INTO productos
-           (codigo,nombre,descripcion,categoria_id,unidad,tiempo_total_hs,
-            costo_mat,costo_mo,precio_venta,activo,obs)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        """INSERT INTO materiales
+           (codigo,descripcion,descripcion_larga,categoria,categoria_producto_id,unidad,
+            tiempo_total_hs,costo_mat,costo_mo,precio_venta,activo,obs,stock,stock_min)
+           VALUES (?,?,?,'Producto terminado',?,?,?,?,?,?,?,?,0,0)""",
         (nuevo_codigo, nuevo_nombre_final, orig["descripcion"],
          orig["categoria_id"], orig["unidad"], orig["tiempo_total_hs"],
          orig["costo_mat"], orig["costo_mo"], orig["precio_venta"],
          1, orig["obs"]))
-
-    # Auto-create matching material for PT stock tracking
-    get_or_create_pt_material({"id": new_pid, "codigo": nuevo_codigo, "nombre": nuevo_nombre_final, "unidad": orig["unidad"]})
 
     # Copy operations and their materials
     ops_copiadas = 0
@@ -3617,32 +4544,36 @@ def update_producto(pid):
     # If only precio_venta is sent (partial update from OC), do a targeted UPDATE
     if "nombre" not in d:
         fields, vals = [], []
-        for col in ["precio_venta","peso_kg","cliente_id","activo","obs","capacidad_cajon"]:
+        for col in ["precio_venta","peso_kg","cliente_id","activo","obs","capacidad_cajon","codigo_barras"]:
             if col in d:
                 fields.append(f"{col}=?")
                 vals.append(d[col])
         if fields:
-            execute(f"UPDATE productos SET {', '.join(fields)} WHERE id=?", vals + [pid])
+            execute(f"UPDATE materiales SET {', '.join(fields)},actualizado=datetime('now','localtime') WHERE id=?", vals + [pid])
         return jsonify({"ok": True})
-    # Validar código si se está modificando (debe seguir siendo único)
+    # Validar código si se está modificando (único en TODA la tabla de artículos)
     if d.get("codigo"):
-        dup = query("SELECT id FROM productos WHERE codigo=? AND id!=?", (d["codigo"], pid), one=True)
+        dup = _codigo_en_uso(d["codigo"], excluir_id=pid)
         if dup:
-            return jsonify({"error": f"El código '{d['codigo']}' ya está en uso por otro producto"}), 409
-    prod_actual = query("SELECT codigo,nombre FROM productos WHERE id=?", (pid,), one=True)
+            return jsonify({"error": _msg_codigo_en_uso(dup)}), 409
+    prod_actual = query("SELECT codigo,descripcion nombre,costo_mat,costo_mo,precio_venta FROM materiales WHERE id=?", (pid,), one=True)
     if not prod_actual:
         return jsonify({"error": "Producto no encontrado"}), 404
     nuevo_codigo = d.get("codigo") or prod_actual["codigo"]
-    execute("UPDATE productos SET codigo=?,nombre=?,descripcion=?,categoria_id=?,unidad=?,tiempo_total_hs=?,costo_mat=?,costo_mo=?,precio_venta=?,peso_kg=?,cliente_id=?,obs=?,activo=?,capacidad_cajon=? WHERE id=?",
-        (nuevo_codigo,d["nombre"],d.get("descripcion"),d.get("categoria_id"),d.get("unidad","unid"),d.get("tiempo_total_hs",0),d.get("costo_mat",0),d.get("costo_mo",0),d.get("precio_venta",0),d.get("peso_kg",0),d.get("cliente_id") or None,d.get("obs"),1 if d.get("activo",True) else 0,d.get("capacidad_cajon") or None,pid))
-    # El material "espejo" del producto terminado en inventario (materiales.codigo
-    # y materiales.descripcion) es una copia denormalizada del producto — si
-    # cambiaron, hay que sincronizarlos o el inventario (p.ej. "Lotes
-    # asignados" en la OT, que muestra materiales.descripcion) queda
-    # mostrando el código/nombre viejo del producto.
-    if nuevo_codigo != prod_actual["codigo"] or d["nombre"] != prod_actual["nombre"]:
-        execute("UPDATE materiales SET codigo=?,descripcion=?,actualizado=datetime('now','localtime') WHERE producto_id=?",
-            (nuevo_codigo, d["nombre"], pid))
+    # v147: si el usuario no tiene permiso monetario el frontend no manda costos
+    # ni precio: se conservan los valores actuales en vez de pisarlos con 0.
+    # Tabla única: nombre -> descripcion, descripcion -> descripcion_larga,
+    # categoria_id -> categoria_producto_id. No hay "espejo" que sincronizar:
+    # el inventario, los lotes y las OT leen esta misma fila.
+    execute("""UPDATE materiales SET codigo=?,descripcion=?,descripcion_larga=?,categoria_producto_id=?,unidad=?,
+        tiempo_total_hs=?,costo_mat=?,costo_mo=?,precio_venta=?,peso_kg=?,cliente_id=?,obs=?,activo=?,
+        capacidad_cajon=?,actualizado=datetime('now','localtime') WHERE id=?""",
+        (nuevo_codigo,d["nombre"],d.get("descripcion"),d.get("categoria_id") or None,d.get("unidad","unid"),d.get("tiempo_total_hs",0),
+         d.get("costo_mat",prod_actual["costo_mat"]),d.get("costo_mo",prod_actual["costo_mo"]),d.get("precio_venta",prod_actual["precio_venta"]),
+         d.get("peso_kg",0),d.get("cliente_id") or None,d.get("obs"),1 if d.get("activo",True) else 0,d.get("capacidad_cajon") or None,pid))
+    if "codigo_barras" in d:
+        cb = (d.get("codigo_barras") or "").strip() or None
+        execute("UPDATE materiales SET codigo_barras=? WHERE id=?", (cb, pid))
     return jsonify({"ok":True})
 
 @app.route("/api/operaciones", methods=["POST"])
@@ -3665,6 +4596,11 @@ def create_operacion():
     # como operación normal.
     if es_terc and not (d.get("proveedor_id") or (d.get("precio_tercerizado") or 0)):
         es_terc = 0
+    # v147 (punto 9): una operación tercerizada exige un material como insumo
+    # (es el mismo material que se genera al ingresar el remito del proveedor).
+    if es_terc and not _tiene_insumo_material(d.get("materiales")):
+        return jsonify({"error": "Una operación tercerizada requiere cargar obligatoriamente un material como insumo "
+                                 "(es el mismo que se generará al ingresar el remito del proveedor)."}), 400
     vol_agrup = 1 if d.get("volumen_agrupado") else 0
     lid = execute("""INSERT INTO proceso_operaciones
         (producto_id,orden,nombre,descripcion,categoria_maquina_id,maquina_id,
@@ -3724,6 +4660,14 @@ def update_operacion(oid):
     # tercerizada si se cargó proveedor o precio.
     if es_terc and not (d.get("proveedor_id") or (d.get("precio_tercerizado") or 0)):
         es_terc = 0
+    if es_terc:
+        if "materiales" in d:
+            _mats_chk = d.get("materiales")
+        else:
+            _mats_chk = [dict(x) for x in query("SELECT material_id,cantidad,tipo FROM operacion_materiales WHERE operacion_id=?", (oid,))]
+        if not _tiene_insumo_material(_mats_chk):
+            return jsonify({"error": "Una operación tercerizada requiere cargar obligatoriamente un material como insumo "
+                                     "(es el mismo que se generará al ingresar el remito del proveedor)."}), 400
     vol_agrup = 1 if d.get("volumen_agrupado") else 0
     execute("""UPDATE proceso_operaciones SET orden=?,nombre=?,descripcion=?,
         categoria_maquina_id=?,maquina_id=?,tiempo_setup_min=?,tiempo_ciclo_seg=?,
@@ -3871,6 +4815,7 @@ def _next_numero_req():
 # en la pantalla de carga manual. El vínculo entre ambas tablas es
 # requerimientos_productivos.numero = ordenes_tercerizado.numero (ambos son
 # únicos), así que el sync es un upsert por ese número.
+@auditoria_proceso("sincronización OTT → requerimiento")
 def _sync_requerimiento_desde_ott(ott_id):
     """Crea o actualiza el requerimiento_productivo espejo de una OTT.
     Se llama después de cualquier cambio relevante sobre la OTT (alta, emisión
@@ -3976,6 +4921,7 @@ def _sync_requerimiento_desde_ott(ott_id):
 # Alta: al crear el ítem del pedido. Entrega: al emitir el remito.
 # Vínculo numero = f"OC-CLI-ITEM-{item_id}" (único por ítem, estable en el
 # tiempo aunque cambien cantidades/fechas).
+@auditoria_proceso("sincronización pedido → requerimiento")
 def _sync_requerimiento_desde_pedido(item_id):
     """Crea o actualiza el requerimiento_productivo espejo de un ítem de
     pedido de cliente (ordenes_cliente_items). Se llama después de crear el
@@ -4060,6 +5006,7 @@ def _sync_requerimiento_desde_pedido(item_id):
 # Herramientas y demás categorías no generan requerimiento — no son compras
 # productivas — y si el ítem no tiene material_id (descripción libre) tampoco
 # se sincroniza, porque no hay forma de saber su categoría.
+@auditoria_proceso("sincronización compra → requerimiento")
 def _sync_requerimiento_desde_compra(item_id):
     """Crea o actualiza el requerimiento_productivo espejo de un ítem de
     orden de compra (ordenes_compra_items), solo si es una compra productiva
@@ -4489,6 +5436,307 @@ def _auto_carga_requerimiento_legacy():
         "archivo_guardado": dest_name,
     }), (201 if ok_count else 422)
 
+APP_VERSION = "149"
+
+@app.route("/api/version")
+@login_required()
+def api_version():
+    return jsonify({"version": APP_VERSION})
+
+# ── Manual de usuario (punto 16): vive en la carpeta templates ───────────────
+@app.route("/manual")
+@login_required()
+def manual_usuario():
+    return send_from_directory(os.path.join(app.root_path, "templates"), "manual_usuario.html")
+
+@app.route("/manual/<fmt>")
+@login_required()
+def manual_descarga(fmt):
+    if fmt not in ("pdf", "docx"):
+        return jsonify({"error": "Formato no válido"}), 404
+    return send_from_directory(os.path.join(app.root_path, "templates"), "Manual_MetalERP." + fmt, as_attachment=True)
+
+
+# ── Operaciones pendientes por sector (punto 19) ─────────────────────────────
+@app.route("/api/operaciones_pendientes", methods=["GET"])
+@login_required()
+def get_operaciones_pendientes():
+    """Renglones de operaciones Pendientes / En proceso de OTs Pendientes / En proceso.
+    Filtro opcional por sector (categoria_maquina_id), maquina, estado y texto."""
+    cat = request.args.get("categoria_id")
+    estado = request.args.get("estado")
+    q = (request.args.get("q") or "").strip()
+    sql = """SELECT oo.id, oo.orden_id, oo.orden, oo.nombre operacion, oo.estado,
+        oo.qty_requerida, oo.qty_producida, oo.es_tercerizada,
+        oo.categoria_maquina_id, cm.nombre sector, oo.maquina_id, m.nombre maquina_nombre,
+        o.numero ot_numero, o.prioridad, o.fecha_entrega, o.estado ot_estado,
+        p.codigo producto_codigo, p.nombre producto_nombre, c.razon cliente_nombre,
+        pr.razon proveedor_nombre
+        FROM orden_operaciones oo
+        JOIN ordenes o ON o.id=oo.orden_id
+        LEFT JOIN categorias_maquina cm ON cm.id=oo.categoria_maquina_id
+        LEFT JOIN maquinas m ON m.id=oo.maquina_id
+        LEFT JOIN productos p ON p.id=o.producto_id
+        LEFT JOIN clientes c ON c.id=o.cliente_id
+        LEFT JOIN proveedores pr ON pr.id=oo.proveedor_id
+        WHERE o.estado IN ('Pendiente','En proceso')
+          AND (oo.estado IN ('Pendiente','En proceso') OR oo.qty_producida<oo.qty_requerida)
+          AND oo.estado NOT IN ('Completada','Cancelada')"""
+    args = []
+    if cat == "terceros":
+        sql += " AND oo.es_tercerizada=1"
+    elif cat:
+        sql += " AND oo.categoria_maquina_id=? AND COALESCE(oo.es_tercerizada,0)=0"
+        args.append(cat)
+    if estado:
+        sql += " AND oo.estado=?"
+        args.append(estado)
+    if q:
+        sql += " AND (o.numero LIKE ? OR oo.nombre LIKE ? OR p.nombre LIKE ? OR p.codigo LIKE ? OR c.razon LIKE ?)"
+        args += [f"%{q}%"] * 5
+    sql += " ORDER BY COALESCE(o.fecha_entrega,'9999'), o.id, CAST(oo.orden AS INTEGER)"
+    rows = query(sql, tuple(args))
+    return jsonify([dict(r) for r in rows])
+
+
+# ── Scheduling de producción ─────────────────────────────────────────────────
+# Gantt por máquina. Un "bloque" = una operación de OT, en una máquina, con un
+# operario y una jornada de 9 o 12 horas. No modifica la OT ni sus operaciones:
+# es solo la planificación; el avance real sigue yendo por Control de producción.
+from datetime import datetime as _dt, timedelta as _td
+
+_SCH_JORNADAS = (9, 12)
+_SCH_FMT = "%Y-%m-%d %H:%M"
+
+
+def _sch_parse(v):
+    """Acepta 'YYYY-MM-DD HH:MM' o 'YYYY-MM-DDTHH:MM' (con o sin segundos)."""
+    v = str(v or "").strip().replace("T", " ")[:16]
+    try:
+        return _dt.strptime(v, _SCH_FMT)
+    except ValueError:
+        return None
+
+
+def _sch_corto(v):
+    """'2026-10-14 06:00' -> '14/10 06:00' para los mensajes."""
+    return f"{v[8:10]}/{v[5:7]} {v[11:16]}"
+
+
+def _sch_bloque_sql():
+    return """SELECT pl.id, pl.orden_operacion_id, pl.maquina_id, pl.empleado_id, pl.inicio, pl.fin,
+        pl.jornada_horas, pl.cantidad_plan, pl.obs,
+        TRIM(COALESCE(e.apellido,'')||' '||COALESCE(e.nombre,'')) empleado_nombre,
+        oo.nombre operacion, oo.orden op_orden, oo.estado op_estado, oo.qty_requerida, oo.qty_producida,
+        oo.categoria_maquina_id,
+        o.id orden_id, o.numero ot_numero, o.prioridad, o.fecha_entrega, o.estado ot_estado,
+        p.codigo producto_codigo, p.nombre producto_nombre, c.razon cliente_nombre
+        FROM planificacion pl
+        JOIN orden_operaciones oo ON oo.id=pl.orden_operacion_id
+        JOIN ordenes o ON o.id=oo.orden_id
+        LEFT JOIN empleados e ON e.id=pl.empleado_id
+        LEFT JOIN productos p ON p.id=o.producto_id
+        LEFT JOIN clientes c ON c.id=o.cliente_id"""
+
+
+@app.route("/api/scheduling", methods=["GET"])
+@login_required()
+def sch_get():
+    """Datos del Gantt: máquinas (recursos) + bloques que tocan la ventana pedida."""
+    desde = request.args.get("desde") or _dt.now().strftime("%Y-%m-%d")
+    try:
+        dias = max(1, min(60, int(request.args.get("dias") or 7)))
+        d0 = _dt.strptime(desde[:10], "%Y-%m-%d")
+    except ValueError:
+        return jsonify({"error": "Fecha o cantidad de días inválida"}), 400
+    d1 = d0 + _td(days=dias)
+    maqs = query("""SELECT m.id, m.codigo, m.nombre, m.estado, m.categoria_id,
+                    COALESCE(cm.nombre,'Sin sector') grupo
+                    FROM maquinas m LEFT JOIN categorias_maquina cm ON cm.id=m.categoria_id
+                    ORDER BY COALESCE(cm.nombre,'~'), m.codigo""")
+    bl = query(_sch_bloque_sql() + " WHERE pl.inicio < ? AND pl.fin > ? ORDER BY pl.inicio",
+               (d1.strftime(_SCH_FMT), d0.strftime(_SCH_FMT)))
+    return jsonify({"desde": d0.strftime("%Y-%m-%d"), "dias": dias,
+                    "maquinas": [dict(x) for x in maqs], "bloques": [dict(x) for x in bl]})
+
+
+@app.route("/api/scheduling/pendientes", methods=["GET"])
+@login_required()
+def sch_pendientes():
+    """Operaciones de OTs Pendientes / En proceso (no tercerizadas) con lo ya planificado."""
+    rows = query("""SELECT oo.id, oo.orden_id, oo.orden, oo.nombre operacion, oo.estado,
+        oo.qty_requerida, oo.qty_producida, oo.categoria_maquina_id, cm.nombre sector,
+        oo.maquina_id, COALESCE(oo.tiempo_setup_min,0) setup_min, COALESCE(oo.tiempo_ciclo_seg,0) ciclo_seg,
+        o.numero ot_numero, o.prioridad, o.fecha_entrega, o.estado ot_estado,
+        p.codigo producto_codigo, p.nombre producto_nombre, c.razon cliente_nombre,
+        (SELECT COALESCE(SUM(pl.cantidad_plan),0) FROM planificacion pl WHERE pl.orden_operacion_id=oo.id) qty_planificada,
+        (SELECT COUNT(*) FROM planificacion pl WHERE pl.orden_operacion_id=oo.id) bloques
+        FROM orden_operaciones oo
+        JOIN ordenes o ON o.id=oo.orden_id
+        LEFT JOIN categorias_maquina cm ON cm.id=oo.categoria_maquina_id
+        LEFT JOIN productos p ON p.id=o.producto_id
+        LEFT JOIN clientes c ON c.id=o.cliente_id
+        WHERE o.estado IN ('Pendiente','En proceso')
+          AND COALESCE(oo.es_tercerizada,0)=0
+          AND oo.estado NOT IN ('Completada','Cancelada')
+          AND (oo.estado IN ('Pendiente','En proceso') OR oo.qty_producida<oo.qty_requerida)
+        ORDER BY COALESCE(o.fecha_entrega,'9999'), o.id, CAST(oo.orden AS INTEGER)""")
+    return jsonify([dict(r) for r in rows])
+
+
+def _sch_validar(d, bid=None):
+    """Valida un bloque. Devuelve (datos, error, avisos). Choques de máquina u
+    operario son error (409): una máquina o una persona no pueden estar en dos
+    trabajos a la vez."""
+    avisos = []
+    try:
+        oo_id = int(d.get("orden_operacion_id"))
+        maq_id = int(d.get("maquina_id"))
+    except (TypeError, ValueError):
+        return None, ("Falta la operación o la máquina", 400), avisos
+    try:
+        jor = int(d.get("jornada_horas") or 9)
+    except (TypeError, ValueError):
+        jor = 0
+    if jor not in _SCH_JORNADAS:
+        return None, ("La jornada debe ser de 9 o 12 horas", 400), avisos
+    ini = _sch_parse(d.get("inicio"))
+    if not ini:
+        return None, ("Fecha/hora de inicio inválida", 400), avisos
+    fin = ini + _td(hours=jor)
+    op = query("""SELECT oo.*, o.numero ot_numero, o.fecha_entrega, o.estado ot_estado
+                  FROM orden_operaciones oo JOIN ordenes o ON o.id=oo.orden_id WHERE oo.id=?""", (oo_id,), one=True)
+    if not op:
+        return None, ("Operación no encontrada", 404), avisos
+    if op["es_tercerizada"]:
+        return None, ("Una operación tercerizada no se programa en una máquina propia", 400), avisos
+    if op["estado"] in ("Completada", "Cancelada") or op["ot_estado"] in ("Completada", "Cancelada"):
+        return None, ("La operación ya está " + op["estado"].lower() + " y no se puede programar", 400), avisos
+    maq = query("SELECT * FROM maquinas WHERE id=?", (maq_id,), one=True)
+    if not maq:
+        return None, ("Máquina no encontrada", 404), avisos
+    emp_id = d.get("empleado_id")
+    emp = None
+    if emp_id not in (None, "", 0, "0"):
+        emp = query("SELECT * FROM empleados WHERE id=?", (int(emp_id),), one=True)
+        if not emp:
+            return None, ("Operario no encontrado", 404), avisos
+        if not emp["activo"]:
+            return None, ("El operario está dado de baja", 400), avisos
+    try:
+        qty = float(d.get("cantidad_plan") or 0)
+    except (TypeError, ValueError):
+        return None, ("Cantidad inválida", 400), avisos
+    if qty < 0:
+        return None, ("La cantidad no puede ser negativa", 400), avisos
+    a, b = ini.strftime(_SCH_FMT), fin.strftime(_SCH_FMT)
+    ex = bid or 0
+    # Choque de máquina
+    c = query(_sch_bloque_sql() + " WHERE pl.maquina_id=? AND pl.id<>? AND pl.inicio<? AND pl.fin>? LIMIT 1",
+              (maq_id, ex, b, a), one=True)
+    if c:
+        return None, (f"La máquina {maq['nombre']} ya está ocupada de {_sch_corto(c['inicio'])} a {_sch_corto(c['fin'])} "
+                      f"({c['ot_numero']} · {c['operacion']})", 409), avisos
+    # Choque de operario
+    if emp:
+        c = query(_sch_bloque_sql() + " WHERE pl.empleado_id=? AND pl.id<>? AND pl.inicio<? AND pl.fin>? LIMIT 1",
+                  (emp["id"], ex, b, a), one=True)
+        if c:
+            mq = query("SELECT nombre FROM maquinas WHERE id=?", (c["maquina_id"],), one=True)
+            return None, (f"{emp['apellido']} {emp['nombre']} ya tiene trabajo de {_sch_corto(c['inicio'])} a {_sch_corto(c['fin'])} "
+                          f"en {mq['nombre'] if mq else 'otra máquina'} ({c['ot_numero']})", 409), avisos
+        if op["categoria_maquina_id"]:
+            hab = query("SELECT 1 FROM empleado_maquinas WHERE empleado_id=? AND categoria_maquina_id=?",
+                        (emp["id"], op["categoria_maquina_id"]), one=True)
+            if not hab:
+                avisos.append("El operario no está habilitado en el sector de esta operación")
+    else:
+        avisos.append("Sin operario asignado")
+    if maq["estado"] != "Operativa":
+        avisos.append(f"La máquina está en estado «{maq['estado']}»")
+    if op["categoria_maquina_id"] and maq["categoria_id"] and op["categoria_maquina_id"] != maq["categoria_id"]:
+        avisos.append("La máquina es de otro sector distinto al de la operación")
+    if op["fecha_entrega"] and fin.strftime("%Y-%m-%d") > str(op["fecha_entrega"])[:10]:
+        avisos.append(f"Termina después de la fecha de entrega de la OT ({str(op['fecha_entrega'])[:10]})")
+    return {"oo": oo_id, "maq": maq_id, "emp": emp["id"] if emp else None, "ini": a, "fin": b,
+            "jor": jor, "qty": qty, "obs": (d.get("obs") or "").strip() or None}, None, avisos
+
+
+@app.route("/api/scheduling", methods=["POST"])
+@login_required(roles=["admin", "operario"])
+def sch_crear():
+    d = request.get_json(silent=True) or {}
+    v, err, avisos = _sch_validar(d)
+    if err:
+        return jsonify({"error": err[0]}), err[1]
+    # Repetir en los N días siguientes (como el Excel: mismo trabajo, mismo
+    # operario, todos los días). Se valida TODO antes de grabar nada.
+    try:
+        rep = max(0, min(30, int(d.get("repetir") or 0)))
+    except (TypeError, ValueError):
+        rep = 0
+    habiles = bool(d.get("solo_habiles", True))
+    plan = [v]
+    base = _sch_parse(v["ini"])
+    cur = base
+    while len(plan) < rep + 1:
+        cur = cur + _td(days=1)
+        if habiles and cur.weekday() >= 5:
+            continue
+        dd = dict(d); dd["inicio"] = cur.strftime(_SCH_FMT)
+        vv, err, av = _sch_validar(dd)
+        if err:
+            return jsonify({"error": f"Día {cur.strftime('%d/%m')}: {err[0]}"}), err[1]
+        for x in av:
+            if x not in avisos:
+                avisos.append(x)
+        plan.append(vv)
+    ids = []
+    for x in plan:
+        ids.append(execute("""INSERT INTO planificacion (orden_operacion_id,maquina_id,empleado_id,inicio,fin,jornada_horas,cantidad_plan,obs)
+                              VALUES (?,?,?,?,?,?,?,?)""",
+                           (x["oo"], x["maq"], x["emp"], x["ini"], x["fin"], x["jor"], x["qty"], x["obs"])))
+    return jsonify({"ok": True, "id": ids[0], "ids": ids, "avisos": avisos}), 201
+
+
+@app.route("/api/scheduling/<int:bid>", methods=["PUT"])
+@login_required(roles=["admin", "operario"])
+def sch_editar(bid):
+    cur = query("SELECT * FROM planificacion WHERE id=?", (bid,), one=True)
+    if not cur:
+        return jsonify({"error": "Bloque no encontrado"}), 404
+    d = request.get_json(silent=True) or {}
+    # lo que no se manda queda como estaba (permite mover solo máquina/hora arrastrando)
+    base = {"orden_operacion_id": cur["orden_operacion_id"], "maquina_id": cur["maquina_id"],
+            "empleado_id": cur["empleado_id"], "inicio": cur["inicio"], "jornada_horas": cur["jornada_horas"],
+            "cantidad_plan": cur["cantidad_plan"], "obs": cur["obs"]}
+    base.update({k: d[k] for k in base if k in d})
+    v, err, avisos = _sch_validar(base, bid)
+    if err:
+        return jsonify({"error": err[0]}), err[1]
+    execute("""UPDATE planificacion SET orden_operacion_id=?,maquina_id=?,empleado_id=?,inicio=?,fin=?,
+               jornada_horas=?,cantidad_plan=?,obs=? WHERE id=?""",
+            (v["oo"], v["maq"], v["emp"], v["ini"], v["fin"], v["jor"], v["qty"], v["obs"], bid))
+    return jsonify({"ok": True, "avisos": avisos})
+
+
+@app.route("/api/scheduling/<int:bid>", methods=["DELETE"])
+@login_required(roles=["admin", "operario"])
+def sch_borrar(bid):
+    if not query("SELECT id FROM planificacion WHERE id=?", (bid,), one=True):
+        return jsonify({"error": "Bloque no encontrado"}), 404
+    execute("DELETE FROM planificacion WHERE id=?", (bid,))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/scheduling/operacion/<int:ooid>", methods=["DELETE"])
+@login_required(roles=["admin", "operario"])
+def sch_borrar_operacion(ooid):
+    """Quita toda la planificación de una operación (vuelve a 'sin planificar')."""
+    execute("DELETE FROM planificacion WHERE orden_operacion_id=?", (ooid,))
+    return jsonify({"ok": True})
+
+
 # ── Ordenes ───────────────────────────────────────────────────────────────────
 @app.route("/api/ordenes", methods=["GET"])
 @login_required()
@@ -4543,12 +5791,19 @@ def create_orden():
     # blinda también acá por si se llama directo a la API).
     lid = execute("INSERT INTO ordenes (numero,cliente_id,producto_id,descripcion,detalle,cantidad,prioridad,estado,fecha_inicio,fecha_entrega,costo_mat,costo_mo,precio_venta,obs) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (numero,d.get("cliente_id"),d["producto_id"],descripcion,d.get("detalle"),d.get("cantidad",1),d.get("prioridad","Normal"),"Pendiente",d.get("fecha_inicio"),d.get("fecha_entrega"),d.get("costo_mat",0),d.get("costo_mo",0),0,d.get("obs")))
+    if "requiere_material" in d and str(d.get("requiere_material")) in ("0","False","false"):
+        execute("UPDATE ordenes SET requiere_material=0 WHERE id=?", (lid,))
     return jsonify({"ok":True,"id":lid,"numero":numero}), 201
 
+@auditoria_proceso("SC automática por tercerizado")
 def _generar_sc_tercerizado(ot_id, ot_numero):
     """Genera solicitudes de compra para operaciones tercerizadas de una OT.
     NOTA: actualmente sin uso — al crear una OT con operación tercerizada ya
-    no se genera SC automáticamente, solo la OTT correspondiente."""
+    no se genera SC automáticamente, solo la OTT correspondiente.
+
+    Desactivado por defecto: ver _sc_automaticas_activas()."""
+    if not _sc_automaticas_activas():
+        return
     ops = query("""SELECT oo.*,p.razon proveedor_nombre
         FROM orden_operaciones oo
         LEFT JOIN proveedores p ON p.id=oo.proveedor_id
@@ -4599,7 +5854,12 @@ def _generar_ott_para_ot(ot_id, ot_numero):
         # arranca recién en las OT siguientes. Solo aplica a operaciones
         # INTERMEDIAS: la última no genera semielaborado sino el PT de la OT.
         mat_se_id = None
-        if not es_ult:
+        # v147: si la operación define su material insumo, ése es el que se
+        # genera al ingresar el remito; si no, se usa el semielaborado (legado).
+        mat_ret_id = _material_retorno_operacion(op["id"])
+        if mat_ret_id:
+            mat_se_id = mat_ret_id
+        elif not es_ult:
             try:
                 mat_se_id = _get_or_create_pse(op["proceso_op_id"])
             except Exception as e:
@@ -4645,7 +5905,7 @@ def _completar_ot_automatico(oid):
                 SELECT om.material_id, m.codigo, m.descripcion,
                        SUM(om.cantidad * oo.qty_producida) consumo
                 FROM orden_operaciones oo
-                JOIN operacion_materiales om ON om.operacion_id=oo.proceso_op_id
+                JOIN orden_operacion_materiales om ON om.orden_operacion_id=oo.id
                 JOIN materiales m ON m.id=om.material_id
                 WHERE oo.orden_id=? AND m.categoria IN ('Insumo','Herramienta')
                 GROUP BY om.material_id
@@ -4671,6 +5931,14 @@ def _completar_ot_automatico(oid):
         print(f"[OTT] No se pudo autocompletar OT {numero_ot} desde retorno OTT: {e}")
         return
     execute("UPDATE ordenes SET estado='Completada' WHERE id=?", (oid,))
+
+
+def _lote_stock_computado(lote_id):
+    """True si las piezas de este lote ya se sumaron a materiales.stock al
+    crearlo. Los lotes viejos (anteriores a este cambio) devuelven False y
+    siguen con el modelo anterior: su stock lo mueve Calidad."""
+    r = query("SELECT stock_computado FROM lotes WHERE id=?", (lote_id,), one=True)
+    return bool(r and r["stock_computado"])
 
 
 def _reducir_lotes_pt(mat_pt_id, lotes, sobrante, ot_lote_num):
@@ -4703,6 +5971,13 @@ def _reducir_lotes_pt(mat_pt_id, lotes, sobrante, ot_lote_num):
             estado=CASE WHEN cantidad_original-? <= 0.0001 AND estado<>'Abierto'
                         THEN 'Agotado' ELSE estado END
             WHERE id=?""", (quitar, quitar, quitar, lote["id"]))
+        # Si al crearse el lote ya se habia computado el stock (las piezas
+        # entraron al deposito), sacarlas del lote tiene que sacarlas tambien
+        # del inventario.
+        if _lote_stock_computado(lote["id"]):
+            execute("""UPDATE materiales SET stock=MAX(0, stock-?),
+                actualizado=datetime('now','localtime') WHERE id=?""",
+                (quitar, mat_pt_id))
         execute("""INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id)
             VALUES (?,?,?,?,?,?)""",
             (mat_pt_id, lote["id"], "ajuste", quitar,
@@ -4716,6 +5991,7 @@ def _reducir_lotes_pt(mat_pt_id, lotes, sobrante, ot_lote_num):
     return sobrante
 
 
+@auditoria_proceso("generación automática de PT")
 def generar_pt_faltante_si_corresponde(oid):
     """Red de seguridad: si la OT se marca 'Completada' pero el flujo de
     Novedades no generó (o generó parcialmente) el stock de Producto
@@ -4805,23 +6081,28 @@ def generar_pt_faltante_si_corresponde(oid):
             execute("""UPDATE lotes SET
                 cantidad_disponible=cantidad_disponible+?,
                 cantidad_original=cantidad_original+?,
-                estado='Ingresado'
+                estado='Ingresado', stock_computado=1
                 WHERE id=?""",
                 (faltante, faltante, lote_pt_row["id"]))
             lote_pt_id = lote_pt_row["id"]
         else:
             lote_pt_id = execute("""INSERT INTO lotes
                 (numero,material_id,cantidad_original,cantidad_disponible,
-                 cantidad_activa,referencia_proveedor,estado,obs,creado_por)
-                VALUES (?,?,?,?,?,?,?,?,?)""",
+                 cantidad_activa,referencia_proveedor,estado,obs,creado_por,stock_computado)
+                VALUES (?,?,?,?,?,?,?,?,?,1)""",
                 (ot_lote_num, mat_pt["id"], faltante, faltante, 0,
                  f"OT {ot_lote_num}", "Ingresado",
                  f"Lotes MP: {lotes_ref}", session.get("user_id")))
 
+        # Las piezas entraron al depósito: entran a inventario ahora, sin
+        # esperar a Calidad. Clasificarlas después no vuelve a moverlas.
+        execute("""UPDATE materiales SET stock=stock+?,
+            actualizado=datetime('now','localtime') WHERE id=?""",
+            (faltante, mat_pt["id"]))
         execute(
             "INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id) VALUES (?,?,?,?,?,?)",
             (mat_pt["id"], lote_pt_id, "ingreso", faltante,
-             f"Generación automática al completar OT {ot_lote_num} — pendiente de clasificación de Calidad (no computa a stock) | Lotes MP: {lotes_ref}",
+             f"Generación automática al completar OT {ot_lote_num} — ingreso a inventario, pendiente de clasificación de Calidad | Lotes MP: {lotes_ref}",
              session.get("user_id")))
         return
 
@@ -4870,15 +6151,18 @@ def generar_pt_faltante_si_corresponde(oid):
             execute("""UPDATE lotes SET
                 cantidad_original=cantidad_original+?,
                 cantidad_disponible=cantidad_disponible+?,
-                estado=?
+                estado=?, stock_computado=1
                 WHERE id=?""",
                 (aporte, aporte, ("Ingresado" if se_llena else "Abierto"), cajon["id"]))
+            execute("""UPDATE materiales SET stock=stock+?,
+                actualizado=datetime('now','localtime') WHERE id=?""",
+                (aporte, mat_pt["id"]))
             execute(
                 "INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id) VALUES (?,?,?,?,?,?)",
                 (mat_pt["id"], cajon["id"], "ingreso", aporte,
                  f"Producción OT {ot_lote_num}, cajón {cajon['numero']}"
                  + (" — cajón completo, pendiente de clasificación de Calidad" if se_llena else " — cajón en curso")
-                 + f" (no computa a stock) | Lotes MP: {lotes_ref}",
+                 + f" — ingreso a inventario | Lotes MP: {lotes_ref}",
                  session.get("user_id")))
             restante -= aporte
         else:
@@ -4889,16 +6173,20 @@ def generar_pt_faltante_si_corresponde(oid):
             se_llena = aporte >= capacidad_cajon - 0.0001
             cid = execute("""INSERT INTO lotes
                 (numero,material_id,cantidad_original,cantidad_disponible,
-                 cantidad_activa,referencia_proveedor,estado,obs,creado_por)
-                VALUES (?,?,?,?,?,?,?,?,?)""",
+                 cantidad_activa,referencia_proveedor,estado,obs,creado_por,stock_computado)
+                VALUES (?,?,?,?,?,?,?,?,?,1)""",
                 (numero_cajon, mat_pt["id"], aporte, aporte, 0,
                  f"OT {ot_lote_num}", ("Ingresado" if se_llena else "Abierto"),
                  f"Lotes MP: {lotes_ref}", session.get("user_id")))
+            execute("""UPDATE materiales SET stock=stock+?,
+                actualizado=datetime('now','localtime') WHERE id=?""",
+                (aporte, mat_pt["id"]))
             execute(
                 "INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id) VALUES (?,?,?,?,?,?)",
                 (mat_pt["id"], cid, "ingreso", aporte,
                  f"Producción OT {ot_lote_num}, cajón {numero_cajon}"
                  + (" — cajón completo, pendiente de clasificación de Calidad" if se_llena else " — cajón en curso")
+                 + " — ingreso a inventario"
                  + f" (no computa a stock) | Lotes MP: {lotes_ref}",
                  session.get("user_id")))
             restante -= aporte
@@ -4975,6 +6263,20 @@ def update_orden(oid):
     execute("UPDATE ordenes SET cliente_id=?,producto_id=?,descripcion=?,detalle=?,cantidad=?,prioridad=?,estado=?,fecha_inicio=?,fecha_entrega=?,costo_mat=?,costo_mo=?,precio_venta=0,obs=?,actualizado=datetime('now','localtime') WHERE id=?",
         (d.get("cliente_id"),d["producto_id"],descripcion,d.get("detalle"),d.get("cantidad",1),d.get("prioridad","Normal"),estado_a_grabar,d.get("fecha_inicio"),d.get("fecha_entrega"),d.get("costo_mat",0),d.get("costo_mo",0),d.get("obs"),oid))
 
+    # Punto 4 (v147): flag "requiere materia prima" de la OT. Solo se toca si el
+    # body lo trae (el cambio rápido de estado no lo manda).
+    if "requiere_material" in d:
+        nuevo_rm = 1 if str(d.get("requiere_material")) in ("1","True","true") else 0
+        actual_rm = query("SELECT requiere_material FROM ordenes WHERE id=?", (oid,), one=True)
+        actual_rm = 1 if (actual_rm is None or actual_rm["requiere_material"] is None) else int(actual_rm["requiere_material"])
+        if nuevo_rm != actual_rm:
+            lotes_v = query("SELECT COUNT(*) c FROM orden_lotes WHERE orden_id=?", (oid,), one=True)["c"]
+            if lotes_v > 0:
+                return jsonify({"error": "No se puede cambiar 'Requiere materia prima': la OT ya tiene lotes vinculados."}), 400
+            execute("UPDATE ordenes SET requiere_material=? WHERE id=?", (nuevo_rm, oid))
+            if not cambia_producto:
+                _populate_orden_materiales(oid)
+
     # Al cambiar el producto (sin actividad previa), regenerar operaciones y
     # materiales requeridos para que reflejen la ruta del producto nuevo.
     if cambia_producto:
@@ -5018,7 +6320,7 @@ def update_orden(oid):
                 SELECT om.material_id, m.codigo, m.descripcion,
                        SUM(om.cantidad * oo.qty_producida) consumo
                 FROM orden_operaciones oo
-                JOIN operacion_materiales om ON om.operacion_id=oo.proceso_op_id
+                JOIN orden_operacion_materiales om ON om.orden_operacion_id=oo.id
                 JOIN materiales m ON m.id=om.material_id
                 WHERE oo.orden_id=? AND m.categoria IN ('Insumo','Herramienta')
                 GROUP BY om.material_id
@@ -5090,7 +6392,7 @@ def update_orden(oid):
             SELECT om.material_id, m.codigo,
                    SUM(om.cantidad * oo.qty_producida) consumo
             FROM orden_operaciones oo
-            JOIN operacion_materiales om ON om.operacion_id=oo.proceso_op_id
+            JOIN orden_operacion_materiales om ON om.orden_operacion_id=oo.id
             JOIN materiales m ON m.id=om.material_id
             WHERE oo.orden_id=? AND m.categoria IN ('Insumo','Herramienta')
             GROUP BY om.material_id
@@ -5204,9 +6506,9 @@ def create_pronostico_venta():
         meses.append(f"{yy:04d}-{mm:02d}")
 
     if cliente_id:
-        productos = query("SELECT id FROM productos WHERE activo=1 AND cliente_id=?", (cliente_id,))
+        productos = query("SELECT id FROM productos WHERE activo=1 AND tipo_articulo='Producto terminado' AND cliente_id=?", (cliente_id,))
     else:
-        productos = query("SELECT id FROM productos WHERE activo=1")
+        productos = query("SELECT id FROM productos WHERE activo=1 AND tipo_articulo='Producto terminado'")
     rows = [(pid, p["id"], mes, 0) for p in productos for mes in meses]
     if rows:
         db = get_db()
@@ -5286,6 +6588,8 @@ def create_usuario():
         return jsonify({"error":"Usuario ya existe"}), 409
     
     rol = d.get("rol", "operario")
+    if not _rol_row(rol):
+        return jsonify({"error": f"El rol \"{rol}\" no existe. Crealo antes en Configuración → Roles."}), 400
     
     # Crear el usuario
     execute("INSERT INTO usuarios (username,password,nombre,rol) VALUES (?,?,?,?)",
@@ -5296,8 +6600,8 @@ def create_usuario():
     
     # Asignar permisos predeterminados según el rol
     # Admin no necesita permisos explícitos (tiene acceso total)
-    if rol in DEFAULT_PERMISIONES:
-        for clave, valor in DEFAULT_PERMISIONES[rol].items():
+    if rol != "admin":
+        for clave, valor in _permisos_rol(rol).items():
             execute("""INSERT OR IGNORE INTO usuario_permisos (usuario_id, clave, valor) 
                       VALUES (?, ?, ?)""",
                     (usuario_id, clave, valor))
@@ -5316,7 +6620,10 @@ def update_usuario(uid):
 
     nombre = d.get("nombre") or d.get("username","")
     rol = d.get("rol", "operario")
+    if not _rol_row(rol):
+        return jsonify({"error": f"El rol \"{rol}\" no existe. Crealo antes en Configuración → Roles."}), 400
     activo = 1 if d.get("activo", 1) else 0
+    _rol_previo = query("SELECT rol FROM usuarios WHERE id=?", (uid,), one=True)["rol"]
 
     if d.get("password"):
         execute("UPDATE usuarios SET username=?,nombre=?,rol=?,activo=?,password=? WHERE id=?",
@@ -5325,7 +6632,90 @@ def update_usuario(uid):
         execute("UPDATE usuarios SET username=?,nombre=?,rol=?,activo=? WHERE id=?",
                 (d["username"], nombre, rol, activo, uid))
 
+    # Si cambió el rol, el usuario recibe los permisos predeterminados del rol nuevo.
+    if rol != _rol_previo and rol != "admin":
+        execute("DELETE FROM usuario_permisos WHERE usuario_id=?", (uid,))
+        for clave, valor in _permisos_rol(rol).items():
+            execute("INSERT OR IGNORE INTO usuario_permisos (usuario_id,clave,valor) VALUES (?,?,?)", (uid, clave, valor))
+
     return jsonify({"ok": True})
+
+# ── Roles editables (v147, punto 12) ─────────────────────────────────────────
+@app.route("/api/roles", methods=["GET"])
+@login_required()
+def get_roles():
+    import json as _j
+    out = []
+    for r in query("SELECT * FROM roles ORDER BY es_sistema DESC, nombre"):
+        d = dict(r)
+        try: d["permisos"] = _j.loads(d.get("permisos") or "{}")
+        except Exception: d["permisos"] = {}
+        d["usuarios"] = query("SELECT COUNT(*) c FROM usuarios WHERE rol=? AND activo=1", (d["nombre"],), one=True)["c"]
+        out.append(d)
+    return jsonify(out)
+
+@app.route("/api/roles", methods=["POST"])
+@login_required(roles=["admin"])
+def create_rol():
+    import json as _j
+    d = request.json or {}
+    nombre = (d.get("nombre") or "").strip().lower().replace(" ", "_")
+    if not nombre: return jsonify({"error":"Nombre requerido"}), 400
+    if d.get("base_rol") not in ROLES_BASE: return jsonify({"error":"Rol base inválido"}), 400
+    if _rol_row(nombre): return jsonify({"error":"Ya existe un rol con ese nombre"}), 409
+    permisos = {k: str(v) for k, v in (d.get("permisos") or {}).items()}
+    rid = execute("INSERT INTO roles (nombre,descripcion,base_rol,permisos,es_sistema) VALUES (?,?,?,?,0)",
+                  (nombre, d.get("descripcion"), d["base_rol"], _j.dumps(permisos)))
+    return jsonify({"ok":True,"id":rid,"nombre":nombre}), 201
+
+@app.route("/api/roles/<int:rid>", methods=["PUT"])
+@login_required(roles=["admin"])
+def update_rol(rid):
+    import json as _j
+    d = request.json or {}
+    r = query("SELECT * FROM roles WHERE id=?", (rid,), one=True)
+    if not r: return jsonify({"error":"Rol no encontrado"}), 404
+    permisos = {k: str(v) for k, v in (d.get("permisos") or {}).items()} if "permisos" in d else None
+    if r["es_sistema"]:
+        # los roles de sistema conservan nombre y rol base; solo se editan descripción y permisos
+        execute("UPDATE roles SET descripcion=?, permisos=COALESCE(?,permisos) WHERE id=?",
+                (d.get("descripcion", r["descripcion"]), _j.dumps(permisos) if permisos is not None else None, rid))
+        return jsonify({"ok":True})
+    nuevo = (d.get("nombre") or r["nombre"]).strip().lower().replace(" ", "_")
+    base = d.get("base_rol", r["base_rol"])
+    if base not in ROLES_BASE: return jsonify({"error":"Rol base inválido"}), 400
+    if nuevo != r["nombre"] and _rol_row(nuevo): return jsonify({"error":"Ya existe un rol con ese nombre"}), 409
+    execute("UPDATE roles SET nombre=?,descripcion=?,base_rol=?,permisos=COALESCE(?,permisos) WHERE id=?",
+            (nuevo, d.get("descripcion", r["descripcion"]), base, _j.dumps(permisos) if permisos is not None else None, rid))
+    if nuevo != r["nombre"]:
+        execute("UPDATE usuarios SET rol=? WHERE rol=?", (nuevo, r["nombre"]))
+    return jsonify({"ok":True})
+
+@app.route("/api/roles/<int:rid>/aplicar_permisos", methods=["POST"])
+@login_required(roles=["admin"])
+def aplicar_permisos_rol(rid):
+    """Copia los permisos del rol a todos sus usuarios (reemplaza los individuales)."""
+    r = query("SELECT * FROM roles WHERE id=?", (rid,), one=True)
+    if not r: return jsonify({"error":"Rol no encontrado"}), 404
+    if r["nombre"] == "admin": return jsonify({"ok":True,"usuarios":0})
+    n = 0
+    for u in query("SELECT id FROM usuarios WHERE rol=?", (r["nombre"],)):
+        execute("DELETE FROM usuario_permisos WHERE usuario_id=?", (u["id"],))
+        for clave, valor in _permisos_rol(r["nombre"]).items():
+            execute("INSERT OR IGNORE INTO usuario_permisos (usuario_id,clave,valor) VALUES (?,?,?)", (u["id"], clave, valor))
+        n += 1
+    return jsonify({"ok":True,"usuarios":n})
+
+@app.route("/api/roles/<int:rid>", methods=["DELETE"])
+@login_required(roles=["admin"])
+def delete_rol(rid):
+    r = query("SELECT * FROM roles WHERE id=?", (rid,), one=True)
+    if not r: return jsonify({"error":"Rol no encontrado"}), 404
+    if r["es_sistema"]: return jsonify({"error":"Los roles de sistema no se pueden eliminar"}), 400
+    en_uso = query("SELECT COUNT(*) c FROM usuarios WHERE rol=?", (r["nombre"],), one=True)["c"]
+    if en_uso: return jsonify({"error":f"El rol está asignado a {en_uso} usuario(s). Reasignalos antes de eliminarlo."}), 400
+    execute("DELETE FROM roles WHERE id=?", (rid,))
+    return jsonify({"ok":True})
 
 @app.route("/api/usuarios/<int:uid>", methods=["DELETE"])
 @login_required(roles=["admin"])
@@ -5396,12 +6786,54 @@ def _orden_int(v):
     except Exception:
         return None
 
+def _motivo_no_repoblar(oid):
+    """Por qué NO se puede regenerar las operaciones de esta OT, o None.
+
+    Regenerar borra y rehace orden_operaciones. Eso es inofensivo mientras la
+    OT no arrancó, pero deja de serlo en cuanto hay trabajo declarado o
+    piezas en la calle:
+
+      · Novedades declaradas: novedades_produccion referencia la operación
+        con ON DELETE NO ACTION, así que el DELETE fallaba con un
+        "FOREIGN KEY constraint failed" y el endpoint devolvía un 500 sin
+        explicación. Además, borrar la operación perdería la producción.
+      · OTT ya en movimiento: la tercerizada referencia la operación con
+        ON DELETE SET NULL, así que el DELETE pasaba pero dejaba la OTT
+        huérfana, apuntando a nada, con piezas ya remitidas al proveedor.
+    """
+    n_nov = query("""SELECT COUNT(*) c FROM novedades_produccion nov
+        JOIN orden_operaciones oo ON oo.id=nov.orden_operacion_id
+        WHERE oo.orden_id=?""", (oid,), one=True)["c"]
+    if n_nov:
+        return ("La OT ya tiene producción declarada (%d novedad/es): no se pueden "
+                "regenerar sus operaciones sin perder ese trabajo." % n_nov)
+    en_curso = query("""SELECT numero, estado FROM ordenes_tercerizado
+        WHERE ot_origen_id=? AND (COALESCE(cantidad_enviada,0) > 0
+              OR estado NOT IN ('Pendiente','Anulada'))
+        LIMIT 1""", (oid,), one=True)
+    if en_curso:
+        return ("La OT tiene una orden de tercerizado en curso (%s, %s): no se pueden "
+                "regenerar sus operaciones." % (en_curso["numero"], en_curso["estado"]))
+    return None
+
+
 def _populate_orden_operaciones(oid):
     """Borra y regenera orden_operaciones a partir del producto actual de la OT.
     Función interna reutilizada por el endpoint POST y por update_orden cuando
-    se cambia el producto de una OT existente."""
+    se cambia el producto de una OT existente.
+
+    Devuelve la cantidad de operaciones creadas, None si la OT no tiene
+    producto, o el string con el motivo si no se puede regenerar."""
     orden = query("SELECT producto_id FROM ordenes WHERE id=?", (oid,), one=True)
     if not orden or not orden["producto_id"]: return None
+    motivo = _motivo_no_repoblar(oid)
+    if motivo:
+        return motivo
+    # Las OTT que todavía no se movieron se borran junto con las operaciones:
+    # si no, quedarían apuntando a nada (ON DELETE SET NULL) y después
+    # _generar_ott_para_ot crearía otras, duplicándolas.
+    execute("""DELETE FROM ordenes_tercerizado WHERE ot_origen_id=?
+        AND COALESCE(cantidad_enviada,0)=0 AND estado IN ('Pendiente','Anulada')""", (oid,))
     execute("DELETE FROM orden_operaciones WHERE orden_id=?", (oid,))
     ops = query("""SELECT po.*,cm.nombre cat_maq FROM proceso_operaciones po
         LEFT JOIN categorias_maquina cm ON cm.id=po.categoria_maquina_id
@@ -5419,7 +6851,7 @@ def _populate_orden_operaciones(oid):
             qty_op = math.ceil(qty / valor_recalc)
         else:
             qty_op = qty
-        execute("""INSERT INTO orden_operaciones
+        _oo_nuevo = execute("""INSERT INTO orden_operaciones
             (orden_id,proceso_op_id,orden,nombre,categoria_maquina_id,maquina_id,
              tiempo_setup_min,tiempo_ciclo_seg,estado,qty_requerida,
              es_tercerizada,proveedor_id,precio_tercerizado,tiempo_minimo_dias)
@@ -5430,6 +6862,7 @@ def _populate_orden_operaciones(oid):
              op["proveedor_id"] if "proveedor_id" in op.keys() else None,
              op["precio_tercerizado"] if "precio_tercerizado" in op.keys() else 0,
              op["tiempo_minimo_dias"] if "tiempo_minimo_dias" in op.keys() else 0))
+        _copiar_materiales_a_ot_op(_oo_nuevo, op["id"])
     # Auto-generate OTT para ops tercerizadas (ya no se genera SC acá: la
     # compra/gestión del servicio tercerizado se maneja desde la OTT).
     ot_row = query("SELECT numero FROM ordenes WHERE id=?", (oid,), one=True)
@@ -5441,15 +6874,26 @@ def _populate_orden_operaciones(oid):
 
 def _populate_orden_materiales(oid):
     """Borra y regenera orden_materiales a partir del producto actual de la OT."""
-    orden = query("SELECT producto_id,cantidad FROM ordenes WHERE id=?", (oid,), one=True)
+    orden = query("SELECT producto_id,cantidad,requiere_material FROM ordenes WHERE id=?", (oid,), one=True)
     if not orden or not orden["producto_id"]: return None
     execute("DELETE FROM orden_materiales WHERE orden_id=?", (oid,))
     mats = query("""SELECT om.material_id,SUM(om.cantidad)*? AS total,m.unidad
-        FROM proceso_operaciones po
-        JOIN operacion_materiales om ON om.operacion_id=po.id
+        FROM orden_operaciones oo
+        JOIN orden_operacion_materiales om ON om.orden_operacion_id=oo.id
         JOIN materiales m ON m.id=om.material_id
-        WHERE po.producto_id=? GROUP BY om.material_id""",
-        (orden["cantidad"], orden["producto_id"]))
+        WHERE oo.orden_id=? AND om.material_id IS NOT NULL GROUP BY om.material_id""",
+        (orden["cantidad"], oid))
+    if not mats:
+        mats = query("""SELECT om.material_id,SUM(om.cantidad)*? AS total,m.unidad
+            FROM proceso_operaciones po
+            JOIN operacion_materiales om ON om.operacion_id=po.id
+            JOIN materiales m ON m.id=om.material_id
+            WHERE po.producto_id=? GROUP BY om.material_id""",
+            (orden["cantidad"], orden["producto_id"]))
+    # Si la OT no requiere materia prima, se omiten los materiales de categoría
+    # "Material" (los insumos/herramientas se siguen descontando igual).
+    if orden["requiere_material"] is not None and int(orden["requiere_material"]) == 0:
+        mats = [m for m in mats if (query("SELECT categoria FROM materiales WHERE id=?", (m["material_id"],), one=True) or {"categoria":None})["categoria"] != "Material"]
     for mat in mats:
         execute("INSERT INTO orden_materiales (orden_id,material_id,cantidad_requerida,cantidad_asignada,unidad) VALUES (?,?,?,0,?)",
             (oid, mat["material_id"], mat["total"], mat["unidad"]))
@@ -5461,6 +6905,7 @@ def _populate_orden_materiales(oid):
 def populate_orden_operaciones(oid):
     n = _populate_orden_operaciones(oid)
     if n is None: return jsonify({"error":"La OT no tiene producto asignado"}), 400
+    if isinstance(n, str): return jsonify({"error": n}), 409
     return jsonify({"ok":True,"ops_created":n})
 
 def _tiene_terc_previa(orden_id, orden_num):
@@ -5505,34 +6950,29 @@ def update_orden_operacion(ooid):
 
 # ── CRUD completo para operaciones de OT ─────────────────────────────────────
 def _recalcular_material_requerido_ot(oid, material_id):
-    """Recalcula orden_materiales.cantidad_requerida para UN material de la OT
-    <oid>, en función de la qty_requerida de CADA operación que usa ese
-    material (operacion_materiales.operacion_id=proceso_op_id), en vez del
-    total global de la OT. Así, si se edita la cantidad a realizar de una
-    operación puntual, lo que se pide al lote/stock para ese material cambia
-    en la misma proporción. NO toca cantidad_asignada/cantidad_reservada —
-    solo el "pedido" (cantidad_requerida); lo ya reservado/asignado se
-    mantiene tal cual quedó (si el faltante cambia, lo maneja el flujo normal
-    de compras/asignación de lotes)."""
+    """Recalcula orden_materiales.cantidad_requerida de UN material de la OT en
+    función de la qty_requerida de cada operación de la OT que lo usa
+    (orden_operacion_materiales: copia propia de la OT, v148). Si el material
+    ya no lo usa ninguna operación y no tiene nada asignado, se quita de la OT;
+    si lo usa y no estaba, se agrega. No toca lo ya asignado/reservado."""
     row = query("""SELECT SUM(oo.qty_requerida * om.cantidad) AS total, m.unidad
         FROM orden_operaciones oo
-        JOIN operacion_materiales om ON om.operacion_id=oo.proceso_op_id AND om.material_id=?
+        JOIN orden_operacion_materiales om ON om.orden_operacion_id=oo.id AND om.material_id=?
         JOIN materiales m ON m.id=om.material_id
         WHERE oo.orden_id=?""", (material_id, oid), one=True)
     total = float(row["total"] or 0) if row else 0
-    existing = query("SELECT id FROM orden_materiales WHERE orden_id=? AND material_id=?", (oid, material_id), one=True)
-    # IMPORTANTE: solo se actualiza la cantidad de un material que la OT YA
-    # tenía en su "foto" de orden_materiales (tomada al crearse, o al
-    # cambiar el producto de una OT sin actividad — ver _populate_orden_materiales).
-    # Si el material NO estaba, NO se inserta acá: eso pasaría si alguien
-    # agrega un material nuevo al proceso/producto DESPUÉS de creada la OT y
-    # luego se toca la qty_requerida de una operación de esa OT (ej. desde
-    # Control de Producción). La OT ya creada debe permanecer intacta pase
-    # lo que pase en proceso/producto — el material nuevo simplemente no
-    # aplica a esta OT (mismo criterio que ya usan /materiales_requeridos
-    # y la validación de novedades, que respetan la foto original).
+    existing = query("SELECT id,cantidad_asignada FROM orden_materiales WHERE orden_id=? AND material_id=?", (oid, material_id), one=True)
     if existing:
+        if total <= 0:
+            usado = query("SELECT COUNT(*) c FROM orden_lotes WHERE orden_id=? AND material_id=?", (oid, material_id), one=True)["c"]
+            if float(existing["cantidad_asignada"] or 0) <= 0 and not usado:
+                execute("DELETE FROM orden_materiales WHERE id=?", (existing["id"],))
+                return
         execute("UPDATE orden_materiales SET cantidad_requerida=? WHERE id=?", (total, existing["id"]))
+    elif total > 0:
+        unidad = (row["unidad"] if row else None)
+        execute("INSERT INTO orden_materiales (orden_id,material_id,cantidad_requerida,cantidad_asignada,unidad) VALUES (?,?,?,0,?)",
+                (oid, material_id, total, unidad))
 
 
 @app.route("/api/ordenes/<int:oid>/operaciones/<int:opid>", methods=["PUT"])
@@ -5576,17 +7016,14 @@ def update_ot_operacion(oid, opid):
                     "se descuente correctamente."}), 400
     # Si se está por cambiar qty_requerida, necesitamos el proceso_op_id ANTES
     # del UPDATE para saber qué materiales de esta operación recalcular después.
-    proceso_op_id = None
-    if "qty_requerida" in fields:
-        oo_prev = query("SELECT proceso_op_id FROM orden_operaciones WHERE id=? AND orden_id=?", (opid, oid), one=True)
-        proceso_op_id = oo_prev["proceso_op_id"] if oo_prev else None
+    proceso_op_id = opid if "qty_requerida" in fields else None
     set_clause = ", ".join(f"{k}=?" for k in fields.keys())
     params = list(fields.values()) + [opid, oid]
     execute(f"UPDATE orden_operaciones SET {set_clause} WHERE id=? AND orden_id=?", params)
     # ── La cantidad que se le pide al lote/stock por cada material que usa
     # esta operación cambia en función de la nueva qty_requerida ingresada.
     if "qty_requerida" in fields and proceso_op_id:
-        mat_ids = query("SELECT DISTINCT material_id FROM operacion_materiales WHERE operacion_id=?", (proceso_op_id,))
+        mat_ids = query("SELECT DISTINCT material_id FROM orden_operacion_materiales WHERE orden_operacion_id=?", (opid,))
         for mr in mat_ids:
             _recalcular_material_requerido_ot(oid, mr["material_id"])
     # Si se puso esta operación "En proceso" o "Completada" a mano, la OT
@@ -5595,18 +7032,60 @@ def update_ot_operacion(oid, opid):
         execute("UPDATE ordenes SET estado='En proceso' WHERE id=? AND estado='Pendiente'", (oid,))
     return jsonify({"ok": True})
 
+# ── Materiales por operación de la OT (v148, punto 4): la OT es independiente del proceso ──
+@app.route("/api/orden_operaciones/<int:ooid>/materiales", methods=["GET"])
+@login_required()
+def get_ot_op_materiales(ooid):
+    rows = query("""SELECT om.id,om.material_id,om.cantidad,om.unidad,om.tipo,m.codigo,m.descripcion,m.categoria,m.stock
+        FROM orden_operacion_materiales om LEFT JOIN materiales m ON m.id=om.material_id
+        WHERE om.orden_operacion_id=? ORDER BY om.id""", (ooid,))
+    return jsonify([dict(r) for r in rows])
+
+@app.route("/api/orden_operaciones/<int:ooid>/materiales", methods=["PUT"])
+@login_required(roles=["admin","operario"])
+def set_ot_op_materiales(ooid):
+    """Reemplaza la lista de materiales/insumos de UNA operación de la OT.
+    Lista vacía = la operación no consume material. No toca el proceso del producto."""
+    oo = query("SELECT * FROM orden_operaciones WHERE id=?", (ooid,), one=True)
+    if not oo: return jsonify({"error": "Operación no encontrada"}), 404
+    lista = (request.json or {}).get("materiales")
+    if not isinstance(lista, list): return jsonify({"error": "materiales (lista) requerido"}), 400
+    limpia = []
+    for m in lista:
+        try:
+            mid = int(m.get("material_id")); cant = float(m.get("cantidad") or 0)
+        except (TypeError, ValueError):
+            return jsonify({"error": "Material o cantidad inválidos"}), 400
+        if cant <= 0: return jsonify({"error": "La cantidad de cada material debe ser mayor a 0"}), 400
+        mat = query("SELECT id,unidad FROM materiales WHERE id=?", (mid,), one=True)
+        if not mat: return jsonify({"error": f"Material {mid} no existe"}), 404
+        limpia.append((mid, cant, m.get("unidad") or mat["unidad"], m.get("tipo") or "material"))
+    if oo["es_tercerizada"] and not any(t == "material" for _, _, _, t in limpia):
+        return jsonify({"error": "Una operación tercerizada necesita un insumo (el material que vuelve del tercero)."}), 400
+    previos = [r["material_id"] for r in query("SELECT DISTINCT material_id FROM orden_operacion_materiales WHERE orden_operacion_id=?", (ooid,)) if r["material_id"]]
+    execute("DELETE FROM orden_operacion_materiales WHERE orden_operacion_id=?", (ooid,))
+    for mid, cant, un, tipo in limpia:
+        execute("INSERT INTO orden_operacion_materiales (orden_operacion_id,material_id,cantidad,unidad,tipo) VALUES (?,?,?,?,?)", (ooid, mid, cant, un, tipo))
+    for mid in set(previos) | {x[0] for x in limpia}:
+        _recalcular_material_requerido_ot(oo["orden_id"], mid)
+    # OTT de esta operación que todavía no inició: actualizar el material de retorno
+    if oo["es_tercerizada"]:
+        ret = _material_retorno_operacion(ooid)
+        if ret:
+            execute("""UPDATE ordenes_tercerizado SET material_se_id=? WHERE operacion_id=? AND estado='Pendiente' AND COALESCE(cantidad_enviada,0)=0""", (ret, ooid))
+    return jsonify({"ok": True})
+
 @app.route("/api/ordenes/<int:oid>/operaciones/<int:opid>", methods=["DELETE"])
 @login_required(roles=["admin","operario"])
 def delete_ot_operacion(oid, opid):
-    oo_prev = query("SELECT proceso_op_id FROM orden_operaciones WHERE id=? AND orden_id=?", (opid, oid), one=True)
+    mat_ids_prev = query("SELECT DISTINCT material_id FROM orden_operacion_materiales WHERE orden_operacion_id=?", (opid,))
+    execute("DELETE FROM orden_operacion_materiales WHERE orden_operacion_id=?", (opid,))
     execute("DELETE FROM orden_operaciones WHERE id=? AND orden_id=?", (opid, oid))
     # Al borrar la operación, lo pedido de sus materiales también baja (ya no
     # hay ninguna operación pendiente que lo necesite, salvo que otra
     # operación de la misma OT use el mismo material).
-    if oo_prev and oo_prev["proceso_op_id"]:
-        mat_ids = query("SELECT DISTINCT material_id FROM operacion_materiales WHERE operacion_id=?", (oo_prev["proceso_op_id"],))
-        for mr in mat_ids:
-            _recalcular_material_requerido_ot(oid, mr["material_id"])
+    for mr in mat_ids_prev:
+        _recalcular_material_requerido_ot(oid, mr["material_id"])
     return jsonify({"ok": True})
 
 @app.route("/api/ordenes/<int:oid>/operaciones", methods=["POST"])
@@ -5624,6 +7103,14 @@ def add_ot_operacion(oid):
          d.get("tiempo_setup_min",0), d.get("tiempo_ciclo_seg",0),
          d.get("estado","Pendiente"), d.get("qty_requerida",0),
          d.get("obs")))
+    for m in (d.get("materiales") or []):
+        try:
+            if float(m.get("cantidad") or 0) > 0 and m.get("material_id"):
+                execute("INSERT INTO orden_operacion_materiales (orden_operacion_id,material_id,cantidad,unidad,tipo) VALUES (?,?,?,?,?)",
+                        (new_id, int(m["material_id"]), float(m["cantidad"]), m.get("unidad"), m.get("tipo") or "material"))
+                _recalcular_material_requerido_ot(oid, int(m["material_id"]))
+        except (TypeError, ValueError):
+            pass
     return jsonify({"ok": True, "id": new_id}), 201
 
 # ── Materiales de OT ──────────────────────────────────────────────────────────
@@ -5648,12 +7135,11 @@ def get_orden_materiales(oid):
     # material puede estar requerido por más de un paso de la ruta, así que
     # se lista cada uno con su número de orden).
     ops_por_mat = {}
-    orden_row = query("SELECT producto_id FROM ordenes WHERE id=?", (oid,), one=True)
-    if orden_row and orden_row["producto_id"]:
-        ops_rows = query("""SELECT om2.material_id, po.orden op_orden, po.nombre op_nombre
-            FROM operacion_materiales om2
-            JOIN proceso_operaciones po ON po.id=om2.operacion_id
-            WHERE po.producto_id=?""", (orden_row["producto_id"],))
+    if True:
+        ops_rows = query("""SELECT om2.material_id, oo.orden op_orden, oo.nombre op_nombre
+            FROM orden_operacion_materiales om2
+            JOIN orden_operaciones oo ON oo.id=om2.orden_operacion_id
+            WHERE oo.orden_id=? ORDER BY CAST(oo.orden AS INTEGER)""", (oid,))
         for orow in ops_rows:
             ops_por_mat.setdefault(orow["material_id"], []).append(
                 f"{orow['op_orden']}. {orow['op_nombre']}")
@@ -5705,10 +7191,13 @@ def get_ott_list():
         o.numero ot_numero, o.estado ot_estado, p.razon proveedor_nombre,
         po.nombre op_nombre, po.orden op_orden,
         pr.nombre producto_nombre, pr.codigo producto_codigo,
+        mse.codigo material_codigo, mse.descripcion material_descripcion,
+        (SELECT GROUP_CONCAT(sc.numero, ', ') FROM solicitudes_compra sc WHERE sc.ott_id=ott.id) sc_numeros,
         COALESCE((SELECT l.cantidad_rechazada FROM lotes l WHERE l.id=ott.lote_retorno_id), 0)
             - COALESCE(ott.cantidad_rechazada_devuelta,0) AS rechazado_pendiente_devolver,
         (SELECT l.estado FROM lotes l WHERE l.id=ott.lote_retorno_id) AS lote_retorno_estado
         FROM ordenes_tercerizado ott
+        LEFT JOIN materiales mse ON mse.id=ott.material_se_id
         LEFT JOIN ordenes o ON o.id=ott.ot_origen_id
         LEFT JOIN proveedores p ON p.id=ott.proveedor_id
         LEFT JOIN proceso_operaciones po ON po.id=ott.proceso_op_id
@@ -5732,8 +7221,10 @@ def get_ott(oid):
         rem.numero remito_numero, remdev.numero remito_devolucion_numero,
         oo.qty_requerida oo_qty_requerida,
         oo.orden_id oo_orden_id, oo.orden oo_orden,
+        mse.codigo material_codigo, mse.descripcion material_descripcion,
         l.cantidad_rechazada lote_cantidad_rechazada
         FROM ordenes_tercerizado ott
+        LEFT JOIN materiales mse ON mse.id=ott.material_se_id
         LEFT JOIN ordenes o ON o.id=ott.ot_origen_id
         LEFT JOIN proveedores p ON p.id=ott.proveedor_id
         LEFT JOIN proceso_operaciones po ON po.id=ott.proceso_op_id
@@ -5786,11 +7277,20 @@ def get_ott(oid):
         prod_id = query("SELECT producto_id FROM proceso_operaciones WHERE id=?", (r["proceso_op_id"],), one=True)
         prod_id = prod_id["producto_id"] if prod_id else None
         if prod_id:
-            mat = query("SELECT stock FROM materiales WHERE producto_id=? AND activo=1", (prod_id,), one=True)
+            # Primero el propio artículo PT (id=producto_id), después semielaborados.
+            mat = query("SELECT stock FROM materiales WHERE producto_id=? AND activo=1 ORDER BY (id=producto_id) DESC, id LIMIT 1", (prod_id,), one=True)
             if mat: mat_stock = mat["stock"]
         if mat_stock is not None:
-            r["cantidad_disponible"] = max(mat_stock - cantidad_enviada, 0)
+            # Acá NO se resta lo ya enviado: al emitir cada remito las piezas
+            # salieron del depósito y materiales.stock ya bajó. Restarlas otra
+            # vez las descontaba dos veces y el modal ofrecía 0 cuando todavía
+            # quedaban piezas por mandar. Es el mismo criterio que usa
+            # ott_emitir_remito para validar (ver rama `elif mat:` de allá).
+            r["cantidad_disponible"] = max(mat_stock, 0)
             r["cantidad_disponible_origen"] = "stock"
+        elif not r.get("operacion_id") and float(r.get("cantidad_plan") or 0) > 0:
+            r["cantidad_disponible"] = max(float(r["cantidad_plan"]) - cantidad_enviada, 0)
+            r["cantidad_disponible_origen"] = "cantidad_plan"
         else:
             r["cantidad_disponible"] = max((r.get("oo_qty_requerida") or 0) - cantidad_enviada, 0)
             r["cantidad_disponible_origen"] = "qty_requerida"
@@ -5798,11 +7298,16 @@ def get_ott(oid):
     # Tope adicional por insumos tipo 'material' cargados en la operación
     # (ver ott_emitir_remito para la validación real al confirmar el envío;
     # esto es solo para que el modal ya muestre/limite el valor correcto).
-    if r.get("proceso_op_id"):
+    if r.get("operacion_id"):
+        # Mismo criterio que ott_emitir_remito: el material que representa la
+        # operación comprada al tercero no es un insumo físico y no limita.
+        _mat_ret = _material_retorno_operacion(r["operacion_id"])
         limite_insumo = None
-        for ins in query("""SELECT om.cantidad, m.stock mat_stock
-                FROM operacion_materiales om JOIN materiales m ON m.id=om.material_id
-                WHERE om.operacion_id=? AND om.tipo='material'""", (r["proceso_op_id"],)):
+        for ins in query("""SELECT om.material_id, om.cantidad, m.stock mat_stock
+                FROM orden_operacion_materiales om JOIN materiales m ON m.id=om.material_id
+                WHERE om.orden_operacion_id=? AND om.tipo='material'""", (r["operacion_id"],)):
+            if _mat_ret and ins["material_id"] == _mat_ret:
+                continue
             cant_unit = float(ins["cantidad"] or 0)
             if cant_unit <= 0:
                 continue
@@ -5820,19 +7325,37 @@ def create_ott():
     d = request.json
     if not d.get("proveedor_id"):
         return jsonify({"error":"Proveedor requerido"}), 400
+    # v147 (punto 10): OTT manual — sin OT/operación de origen. Exige el material
+    # como insumo (el mismo que se genera al ingresar el remito) y la cantidad.
+    es_manual = not d.get("operacion_id") and not d.get("proceso_op_id")
+    material_id = d.get("material_id")
+    cantidad_plan = 0
+    if es_manual:
+        if not material_id:
+            return jsonify({"error":"Seleccioná el material como insumo (es el mismo que se generará al ingresar el remito)"}), 400
+        mat = query("SELECT id,categoria FROM materiales WHERE id=? AND activo=1", (material_id,), one=True)
+        if not mat:
+            return jsonify({"error":"Material no encontrado"}), 404
+        if mat["categoria"] == "Producto terminado":
+            return jsonify({"error":"Un producto terminado no puede usarse como insumo de una OTT manual"}), 400
+        try: cantidad_plan = float(d.get("cantidad") or 0)
+        except (TypeError, ValueError): cantidad_plan = 0
+        if cantidad_plan <= 0:
+            return jsonify({"error":"Indicá la cantidad a enviar a terceros"}), 400
     last = query("SELECT numero FROM ordenes_tercerizado ORDER BY id DESC LIMIT 1", one=True)
     try: n = int(last["numero"].split("-")[1])+1 if last else 1
     except: n = 1
     numero = f"OTT-{n:04d}"
     lid = execute("""INSERT INTO ordenes_tercerizado
         (numero,ot_origen_id,operacion_id,proceso_op_id,proveedor_id,
-         precio_acordado,estado,es_ultimo_nivel,fecha_retorno_est,obs,creado_por)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+         precio_acordado,estado,es_ultimo_nivel,fecha_retorno_est,obs,creado_por,material_se_id,cantidad_plan)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (numero, d.get("ot_origen_id"), d.get("operacion_id"),
          d.get("proceso_op_id"), d["proveedor_id"],
          d.get("precio_acordado", 0), "Pendiente",
          1 if d.get("es_ultimo_nivel") else 0,
-         d.get("fecha_retorno_est"), d.get("obs"), session["user_id"]))
+         d.get("fecha_retorno_est"), d.get("obs"), session["user_id"],
+         material_id if es_manual else None, cantidad_plan))
     _sync_requerimiento_desde_ott(lid)
     return jsonify({"ok": True, "id": lid, "numero": numero}), 201
 
@@ -5840,6 +7363,12 @@ def create_ott():
 @login_required(roles=["admin","operario"])
 def update_ott(oid):
     d = request.json
+    # v147 (punto 9): el proveedor se puede cambiar solo antes de iniciarse la OTT
+    # (antes del primer envío), porque al enviar se genera la solicitud de compra.
+    _ott_act = query("SELECT proveedor_id,cantidad_enviada FROM ordenes_tercerizado WHERE id=?", (oid,), one=True)
+    if not _ott_act: return jsonify({"error":"OTT no encontrada"}), 404
+    if float(_ott_act["cantidad_enviada"] or 0) > 0 and d.get("proveedor_id") != _ott_act["proveedor_id"]:
+        return jsonify({"error":"No se puede cambiar el proveedor: la OTT ya inició (tiene envíos)."}), 400
     execute("""UPDATE ordenes_tercerizado SET estado=?,proveedor_id=?,precio_acordado=?,
         fecha_retorno_est=?,fecha_envio=?,obs=? WHERE id=?""",
         (d.get("estado"), d.get("proveedor_id"), d.get("precio_acordado",0),
@@ -5847,11 +7376,16 @@ def update_ott(oid):
     _sync_requerimiento_desde_ott(oid)
     return jsonify({"ok": True})
 
+@auditoria_proceso("SC automática por insumo de OTT")
 def _generar_sc_insumo_ott(material_id, faltante, motivo):
     """Genera (o amplía, si ya hay una activa) una Solicitud de Compra por
     el faltante puntual de un material/insumo requerido para remitir una
     OTT — a diferencia de auto_generar_sc_bajo_stock, esto NO depende de
-    stock_min/stock_max: es el faltante exacto para cubrir este remito."""
+    stock_min/stock_max: es el faltante exacto para cubrir este remito.
+
+    Desactivado por defecto: ver _sc_automaticas_activas()."""
+    if not _sc_automaticas_activas():
+        return None
     if faltante <= 0 or not material_id:
         return None
     mat = query("SELECT codigo,descripcion,unidad FROM materiales WHERE id=?", (material_id,), one=True)
@@ -5920,6 +7454,53 @@ def _generar_ot_aux_insumo_ott(producto_id, faltante, motivo):
     return {"numero": numero_aux, "producto": prod["nombre"], "cantidad": round(faltante, 3)}
 
 
+@auditoria_proceso("SC automática por envío a tercero")
+def _generar_sc_por_envio_ott(ott_id, cantidad, num_rem):
+    """v147 — punto 9: al emitir un envío de una OTT se genera una Solicitud de
+    Compra por la cantidad enviada (servicio tercerizado), con una cotización
+    precargada del proveedor de la OTT al precio acordado, SIN seleccionar:
+    Compras debe confirmar el precio (seleccionando la cotización) y emitir la
+    OC. Devuelve None si la OTT no tiene material de retorno definido (legado).
+
+    Desactivado por defecto: ver _sc_automaticas_activas()."""
+    if not _sc_automaticas_activas():
+        return None
+    ott = query("""SELECT ott.*, po.nombre op_nombre, o.numero ot_numero
+        FROM ordenes_tercerizado ott
+        LEFT JOIN proceso_operaciones po ON po.id=ott.proceso_op_id
+        LEFT JOIN ordenes o ON o.id=ott.ot_origen_id WHERE ott.id=?""", (ott_id,), one=True)
+    if not ott or not ott["proveedor_id"]:
+        return None
+    mat_id = None
+    if ott["operacion_id"]:
+        mat_id = _material_retorno_operacion(ott["operacion_id"])
+    elif ott["material_se_id"]:
+        mat_id = ott["material_se_id"]
+    if not mat_id:
+        return None
+    mat = query("SELECT id,codigo,descripcion,unidad,categoria FROM materiales WHERE id=?", (mat_id,), one=True)
+    if not mat:
+        return None
+    numero = next_numero_sc()
+    tipo_sc = "Productiva" if mat["categoria"] == "Material" else "Indirecta"
+    desc = (f"Servicio tercerizado {ott['op_nombre'] or 'OTT manual'} — {mat['descripcion']} "
+            f"(OTT {ott['numero']}, remito {num_rem})")
+    sid = execute("""INSERT INTO solicitudes_compra
+        (numero,tipo,material_id,descripcion,cantidad,unidad,urgencia,estado,ot_origen_id,
+         solicitante_id,obs,ott_id,ott_remito)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (numero, tipo_sc, mat["id"], desc, cantidad, mat["unidad"], "Normal", "Pendiente",
+         ott["ot_origen_id"], session.get("user_id"),
+         f"Generada automáticamente por el envío {num_rem} de la OTT {ott['numero']}. "
+         "Compras debe confirmar el precio y emitir la OC.",
+         ott_id, num_rem))
+    execute("""INSERT INTO cotizaciones_compra
+        (solicitud_id,proveedor_id,precio_unit,plazo_entrega_dias,seleccionada,obs)
+        VALUES (?,?,?,?,0,?)""",
+        (sid, ott["proveedor_id"], float(ott["precio_acordado"] or 0), 3,
+         "Precio precargado desde la OTT — confirmar antes de emitir la OC"))
+    return {"numero": numero, "cantidad": cantidad, "material": mat["descripcion"]}
+
 @app.route("/api/ott/<int:oid>/emitir_remito", methods=["POST"])
 @login_required(roles=["admin","operario"])
 def ott_emitir_remito(oid):
@@ -5987,7 +7568,9 @@ def ott_emitir_remito(oid):
 
     mat = None
     if ott["producto_id"]:
-        mat = query("SELECT id,stock,codigo FROM materiales WHERE producto_id=? AND activo=1",
+        # Primero el propio artículo PT (id=producto_id), después semielaborados.
+        mat = query("""SELECT id,stock,codigo FROM materiales WHERE producto_id=? AND activo=1
+                    ORDER BY (id=producto_id) DESC, id LIMIT 1""",
                     (ott["producto_id"],), one=True)
 
     # Si el paso anterior fue tercerizado, lo que se reenvía al segundo
@@ -6014,11 +7597,19 @@ def ott_emitir_remito(oid):
     # para acompañar ese envío. Los insumos tipo 'producto' NO entran acá:
     # su faltante se resuelve generando una OT auxiliar (ver más abajo), no
     # limitando el remito.
+    # El insumo que representa la operación comprada al tercero (el material
+    # de retorno de la OTT) NO es un insumo físico: existe para poder
+    # COMPRARLE la operación al proveedor, y es el que se genera cuando entra
+    # su remito. No hay que exigirlo en stock para poder mandar las piezas ni
+    # consumirlo: se adquiere con la SC que genera el propio envío.
+    mat_retorno_id = _material_retorno_operacion(ott["operacion_id"]) if ott["operacion_id"] else None
     limite_insumo, limite_insumo_cod = None, None
-    if ott["proceso_op_id"]:
-        for ins in query("""SELECT om.cantidad, m.stock mat_stock, m.codigo mat_codigo
-                FROM operacion_materiales om JOIN materiales m ON m.id=om.material_id
-                WHERE om.operacion_id=? AND om.tipo='material'""", (ott["proceso_op_id"],)):
+    if ott["operacion_id"]:
+        for ins in query("""SELECT om.material_id, om.cantidad, m.stock mat_stock, m.codigo mat_codigo
+                FROM orden_operacion_materiales om JOIN materiales m ON m.id=om.material_id
+                WHERE om.orden_operacion_id=? AND om.tipo='material'""", (ott["operacion_id"],)):
+            if mat_retorno_id and ins["material_id"] == mat_retorno_id:
+                continue
             cant_unit = float(ins["cantidad"] or 0)
             if cant_unit <= 0:
                 continue
@@ -6056,6 +7647,15 @@ def ott_emitir_remito(oid):
                                       + (f" — limitado por stock de insumo {limite_insumo_cod}"
                                          if limite_insumo is not None and limite_insumo < float(oo["qty_requerida"]) - float(total_ya_enviado or 0)
                                          else "")}), 400
+    elif not ott["operacion_id"] and float(ott["cantidad_plan"] or 0) > 0:
+        # v147: OTT manual — el techo es la cantidad indicada al crearla.
+        disponible = max(float(ott["cantidad_plan"]) - cantidad_enviada_previa, 0)
+        if cantidad > disponible + 0.0001:
+            return jsonify({"error": f"Cantidad excede lo indicado en la OTT (disponible: {disponible:g}, solicitado: {cantidad:g})"}), 400
+        _mat_man = query("SELECT codigo,stock FROM materiales WHERE id=?", (ott["material_se_id"],), one=True)
+        if _mat_man and float(_mat_man["stock"] or 0) + 0.0001 < cantidad:
+            return jsonify({"error": f"Stock insuficiente del material insumo {_mat_man['codigo']} "
+                                      f"(disponible: {float(_mat_man['stock'] or 0):g}, solicitado: {cantidad:g})"}), 400
     elif limite_insumo is not None and cantidad > limite_insumo:
         # No hay operación anterior, ni stock propio del semielaborado, ni
         # cantidad planificada cargada — el único límite que queda es el
@@ -6131,11 +7731,13 @@ def ott_emitir_remito(oid):
     # para fabricarlo. El remito igual se emite — no se bloquea por esto.
     insumos_op = query("""SELECT om.tipo, om.material_id, om.producto_id, om.cantidad,
             m.codigo mat_codigo, m.stock mat_stock
-        FROM operacion_materiales om
+        FROM orden_operacion_materiales om
         JOIN materiales m ON m.id=om.material_id
-        WHERE om.operacion_id=?""", (ott["proceso_op_id"],)) if ott["proceso_op_id"] else []
+        WHERE om.orden_operacion_id=?""", (ott["operacion_id"],)) if ott["operacion_id"] else []
     scs_insumo, ots_insumo = [], []
     for ins in insumos_op:
+        if mat_retorno_id and ins["material_id"] == mat_retorno_id:
+            continue   # es la operación que se le compra al tercero, no un insumo físico
         requerido = round(float(ins["cantidad"] or 0) * cantidad, 4)
         if requerido <= 0:
             continue
@@ -6159,16 +7761,40 @@ def ott_emitir_remito(oid):
                 r = _generar_sc_insumo_ott(ins["material_id"], faltante, motivo)
                 if r: scs_insumo.append(r)
 
+    # v147 (punto 10): OTT manual — se consume el material insumo enviado.
+    if not ott["operacion_id"] and ott["material_se_id"] and float(ott["cantidad_plan"] or 0) > 0:
+        execute("""UPDATE materiales SET stock=MAX(0,stock-?), actualizado=datetime('now','localtime') WHERE id=?""",
+                (cantidad, ott["material_se_id"]))
+        execute("""INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id)
+            VALUES (?,NULL,'salida',?,?,?)""",
+            (ott["material_se_id"], cantidad, f"Envío a tercerizado OTT {ott['numero']} — {num_rem}", session["user_id"]))
+
     # Si ya estaba "En proceso" (hubo una recepción parcial previa), se
     # mantiene ese estado — no se retrocede a "Remito emitido". Si estaba
     # "Pendiente" o "Remito emitido", pasa (o queda) en "Remito emitido".
     nuevo_estado = ott["estado"] if ott["estado"] == "En proceso" else "Remito emitido"
+    # El retorno estimado se fija al emitir el PRIMER remito: antes de enviar
+    # el material no hay desde cuándo contar. Sale del plazo pactado con el
+    # proveedor (proveedores.plazo_dias). Sin esto el campo quedaba siempre en
+    # NULL para las OTT generadas automáticamente desde una OT, y entonces
+    # _calc_cumplimientos_req devolvia cumple_fecha=None: ninguna OTT podia
+    # aparecer en el grafico de Cumplimiento de entrega ni marcarse VENCIDA.
+    # COALESCE: si alguien ya lo cargo a mano en la OTT, se respeta, y los
+    # remitos parciales posteriores no lo recalculan.
     execute("""UPDATE ordenes_tercerizado SET estado=?,
         remito_traslado_id=?, fecha_envio=COALESCE(fecha_envio,date('now','localtime')),
+        fecha_retorno_est=COALESCE(fecha_retorno_est,
+            date(COALESCE(fecha_envio, date('now','localtime')), '+' ||
+                 COALESCE((SELECT plazo_dias FROM proveedores
+                           WHERE id=ordenes_tercerizado.proveedor_id), 3) || ' days')),
         cantidad_enviada=? WHERE id=?""",
         (nuevo_estado, rid, cantidad_enviada_previa + cantidad, oid))
     _sync_requerimiento_desde_ott(oid)
+    # v147 (punto 9): cada envío genera una solicitud de compra por la cantidad
+    # enviada; Compras confirma el precio y emite la OC.
+    sc_ott = _generar_sc_por_envio_ott(oid, cantidad, num_rem)
     return jsonify({"ok": True, "remito_numero": num_rem, "remito_id": rid,
+                     "solicitud_compra_ott": sc_ott,
                      "cantidad_enviada_total": cantidad_enviada_previa + cantidad,
                      "stock_descontado": stock_descontado,
                      "solicitudes_compra_insumo": scs_insumo,
@@ -6203,6 +7829,8 @@ def ott_registrar_retorno(oid):
     cantidad = float(d.get("cantidad", 1))
     if cantidad <= 0:
         return jsonify({"error":"Cantidad debe ser mayor a 0"}), 400
+    # v147 (punto 9): el remito del proveedor se ingresa desde Recepción
+    remito_prov = (d.get("remito") or "").strip()
 
     cantidad_enviada = float(ott["cantidad_enviada"] or 0)
     cantidad_recibida_previa = float(ott["cantidad_recibida"] or 0)
@@ -6272,6 +7900,7 @@ def ott_registrar_retorno(oid):
             )
         }
         _sync_requerimiento_desde_ott(oid)
+        _ott_sync_oc_recibido(oid)
         return jsonify(resultado), 201
 
     # ── Caso operación INTERMEDIA (semielaborado) ──────────────────────────
@@ -6398,11 +8027,20 @@ def ott_registrar_retorno(oid):
              f"Retorno OTT {ott['numero']} — OT {ott['ot_numero'] or '—'} — pendiente de aprobación en Lotes",
              session["user_id"]))
 
+    # Las piezas volvieron del tercero y están en el depósito: entran a
+    # inventario ahora, las apruebe Calidad o no.
+    execute("""UPDATE materiales SET stock=stock+?, actualizado=datetime('now','localtime')
+        WHERE id=?""", (cantidad, mat_id))
+    execute("UPDATE lotes SET stock_computado=1 WHERE id=?", (lote_id,))
     execute("""INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id)
         VALUES (?,?,'ingreso',?,?,?)""",
         (mat_id, lote_id, cantidad,
-         f"Retorno OTT {ott['numero']} (pendiente de clasificación, no computa a stock)",
+         f"Retorno OTT {ott['numero']} — ingreso a inventario, pendiente de clasificación"
+         + (f" · Remito {remito_prov}" if remito_prov else ""),
          session["user_id"]))
+    if remito_prov:
+        execute("UPDATE lotes SET referencia_proveedor=COALESCE(NULLIF(referencia_proveedor,''),?) WHERE id=?",
+                (remito_prov, lote_id))
 
     # ── Reservar el lote exclusivamente para la OT de origen ──────────────
     # Este material (semielaborado) es el resultado de una operación
@@ -6472,6 +8110,7 @@ def ott_registrar_retorno(oid):
         )
     }
     _sync_requerimiento_desde_ott(oid)
+    _ott_sync_oc_recibido(oid)
     return jsonify(resultado), 201
 
 @app.route("/api/ott/<int:oid>/devolver_rechazo", methods=["POST"])
@@ -6560,6 +8199,7 @@ def ott_devolver_rechazo(oid):
         WHERE id=?""",
         (nuevo_estado, cantidad_recibida_nueva, ya_devuelto + cantidad, rid, oid))
 
+    _ott_sync_oc_recibido(oid)
     _sync_requerimiento_desde_ott(oid)
     return jsonify({"ok": True, "cantidad_devuelta": cantidad, "remito_numero": num_rem,
         "remito_id": rid, "cantidad_recibida": cantidad_recibida_nueva,
@@ -6616,17 +8256,15 @@ def get_materiales_requeridos_op(ooid):
     oo = query("SELECT * FROM orden_operaciones WHERE id=?", (ooid,), one=True)
     if not oo:
         return jsonify({"error": "Operación no encontrada"}), 404
-    if not oo["proceso_op_id"]:
-        return jsonify([])
     mats = query("""SELECT om.material_id, om.cantidad cantidad_unitaria, om.unidad, om.tipo,
         m.codigo, m.descripcion, m.categoria
-        FROM operacion_materiales om
+        FROM orden_operacion_materiales om
         JOIN materiales m ON m.id=om.material_id
-        WHERE om.operacion_id=?
+        WHERE om.orden_operacion_id=?
           AND EXISTS (
             SELECT 1 FROM orden_materiales omt
             WHERE omt.orden_id=? AND omt.material_id=om.material_id
-          )""", (oo["proceso_op_id"], oo["orden_id"]))
+          )""", (oo["id"], oo["orden_id"]))
     out = []
     for mat in mats:
         es_insumo = mat["categoria"] in ("Insumo", "Herramienta")
@@ -7056,9 +8694,9 @@ def _sync_precio_venta_producto(producto_id, precio_unit):
         return
     if precio_unit <= 0:
         return
-    prod = query("SELECT precio_venta FROM productos WHERE id=?", (producto_id,), one=True)
+    prod = query("SELECT precio_venta FROM materiales WHERE id=?", (producto_id,), one=True)
     if prod and round(float(prod["precio_venta"] or 0), 2) != round(precio_unit, 2):
-        execute("UPDATE productos SET precio_venta=? WHERE id=?", (precio_unit, producto_id))
+        execute("UPDATE materiales SET precio_venta=? WHERE id=?", (precio_unit, producto_id))
 
 @app.route("/api/ordenes_cliente", methods=["POST"])
 @login_required(roles=["admin","vendedor"])
@@ -7112,7 +8750,7 @@ def _recalcular_tiempo_total_producto(prod_id):
         SELECT MIN(tiempo_setup_min + tiempo_ciclo_seg/60.0) t
         FROM proceso_operaciones WHERE producto_id=? GROUP BY orden)""",
         (prod_id,), one=True)["total"]
-    execute("UPDATE productos SET tiempo_total_hs=? WHERE id=?", (round(tot/60,2), prod_id))
+    execute("UPDATE materiales SET tiempo_total_hs=? WHERE id=?", (round(tot/60,2), prod_id))
 
 def tiempo_std_min(ops, qty):
     """Tiempo estándar en MINUTOS de una lista de operaciones para 'qty' piezas.
@@ -7153,8 +8791,9 @@ def calcular_tiempo_ciclo_total_seg(prod_id, qty=1.0, _visitados=None):
 
     for m in mats:
         if m["categoria"] == "Producto terminado":
-            sub = query("SELECT id FROM productos WHERE codigo=? AND activo=1",
-                        (m["codigo"],), one=True)
+            # Tabla única: el material PT ES el producto (mismo id).
+            sub = query("SELECT id FROM materiales WHERE id=? AND activo=1",
+                        (m["material_id"],), one=True)
             if sub:
                 total += calcular_tiempo_ciclo_total_seg(
                     sub["id"], float(m["total_cant"] or 0), _visitados)
@@ -7183,9 +8822,10 @@ def calcular_costo_producto(prod_id, qty=1.0, _visitados=None):
         cant = float(m["total_cant"] or 0)
         if m["categoria"] == "Producto terminado":
             # Buscar si este PT tiene un producto-proceso definido
+            # Tabla única: el material PT ES el producto (mismo id).
             sub_prod = query(
-                "SELECT id FROM productos WHERE codigo=? AND activo=1",
-                (m["codigo"],), one=True)
+                "SELECT id FROM materiales WHERE id=? AND activo=1",
+                (m["material_id"],), one=True)
             if sub_prod:
                 costo_total += calcular_costo_producto(sub_prod["id"], cant, _visitados)
                 continue
@@ -7247,7 +8887,7 @@ def explotar_multinivel(prod_id, qty, cliente_id, fecha_entrega_padre, oc_numero
 
     # Operaciones
     for op in ops_proc:
-        execute("""INSERT INTO orden_operaciones
+        _oo_nuevo = execute("""INSERT INTO orden_operaciones
             (orden_id,proceso_op_id,orden,nombre,categoria_maquina_id,maquina_id,
              tiempo_setup_min,tiempo_ciclo_seg,estado,qty_requerida,
              es_tercerizada,proveedor_id,precio_tercerizado,tiempo_minimo_dias)
@@ -7260,6 +8900,7 @@ def explotar_multinivel(prod_id, qty, cliente_id, fecha_entrega_padre, oc_numero
              op["proveedor_id"] if "proveedor_id" in op.keys() else None,
              op["precio_tercerizado"] if "precio_tercerizado" in op.keys() else 0,
              op["tiempo_minimo_dias"] if "tiempo_minimo_dias" in op.keys() else 0))
+        _copiar_materiales_a_ot_op(_oo_nuevo, op["id"])
 
     # Materiales — separar simples de sub-productos
     mats = query("""SELECT om.material_id, SUM(om.cantidad)*? AS total_cant,
@@ -7280,12 +8921,13 @@ def explotar_multinivel(prod_id, qty, cliente_id, fecha_entrega_padre, oc_numero
 
         # Si es PT con proceso propio → generar OT hija recursivamente
         if mat["categoria"] == "Producto terminado":
+            # Tabla única: el material ES el producto (mismo id).
             sub_prod = query(
-                """SELECT p.id FROM productos p
+                """SELECT p.id FROM materiales p
                    JOIN proceso_operaciones po ON po.producto_id=p.id
-                   WHERE p.codigo=? AND p.activo=1
+                   WHERE p.id=? AND p.activo=1
                    LIMIT 1""",
-                (mat["codigo"],), one=True)
+                (mat["material_id"],), one=True)
             if sub_prod:
                 sub_ot_id, _ots = explotar_multinivel(
                     sub_prod["id"], cant, cliente_id, fecha_ot,
@@ -7310,12 +8952,13 @@ def explotar_multinivel(prod_id, qty, cliente_id, fecha_entrega_padre, oc_numero
             # cubrir lo que esta OT va a consumir, se genera una OT hija por
             # el FALTANTE (no por la cantidad total: lo que ya hay en stock
             # cubre esa parte y no hace falta fabricarlo de nuevo).
+            # Tabla única: el material ES el producto (mismo id).
             sub_prod = query(
-                """SELECT p.id FROM productos p
+                """SELECT p.id FROM materiales p
                    JOIN proceso_operaciones po ON po.producto_id=p.id
-                   WHERE p.codigo=? AND p.activo=1
+                   WHERE p.id=? AND p.activo=1
                    LIMIT 1""",
-                (mat["codigo"],), one=True)
+                (mat["material_id"],), one=True)
             if sub_prod:
                 mat_stock = query("SELECT stock FROM materiales WHERE id=?",
                     (mat["material_id"],), one=True)
@@ -7522,6 +9165,7 @@ def update_orden_cliente(ocid):
     return jsonify({"ok":True})
 
 # ── MRP ampliado: consolidar OC-cliente → generar OTs ────────────────────────
+@auditoria_proceso("SC automática por material faltante")
 def _generar_sc_materiales_faltantes(oid, numero_ot, motivo=""):
     """Revisa los materiales que requiere una OT (por ejemplo una OT auxiliar
     recién creada) y, para cada uno que esté bajo stock mínimo o cuyo stock
@@ -7531,7 +9175,11 @@ def _generar_sc_materiales_faltantes(oid, numero_ot, motivo=""):
     lo justo para esta OT — igual que el resto del sistema de reposición.
     Si el material no tiene Máximo configurado, se usa como objetivo lo que
     esta OT necesita.
-    Devuelve la lista de SC creadas/actualizadas."""
+    Devuelve la lista de SC creadas/actualizadas.
+
+    Desactivado por defecto: ver _sc_automaticas_activas()."""
+    if not _sc_automaticas_activas():
+        return []
     creadas = []
     mats = query("""SELECT om.material_id, om.cantidad_requerida, m.codigo, m.descripcion,
         m.unidad, m.categoria, m.stock, m.stock_min, m.stock_max,
@@ -7603,6 +9251,7 @@ def _generar_sc_materiales_faltantes(oid, numero_ot, motivo=""):
 
 @app.route("/api/mrp/consolidar", methods=["POST"])
 @login_required(roles=["admin","operario"])
+@auditoria_proceso("MRP — consolidación de pedidos")
 def mrp_consolidar():
     d = request.json
     oc_ids = d.get("oc_ids", [])
@@ -7829,6 +9478,13 @@ def _gap_analysis_materiales():
         # (p.ej. porque el faltante creció con esta corrida de MRP), la
         # actualizamos para que cubra el faltante real en vez de dejarla
         # desactualizada.
+        # Sexta via automatica de SC (ademas de las cuatro de
+        # _sc_automaticas_activas): el MRP inserta la SC aca mismo, sin pasar
+        # por _generar_sc_*. Con las SC en manual se saltea el material y se
+        # sigue con el resto del gap analysis: las OT auxiliares de arriba
+        # NO se tocan, solo deja de pedirse la compra sola.
+        if not _sc_automaticas_activas():
+            continue
         sc_exist = query("""SELECT id,cantidad FROM solicitudes_compra
             WHERE material_id=? AND estado IN ('Pendiente','En evaluación')
             ORDER BY id DESC LIMIT 1""", (mat["material_id"],), one=True)
@@ -7876,6 +9532,7 @@ def mrp_pronostico_meses():
 
 @app.route("/api/mrp/consolidar_pronostico", methods=["POST"])
 @login_required(roles=["admin","operario"])
+@auditoria_proceso("MRP — consolidación de pronóstico")
 def mrp_consolidar_pronostico():
     """Genera OTs de fabricación (para stock, sin OC de cliente vinculada) a
     partir de los renglones de un pronóstico de venta. Se debe indicar el mes
@@ -7951,7 +9608,7 @@ def mrp_consolidar_pronostico():
 def populate_ops_internal(oid, prod_id, qty):
     ops = query("SELECT * FROM proceso_operaciones WHERE producto_id=? ORDER BY CAST(orden AS INTEGER), orden", (prod_id,))
     for op in ops:
-        execute("""INSERT INTO orden_operaciones
+        _oo_nuevo = execute("""INSERT INTO orden_operaciones
             (orden_id,proceso_op_id,orden,nombre,categoria_maquina_id,maquina_id,
              tiempo_setup_min,tiempo_ciclo_seg,estado,qty_requerida,
              es_tercerizada,proveedor_id,precio_tercerizado,tiempo_minimo_dias)
@@ -7962,6 +9619,7 @@ def populate_ops_internal(oid, prod_id, qty):
              op["proveedor_id"] if "proveedor_id" in op.keys() else None,
              op["precio_tercerizado"] if "precio_tercerizado" in op.keys() else 0,
              op["tiempo_minimo_dias"] if "tiempo_minimo_dias" in op.keys() else 0))
+        _copiar_materiales_a_ot_op(_oo_nuevo, op["id"])
 
 def populate_mats_internal(oid, prod_id, qty):
     mats = query("""SELECT om.material_id,SUM(om.cantidad)*? AS total,m.unidad
@@ -8224,10 +9882,10 @@ def create_novedad():
     mats_op = []
     insumos_op = []
     lotes_info = {}
-    if op["proceso_op_id"]:
+    if True:
         mats_op_all = query("""SELECT om.*, m.descripcion descripcion, m.categoria categoria
-            FROM operacion_materiales om JOIN materiales m ON m.id=om.material_id
-            WHERE om.operacion_id=?""", (op["proceso_op_id"],))
+            FROM orden_operacion_materiales om JOIN materiales m ON m.id=om.material_id
+            WHERE om.orden_operacion_id=?""", (op["id"],))
         mats_op = [m for m in mats_op_all if m["categoria"] not in ("Insumo", "Herramienta")]
         insumos_op = [m for m in mats_op_all if m["categoria"] in ("Insumo", "Herramienta")]
     # ── Material semielaborado de una OTT anterior (no está en el BOM del
@@ -8250,7 +9908,7 @@ def create_novedad():
             consumo_incremental = ins["cantidad"] * qty
             comprometido = query("""SELECT COALESCE(SUM(om.cantidad * oo.qty_producida),0) c
                 FROM orden_operaciones oo
-                JOIN operacion_materiales om ON om.operacion_id=oo.proceso_op_id
+                JOIN orden_operacion_materiales om ON om.orden_operacion_id=oo.id
                 WHERE oo.orden_id=? AND om.material_id=?""",
                 (d["orden_id"], ins["material_id"]), one=True)["c"] or 0
             mat_stock = query("SELECT stock FROM materiales WHERE id=?", (ins["material_id"],), one=True)
@@ -8344,10 +10002,8 @@ def create_novedad():
     # cargando novedades libremente y la operación solo vuelve a
     # "Completada" cuando el usuario la marca así manualmente. ─────────────
     ya_estaba_al_100 = qty_req_op > 0 and qty_prod_op >= qty_req_op - 0.0001
-    if (qty_req_op > 0 and (qty_prod_op + qty) >= qty_req_op - 0.0001
-            and op["estado"] != "Completada" and not ya_estaba_al_100):
-        execute("UPDATE orden_operaciones SET estado='Completada' WHERE id=?",
-            (d["orden_operacion_id"],))
+    if op["estado"] != "Completada" and not ya_estaba_al_100:
+        _sincronizar_estado_paso(d["orden_operacion_id"])
 
     # Consumir materias primas/PT vinculadas a un lote: DESCUENTO REAL E
     # INMEDIATO en cuanto se declara la novedad (la novedad ya representa
@@ -8474,17 +10130,17 @@ def update_novedad(nid):
     diff    = qty_new - qty_old  # positive = more produced, negative = less
 
     # --- Validar stock de insumos si se está aumentando la cantidad ---
-    if nov["proceso_op_id"] and diff > 0:
+    if diff > 0:
         insumos_op = query("""SELECT om.*, m.descripcion descripcion
-            FROM operacion_materiales om JOIN materiales m ON m.id=om.material_id
-            WHERE om.operacion_id=? AND m.categoria IN ('Insumo','Herramienta')""", (nov["proceso_op_id"],))
+            FROM orden_operacion_materiales om JOIN materiales m ON m.id=om.material_id
+            WHERE om.orden_operacion_id=? AND m.categoria IN ('Insumo','Herramienta')""", (nov["orden_operacion_id"],))
         if insumos_op:
             errores_ins = []
             for ins in insumos_op:
                 consumo_incremental = ins["cantidad"] * diff
                 comprometido = query("""SELECT COALESCE(SUM(om.cantidad * oo.qty_producida),0) c
                     FROM orden_operaciones oo
-                    JOIN operacion_materiales om ON om.operacion_id=oo.proceso_op_id
+                    JOIN orden_operacion_materiales om ON om.orden_operacion_id=oo.id
                     WHERE oo.orden_id=? AND om.material_id=?""",
                     (nov["orden_id"], ins["material_id"]), one=True)["c"] or 0
                 mat_stock = query("SELECT stock FROM materiales WHERE id=?", (ins["material_id"],), one=True)
@@ -8504,10 +10160,10 @@ def update_novedad(nid):
     # vinculado a este material en la OT.
     if diff != 0:
         mats_op = []
-        if nov["proceso_op_id"]:
+        if True:
             mats_op = query("""SELECT om.*, m.categoria categoria
-                FROM operacion_materiales om JOIN materiales m ON m.id=om.material_id
-                WHERE om.operacion_id=?""", (nov["proceso_op_id"],))
+                FROM orden_operacion_materiales om JOIN materiales m ON m.id=om.material_id
+                WHERE om.orden_operacion_id=?""", (nov["orden_operacion_id"],))
             mats_op = [dict(m) for m in mats_op]
         for extra in _materiales_ott_pendientes_por_operacion(nov["orden_id"], nov["orden_operacion_id"]):
             if not any(m["material_id"] == extra["material_id"] for m in mats_op):
@@ -8587,15 +10243,7 @@ def update_novedad(nid):
     oo_now = query("SELECT qty_requerida,qty_producida,estado FROM orden_operaciones WHERE id=?",
         (nov["orden_operacion_id"],), one=True)
     if oo_now:
-        qty_req_now = float(oo_now["qty_requerida"] or 0)
-        qty_prod_now = float(oo_now["qty_producida"] or 0)
-        if qty_req_now > 0:
-            if qty_prod_now >= qty_req_now - 0.0001 and oo_now["estado"] != "Completada":
-                execute("UPDATE orden_operaciones SET estado='Completada' WHERE id=?",
-                    (nov["orden_operacion_id"],))
-            elif qty_prod_now < qty_req_now - 0.0001 and oo_now["estado"] == "Completada":
-                execute("UPDATE orden_operaciones SET estado='En proceso' WHERE id=?",
-                    (nov["orden_operacion_id"],))
+        _sincronizar_estado_paso(nov["orden_operacion_id"])
 
     # --- Resincronizar el PT si es la ultima operacion ---
     # El PT producido vive en un LOTE pendiente de Calidad; materiales.stock
@@ -8616,8 +10264,8 @@ def update_novedad(nid):
 
     # --- Recalcular rendimiento ---
     std = float(nov["tiempo_ciclo_seg"] if hasattr(nov,"tiempo_ciclo_seg") else 60) or 60
-    op_std = query("SELECT tiempo_ciclo_seg FROM proceso_operaciones WHERE id=?",
-                   (nov["proceso_op_id"],), one=True) if nov["proceso_op_id"] else None
+    op_std = query("SELECT tiempo_ciclo_seg FROM orden_operaciones WHERE id=?",
+                   (nov["orden_operacion_id"],), one=True)
     # ciclo en minutos (la columna esta en segundos) para comparar contra
     # tiempo_real_min.
     ciclo = (float(op_std["tiempo_ciclo_seg"] or 60) if op_std else 60) / 60.0
@@ -8675,10 +10323,10 @@ def delete_novedad(nid):
     # --- Devolver el CONSUMO REAL de materias primas al stock/lote ---
     # Desde que el material se descuenta al declarar la novedad (ver
     # create_novedad), eliminarla debe devolver ese stock ya consumido.
-    if nov["proceso_op_id"]:
+    if True:
         mats_op = query("""SELECT om.*, m.categoria categoria, m.descripcion descripcion
-            FROM operacion_materiales om JOIN materiales m ON m.id=om.material_id
-            WHERE om.operacion_id=?""", (nov["proceso_op_id"],))
+            FROM orden_operacion_materiales om JOIN materiales m ON m.id=om.material_id
+            WHERE om.orden_operacion_id=?""", (nov["orden_operacion_id"],))
         mats_op = [dict(m) for m in mats_op]
     else:
         mats_op = []
@@ -8781,8 +10429,8 @@ def delete_novedad(nid):
     if nov["orden"] == max_ord and nov["producto_id"]:
         prod = query("SELECT * FROM productos WHERE id=?", (nov["producto_id"],), one=True)
         if prod:
-            mat_pt = query("SELECT id FROM materiales WHERE codigo=? AND categoria='Producto terminado'",
-                           (prod["codigo"],), one=True)
+            # Tabla única: el stock del PT está en la misma fila del producto.
+            mat_pt = query("SELECT id FROM materiales WHERE id=?", (prod["id"],), one=True)
             if mat_pt:
                 execute("UPDATE materiales SET stock=MAX(0,stock-?),actualizado=datetime('now','localtime') WHERE id=?",
                         (qty, mat_pt["id"]))
@@ -8964,9 +10612,8 @@ def restaurar_novedad_eliminada(eid):
     execute("UPDATE orden_operaciones SET qty_producida=qty_producida+? WHERE id=?", (qty, reg["orden_operacion_id"]))
     execute("UPDATE ordenes SET estado='En proceso' WHERE id=? AND estado='Pendiente'", (reg["orden_id"],))
     ya_estaba_al_100 = qty_req_op > 0 and qty_prod_antes >= qty_req_op - 0.0001
-    if (qty_req_op > 0 and (qty_prod_antes + qty) >= qty_req_op - 0.0001
-            and oo["estado"] != "Completada" and not ya_estaba_al_100):
-        execute("UPDATE orden_operaciones SET estado='Completada' WHERE id=?", (reg["orden_operacion_id"],))
+    if oo["estado"] != "Completada" and not ya_estaba_al_100:
+        _sincronizar_estado_paso(reg["orden_operacion_id"])
 
     # --- Re-consumir la materia prima de los mismos lotes que se habían devuelto ---
     for l in detalle.get("lotes_mp") or []:
@@ -9009,8 +10656,8 @@ def restaurar_novedad_eliminada(eid):
     pt = detalle.get("pt")
     if pt:
         prod = query("SELECT * FROM productos WHERE id=?", (reg["producto_id"],), one=True) if reg["producto_id"] else None
-        mat_pt = query("SELECT id FROM materiales WHERE codigo=? AND categoria='Producto terminado'",
-                       (prod["codigo"],), one=True) if prod else None
+        # Tabla única: el stock del PT está en la misma fila del producto.
+        mat_pt = query("SELECT id FROM materiales WHERE id=?", (prod["id"],), one=True) if prod else None
         if mat_pt:
             qty_pt = float(pt.get("cantidad_revertida_stock") or 0)
             execute("UPDATE materiales SET stock=stock+?, actualizado=datetime('now','localtime') WHERE id=?",
@@ -9193,11 +10840,14 @@ def create_lote():
     qty = float(d["cantidad"])
     lid = execute("""INSERT INTO lotes
         (numero,material_id,cantidad_original,cantidad_disponible,proveedor_id,
-         referencia_proveedor,certificado,estado,obs,creado_por)
-        VALUES (?,?,?,?,?,?,?,?,?,?)""",
+         referencia_proveedor,certificado,estado,obs,creado_por,stock_computado)
+        VALUES (?,?,?,?,?,?,?,?,?,?,1)""",
         (numero, d["material_id"], qty, qty,
          d.get("proveedor_id"), d.get("referencia_proveedor"),
          d.get("certificado"), "Ingresado", d.get("obs"), session["user_id"]))
+    # El material está en el depósito: entra a inventario al ingresarlo.
+    execute("""UPDATE materiales SET stock=stock+?, actualizado=datetime('now','localtime')
+        WHERE id=?""", (qty, d["material_id"]))
     # El stock del material representa SOLO lo Aprobado por Calidad. Un lote
     # recién ingresado queda en estado "Ingresado" con cantidad_activa=0
     # (nada aprobado todavía), así que NO se suma a stock acá. El stock se
@@ -9211,6 +10861,7 @@ def create_lote():
          session["user_id"]))
     return jsonify({"ok": True, "id": lid, "numero": numero}), 201
 
+@auditoria_proceso("sincronización retorno OTT → operación")
 def _sync_ott_retorno_a_operacion(lote_id):
     """Si este lote es el lote de retorno de una operación tercerizada
     INTERMEDIA (OTT con lote_retorno_id=lote_id, es_ultimo_nivel=0), actualiza
@@ -9396,6 +11047,11 @@ def update_lote(lid):
         # sale de stock.
         aprobado_anterior = float(lote["cantidad_activa"] or 0)
         delta_aprobado = aprobado - aprobado_anterior
+        # Si las piezas ya entraron a inventario al entrar al deposito
+        # (stock_computado=1), clasificarlas no mueve nada: estan fisicamente
+        # ahi igual, aprobadas o no.
+        if bool(lote["stock_computado"] if "stock_computado" in lote.keys() else 0):
+            delta_aprobado = 0.0
         if abs(delta_aprobado) > 0.0001:
             execute("""UPDATE materiales SET stock=MAX(0,stock+?),
                 actualizado=datetime('now','localtime') WHERE id=?""",
@@ -9447,6 +11103,9 @@ def update_lote(lid):
     # la variación de cantidad_activa (aprobado), no de rechazado ─────────
     aprobado_anterior = float(lote["cantidad_activa"] or 0)
     delta_aprobado = nueva_activa_total - aprobado_anterior
+    # Idem: un lote cuyo stock ya se computo al crearlo no se mueve por Calidad.
+    if bool(lote["stock_computado"] if "stock_computado" in lote.keys() else 0):
+        delta_aprobado = 0.0
     if abs(delta_aprobado) > 0.0001:
         execute("""UPDATE materiales SET stock=MAX(0,stock+?),
             actualizado=datetime('now','localtime') WHERE id=?""",
@@ -9546,7 +11205,11 @@ def auto_generar_sc_bajo_stock(material_id, motivo=""):
     mínimo, se generará una SC nueva.
 
     No hace nada si el material no es comprable (Producto terminado) o no
-    tiene mínimo configurado."""
+    tiene mínimo configurado.
+
+    Desactivado por defecto: ver _sc_automaticas_activas()."""
+    if not _sc_automaticas_activas():
+        return
     if not material_id:
         return
     mat = query("SELECT id,codigo,descripcion,stock,stock_min,stock_max,unidad,categoria FROM materiales WHERE id=?",
@@ -9726,6 +11389,7 @@ def update_solicitud(sid):
 # ── Cotizaciones de compra ────────────────────────────────────────────────────
 @app.route("/api/cotizaciones_compra", methods=["GET"])
 @login_required()
+@solo_con_monetario
 def get_cotizaciones():
     sid = request.args.get("solicitud_id")
     sql = """SELECT c.*,p.razon proveedor_nombre,s.descripcion solicitud_desc,s.cantidad sol_cantidad,s.unidad sol_unidad,s.tipo solicitud_tipo,s.estado solicitud_estado
@@ -9737,6 +11401,7 @@ def get_cotizaciones():
 
 @app.route("/api/cotizaciones_compra", methods=["POST"])
 @login_required(roles=["admin","almacen","vendedor"])
+@solo_con_monetario
 def create_cotizacion():
     d = request.json
     if not d.get("solicitud_id") or not d.get("proveedor_id") or not d.get("precio_unit"):
@@ -9752,6 +11417,7 @@ ESTADOS_SC_CERRADOS = ("OC Emitida", "Cerrada", "Cancelada", "Rechazada")
 
 @app.route("/api/cotizaciones_compra/<int:cid>", methods=["PUT"])
 @login_required(roles=["admin","almacen","vendedor"])
+@solo_con_monetario
 def update_cotizacion(cid):
     cot = query("SELECT * FROM cotizaciones_compra WHERE id=?", (cid,), one=True)
     if not cot: return jsonify({"error":"Cotización no encontrada"}), 404
@@ -9769,6 +11435,7 @@ def update_cotizacion(cid):
 
 @app.route("/api/cotizaciones_compra/<int:cid>/seleccionar", methods=["POST"])
 @login_required(roles=["admin","almacen","vendedor"])
+@solo_con_monetario
 def seleccionar_cotizacion(cid):
     cot = query("SELECT * FROM cotizaciones_compra WHERE id=?", (cid,), one=True)
     if not cot: return jsonify({"error":"Cotización no encontrada"}), 404
@@ -9782,6 +11449,7 @@ def seleccionar_cotizacion(cid):
 
 @app.route("/api/cotizaciones_compra/<int:cid>/deseleccionar", methods=["POST"])
 @login_required(roles=["admin","almacen","vendedor"])
+@solo_con_monetario
 def deseleccionar_cotizacion(cid):
     cot = query("SELECT * FROM cotizaciones_compra WHERE id=?", (cid,), one=True)
     if not cot: return jsonify({"error":"Cotización no encontrada"}), 404
@@ -9813,11 +11481,12 @@ def get_ocs():
     for r in rows:
         d = dict(r)
         d["items"] = [dict(x) for x in query("""SELECT i.*,m.descripcion mat_desc,m.codigo mat_codigo,
-            s.numero sc_numero,s.tipo sc_tipo,
+            s.numero sc_numero,s.tipo sc_tipo,s.ott_id sc_ott_id,tt.numero ott_numero,
             c.condicion_pago cot_condicion_pago,c.plazo_entrega_dias cot_plazo_entrega_dias,
             l.cantidad_rechazada lote_cantidad_rechazada
             FROM ordenes_compra_items i LEFT JOIN materiales m ON m.id=i.material_id
             LEFT JOIN solicitudes_compra s ON s.id=i.solicitud_id
+            LEFT JOIN ordenes_tercerizado tt ON tt.id=s.ott_id
             LEFT JOIN cotizaciones_compra c ON c.solicitud_id=i.solicitud_id AND c.seleccionada=1
             LEFT JOIN lotes l ON l.id=i.lote_id
             WHERE i.oc_id=?""", (r["id"],))]
@@ -9845,10 +11514,11 @@ def get_ocs_by_proveedor(pid):
     for r in rows:
         d = dict(r)
         d["items"] = [dict(x) for x in query("""SELECT i.*,m.descripcion mat_desc,m.codigo mat_codigo,
-            s.numero sc_numero,s.tipo sc_tipo,
+            s.numero sc_numero,s.tipo sc_tipo,s.ott_id sc_ott_id,tt.numero ott_numero,
             c.condicion_pago cot_condicion_pago,c.plazo_entrega_dias cot_plazo_entrega_dias
             FROM ordenes_compra_items i LEFT JOIN materiales m ON m.id=i.material_id
             LEFT JOIN solicitudes_compra s ON s.id=i.solicitud_id
+            LEFT JOIN ordenes_tercerizado tt ON tt.id=s.ott_id
             LEFT JOIN cotizaciones_compra c ON c.solicitud_id=i.solicitud_id AND c.seleccionada=1
             WHERE i.oc_id=?""", (r["id"],))]
         result.append(d)
@@ -9856,6 +11526,7 @@ def get_ocs_by_proveedor(pid):
 
 @app.route("/api/ordenes_compra", methods=["POST"])
 @login_required(roles=["admin","almacen","vendedor"])
+@solo_con_monetario
 def create_oc():
     d = request.json
     if not d.get("proveedor_id") or not d.get("items"): return jsonify({"error":"Proveedor e ítems requeridos"}), 400
@@ -9886,6 +11557,20 @@ def create_oc():
     numero = next_numero_oc()
     total = sum(float(i.get("precio_unit",0))*float(i.get("cantidad",0)) for i in d["items"])
     estado = "Aprobada" if total <= LIMITE_APROBACION else "Pendiente aprobacion"
+    # v147 (punto 9): una OC generada por una OTT obtiene autorización automática
+    # si el precio de TODOS sus ítems coincide con la lista de precios del
+    # proveedor; si no coincide, queda pendiente de aprobación (aunque no
+    # supere el límite).
+    items_ott = [i for i in d["items"] if i.get("solicitud_id") and
+                 query("SELECT ott_id FROM solicitudes_compra WHERE id=?", (i["solicitud_id"],), one=True)["ott_id"]]
+    if items_ott:
+        todos_ok = True
+        for i in items_ott:
+            lp = query("SELECT precio_unit FROM proveedor_materiales WHERE proveedor_id=? AND material_id=?",
+                       (d["proveedor_id"], i.get("material_id")), one=True)
+            if not lp or abs(float(lp["precio_unit"] or 0) - float(i.get("precio_unit", 0))) > 0.005:
+                todos_ok = False; break
+        estado = "Aprobada" if todos_ok else "Pendiente aprobacion"
     lid = execute("""INSERT INTO ordenes_compra
         (numero,proveedor_id,estado,monto_total,fecha_entrega_est,obs,creado_por)
         VALUES (?,?,?,?,?,?,?)""",
@@ -9908,7 +11593,10 @@ def create_oc():
         # cantidad pedida: solo va a reflejar lo que efectivamente vaya
         # llegando (ver recibir_oc), para no dar por planificable algo que
         # todavía no entró físicamente a planta.
-        if item.get("material_id"):
+        _es_ott_item = bool(item.get("solicitud_id") and
+            query("SELECT ott_id FROM solicitudes_compra WHERE id=?", (item["solicitud_id"],), one=True)["ott_id"])
+        if item.get("material_id") and not _es_ott_item:
+            # (los ítems de OTT no crean lote acá: el lote lo genera la recepción del remito en Terceros)
             mat_cat = query("SELECT categoria FROM materiales WHERE id=?", (item["material_id"],), one=True)
             if mat_cat and mat_cat["categoria"] in ("Material", "Producto terminado"):
                 numero_lote = _gen_lote_numero()
@@ -9921,7 +11609,38 @@ def create_oc():
                 lotes_creados.append(numero_lote)
                 execute("UPDATE ordenes_compra_items SET lote_id=? WHERE oc_id=? AND material_id=? AND lote_id IS NULL",
                     (lote_id, lid, item["material_id"]))
+    for _i in items_ott:
+        _o = query("SELECT ott_id FROM solicitudes_compra WHERE id=?", (_i["solicitud_id"],), one=True)
+        if _o and _o["ott_id"]:
+            _ott_sync_oc_recibido(_o["ott_id"])
     return jsonify({"ok":True,"id":lid,"numero":numero,"estado":estado,"total":total,"lotes":lotes_creados}), 201
+
+def _ott_sync_oc_recibido(ott_id):
+    """v147: reparte lo recibido de una OTT (ordenes_tercerizado.cantidad_recibida)
+    entre los ítems de OC vinculados a ella (vía solicitudes_compra.ott_id) y
+    recalcula el estado de esas OC. Idempotente."""
+    ott = query("SELECT cantidad_recibida FROM ordenes_tercerizado WHERE id=?", (ott_id,), one=True)
+    if not ott: return
+    restante = float(ott["cantidad_recibida"] or 0)
+    items = query("""SELECT i.id,i.cantidad,i.oc_id,oc.estado FROM ordenes_compra_items i
+        JOIN solicitudes_compra s ON s.id=i.solicitud_id
+        JOIN ordenes_compra oc ON oc.id=i.oc_id
+        WHERE s.ott_id=? AND oc.estado!='Anulada' ORDER BY i.id""", (ott_id,))
+    ocs = set()
+    for it in items:
+        asignar = max(0.0, min(float(it["cantidad"] or 0), restante))
+        execute("UPDATE ordenes_compra_items SET cantidad_recibida=? WHERE id=?", (asignar, it["id"]))
+        restante -= asignar
+        ocs.add(it["oc_id"])
+    for ocid in ocs:
+        oc = query("SELECT estado FROM ordenes_compra WHERE id=?", (ocid,), one=True)
+        if not oc or oc["estado"] in ("Pendiente aprobacion", "Completada", "Anulada", "Cerrada"):
+            continue
+        tot = query("SELECT COALESCE(SUM(cantidad),0) t, COALESCE(SUM(cantidad_recibida),0) r FROM ordenes_compra_items WHERE oc_id=?", (ocid,), one=True)
+        if tot["r"] >= tot["t"] - 0.0001 and tot["t"] > 0:
+            execute("UPDATE ordenes_compra SET estado='Recibida' WHERE id=?", (ocid,))
+        elif tot["r"] > 0:
+            execute("UPDATE ordenes_compra SET estado='Recibida parcial' WHERE id=?", (ocid,))
 
 def _gen_recepcion_numero():
     """Genera número de recepción correlativo por año: REC-2026-0001"""
@@ -9974,13 +11693,13 @@ def get_recepciones():
         ORDER BY mv.id DESC""")
     for mv in oc_movs:
         d = dict(mv)
-        oc_numero = d["referencia"][len("Recep. "):].strip()
+        oc_numero = d["referencia"][len("Recep. "):].split(" · ")[0].strip()
+        d["remito"] = d["referencia"].split(" · Remito ", 1)[1].strip() if " · Remito " in d["referencia"] else None
         oc = query("""SELECT oc.numero,pv.razon AS proveedor_nombre
             FROM ordenes_compra oc LEFT JOIN proveedores pv ON pv.id=oc.proveedor_id
             WHERE oc.numero=?""", (oc_numero,), one=True)
         d["numero"] = oc_numero
         d["proveedor_nombre"] = oc["proveedor_nombre"] if oc else None
-        d["remito"] = None
         d["precio_unit"] = None
         d["origen"] = "OC"
         result.append(d)
@@ -10001,12 +11720,12 @@ def get_recepciones():
     for mv in ott_movs:
         d = dict(mv)
         ott_numero = d["referencia"][len("Retorno OTT "):].split(" (")[0].strip()
+        d["remito"] = d["referencia"].split(" · Remito ", 1)[1].strip() if " · Remito " in d["referencia"] else None
         ott = query("""SELECT ott.numero,pv.razon AS proveedor_nombre
             FROM ordenes_tercerizado ott LEFT JOIN proveedores pv ON pv.id=ott.proveedor_id
             WHERE ott.numero=?""", (ott_numero,), one=True)
         d["numero"] = ott_numero
         d["proveedor_nombre"] = ott["proveedor_nombre"] if ott else None
-        d["remito"] = None
         d["precio_unit"] = None
         d["origen"] = "OTT"
         result.append(d)
@@ -10040,10 +11759,14 @@ def create_recepcion():
         numero_lote = _gen_lote_numero()
         lote_id = execute("""INSERT INTO lotes
             (numero,material_id,cantidad_original,cantidad_disponible,cantidad_activa,
-             proveedor_id,referencia_proveedor,estado,obs,creado_por)
-            VALUES (?,?,?,?,?,?,?,?,?,?)""",
+             proveedor_id,referencia_proveedor,estado,obs,creado_por,stock_computado)
+            VALUES (?,?,?,?,?,?,?,?,?,?,1)""",
             (numero_lote, mat["id"], qty, qty, 0,
              d.get("proveedor_id"), d.get("remito"), "Ingresado", d.get("obs"), session["user_id"]))
+        # La mercadería entró al depósito: entra a inventario, la apruebe
+        # Calidad o no.
+        execute("""UPDATE materiales SET stock=stock+?, actualizado=datetime('now','localtime')
+            WHERE id=?""", (qty, mat["id"]))
         execute("""INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id)
             VALUES (?,?,?,?,?,?)""",
             (mat["id"], lote_id, "recepcion", qty, f"Recepción {numero}", session["user_id"]))
@@ -10079,6 +11802,10 @@ def recibir_oc(ocid):
     for recv in recepciones:
         item = query("SELECT * FROM ordenes_compra_items WHERE id=?", (recv["item_id"],), one=True)
         if not item: continue
+        if item["solicitud_id"]:
+            _sc_ott = query("SELECT ott_id FROM solicitudes_compra WHERE id=?", (item["solicitud_id"],), one=True)
+            if _sc_ott and _sc_ott["ott_id"]:
+                return jsonify({"error": "Los ítems de una OC generada por una OTT se reciben desde Recepción → Pendientes de retorno — Terceros (OTT), cargando el remito."}), 400
         qty = float(recv.get("cantidad",0))
         # ── Se puede recibir una cantidad distinta a la pedida (de más o de
         # menos). Si además viene un precio_unit distinto al cargado en la
@@ -10118,8 +11845,12 @@ def recibir_oc(ocid):
                 crecimiento = qty - a_reingresar
                 if crecimiento > 0.0001 and item["lote_id"]:
                     execute("""UPDATE lotes SET cantidad_original=cantidad_original+?,
-                        cantidad_disponible=cantidad_disponible+? WHERE id=?""",
+                        cantidad_disponible=cantidad_disponible+?, stock_computado=1
+                        WHERE id=?""",
                         (crecimiento, crecimiento, item["lote_id"]))
+                    execute("""UPDATE materiales SET stock=stock+?,
+                        actualizado=datetime('now','localtime') WHERE id=?""",
+                        (crecimiento, item["material_id"]))
                     execute("""INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id)
                         VALUES (?,?,?,?,?,?)""",
                         (item["material_id"], item["lote_id"], "ajuste", crecimiento,
@@ -10157,7 +11888,7 @@ def recibir_oc(ocid):
             execute("INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id) VALUES (?,?,?,?,?,?)",
                 (item["material_id"], None,
                  "entrada" if not (mat_cat and mat_cat["categoria"] in ("Material","Producto terminado")) else "recepcion",
-                 qty, f"Recep. {oc['numero']}", session["user_id"]))
+                 qty, f"Recep. {oc['numero']}" + (f" · Remito {d.get('remito')}" if d.get("remito") else ""), session["user_id"]))
         _sync_requerimiento_desde_compra(item["id"])
     items = query("SELECT cantidad,cantidad_recibida,precio_unit FROM ordenes_compra_items WHERE oc_id=?", (ocid,))
     total_ord = sum(i["cantidad"] for i in items)
@@ -10225,6 +11956,14 @@ def oc_devolver_rechazo(ocid):
                 cantidad_disponible=MAX(0, cantidad_disponible-?),
                 cantidad_rechazada=MAX(0, cantidad_rechazada-?)
             WHERE id=?""", (cantidad, cantidad, item["lote_id"]))
+        # Las piezas rechazadas seguían contando en inventario mientras
+        # estaban en el depósito. Al volver al proveedor, salen. (Solo para
+        # lotes cuyo stock se computó al recibirlos; los anteriores a este
+        # modelo nunca habían entrado.)
+        if _lote_stock_computado(item["lote_id"]):
+            execute("""UPDATE materiales SET stock=MAX(0, stock-?),
+                actualizado=datetime('now','localtime') WHERE id=?""",
+                (cantidad, item["material_id"]))
         execute("""INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id)
             VALUES (?,?,'salida',?,?,?)""",
             (item["material_id"], item["lote_id"], cantidad,
@@ -10296,8 +12035,86 @@ def cerrar_oc(ocid):
     execute("UPDATE ordenes_compra SET estado='Cerrada' WHERE id=?", (ocid,))
     return jsonify({"ok":True,"estado":"Cerrada"})
 
+def _oc_tipo(ocid):
+    """'Directa' si algún ítem viene de una SC productiva (o material 'Material'),
+    'Indirecta' si todos son insumos/herramientas."""
+    rows = query("""SELECT s.tipo sc_tipo, m.categoria cat FROM ordenes_compra_items i
+        LEFT JOIN solicitudes_compra s ON s.id=i.solicitud_id
+        LEFT JOIN materiales m ON m.id=i.material_id WHERE i.oc_id=?""", (ocid,))
+    for r in rows:
+        if r["sc_tipo"] == "Productiva" or (not r["sc_tipo"] and r["cat"] in ("Material", "Producto terminado", "Semielaborado")):
+            return "Directa"
+    return "Indirecta"
+
+@app.route("/api/ordenes_compra/<int:ocid>/remitos", methods=["GET"])
+@login_required()
+def oc_remitos_recibidos(ocid):
+    """Remitos del proveedor ya cargados al recibir esta OC (para vincular al completarla)."""
+    oc = query("SELECT numero,remito_numero FROM ordenes_compra WHERE id=?", (ocid,), one=True)
+    if not oc: return jsonify({"error":"OC no encontrada"}), 404
+    remitos = []
+    for r in query("SELECT referencia FROM movimientos WHERE referencia LIKE ?", (f"Recep. {oc['numero']}%",)):
+        if " · Remito " in (r["referencia"] or ""):
+            v = r["referencia"].split(" · Remito ", 1)[1].strip()
+            if v and v not in remitos: remitos.append(v)
+    # remitos de terceros (OTT) vinculados a los ítems de esta OC
+    for t in query("""SELECT DISTINCT tt.numero FROM ordenes_compra_items i
+        JOIN solicitudes_compra s ON s.id=i.solicitud_id JOIN ordenes_tercerizado tt ON tt.id=s.ott_id
+        WHERE i.oc_id=?""", (ocid,)):
+        for r in query("SELECT referencia FROM movimientos WHERE referencia LIKE ?", (f"Retorno OTT {t['numero']}%",)):
+            if " · Remito " in (r["referencia"] or ""):
+                v = r["referencia"].split(" · Remito ", 1)[1].strip()
+                if v and v not in remitos: remitos.append(v)
+    return jsonify({"tipo": _oc_tipo(ocid), "remitos": remitos, "remito_numero": oc["remito_numero"]})
+
+@app.route("/api/ordenes_compra/<int:ocid>/anular", methods=["POST"])
+@login_required(roles=["admin","almacen","vendedor"])
+def anular_oc(ocid):
+    """v147 (punto 8): anula una OC (directa o indirecta) que todavía no recibió
+    mercadería. Libera las SC (vuelven a 'Cotizada' para poder re-emitir) y
+    elimina los lotes vacíos creados al emitir."""
+    d = request.json or {}
+    oc = query("SELECT * FROM ordenes_compra WHERE id=?", (ocid,), one=True)
+    if not oc: return jsonify({"error":"OC no encontrada"}), 404
+    if oc["estado"] in ("Anulada","Completada","Recibida","Cerrada"):
+        return jsonify({"error": f"No se puede anular una OC en estado \"{oc['estado']}\""}), 400
+    items = query("SELECT * FROM ordenes_compra_items WHERE oc_id=?", (ocid,))
+    if any(float(i["cantidad_recibida"] or 0) > 0.0001 for i in items):
+        return jsonify({"error":"La OC ya tiene mercadería recibida: no se puede anular. Usá 'Completar' o 'Cerrar OC'."}), 400
+    for i in items:
+        if i["lote_id"]:
+            l = query("SELECT cantidad_original FROM lotes WHERE id=?", (i["lote_id"],), one=True)
+            mv = query("SELECT COUNT(*) c FROM movimientos WHERE lote_id=?", (i["lote_id"],), one=True)["c"]
+            if l and float(l["cantidad_original"] or 0) == 0 and mv == 0:
+                execute("UPDATE ordenes_compra_items SET lote_id=NULL WHERE id=?", (i["id"],))
+                execute("DELETE FROM lotes WHERE id=?", (i["lote_id"],))
+        if i["solicitud_id"]:
+            execute("UPDATE solicitudes_compra SET estado='Cotizada' WHERE id=? AND estado='OC Emitida'", (i["solicitud_id"],))
+    execute("""UPDATE ordenes_compra SET estado='Anulada',motivo_anulacion=?,fecha_anulada=datetime('now','localtime') WHERE id=?""",
+        ((d.get("motivo") or "").strip() or None, ocid))
+    return jsonify({"ok":True,"estado":"Anulada"})
+
+@app.route("/api/ordenes_compra/<int:ocid>/completar", methods=["POST"])
+@login_required(roles=["admin","almacen","vendedor"])
+def completar_oc(ocid):
+    """v147 (punto 8): completa una OC. En una OC DIRECTA es obligatorio
+    vincular el remito correspondiente; en una indirecta es opcional."""
+    d = request.json or {}
+    oc = query("SELECT * FROM ordenes_compra WHERE id=?", (ocid,), one=True)
+    if not oc: return jsonify({"error":"OC no encontrada"}), 404
+    if oc["estado"] not in ("Aprobada","Enviada","Recibida parcial","Recibida","Cerrada"):
+        return jsonify({"error": f"No se puede completar una OC en estado \"{oc['estado']}\""}), 400
+    tipo = _oc_tipo(ocid)
+    remito = (d.get("remito") or "").strip()
+    if tipo == "Directa" and not remito:
+        return jsonify({"error":"Una OC directa requiere vincular el remito correspondiente para completarse."}), 400
+    execute("""UPDATE ordenes_compra SET estado='Completada',remito_numero=?,fecha_completada=datetime('now','localtime') WHERE id=?""",
+        (remito or None, ocid))
+    return jsonify({"ok":True,"estado":"Completada","tipo":tipo})
+
 @app.route("/api/ordenes_compra/<int:ocid>", methods=["PUT"])
 @login_required(roles=["admin","almacen","vendedor"])
+@solo_con_monetario
 def update_oc(ocid):
     d = request.json
     execute("UPDATE ordenes_compra SET estado=?,fecha_entrega_est=?,obs=? WHERE id=?",
@@ -10502,7 +12319,7 @@ def get_pt_disponible():
         END ya_remitido
         FROM lotes l
         JOIN materiales m ON m.id=l.material_id
-        LEFT JOIN productos p ON p.codigo=m.codigo
+        LEFT JOIN productos p ON p.id=m.id
         LEFT JOIN clientes pcli ON pcli.id=p.cliente_id
         LEFT JOIN ordenes ot_gen ON ot_gen.numero=l.numero
         LEFT JOIN orden_cliente_item_ots ocio ON ocio.ot_id=ot_gen.id
@@ -10606,16 +12423,26 @@ def create_remito():
 
 
 # ── Configuración del sistema ─────────────────────────────────────────────────
+# Claves de `configuracion` cuyo contenido es (o revela) un importe.
+CONFIG_CLAVES_MONETARIAS = ("valor_hora_mo", "pdf_mostrar_costos", "pdf_mostrar_precios")
+
+
 @app.route("/api/config", methods=["GET"])
 @login_required()
 def get_config():
     rows = query("SELECT clave, valor, descripcion FROM configuracion ORDER BY clave")
-    return jsonify({r["clave"]: {"valor": r["valor"] or "", "descripcion": r["descripcion"]} for r in rows})
+    ver = puede_ver_monetario()
+    return jsonify({r["clave"]: {"valor": r["valor"] or "", "descripcion": r["descripcion"]}
+                    for r in rows
+                    if ver or r["clave"] not in CONFIG_CLAVES_MONETARIAS})
 
 @app.route("/api/config", methods=["POST"])
 @login_required(roles=["admin"])
 def save_config():
     d = request.json or {}
+    if not puede_ver_monetario():
+        # No puede verlas, tampoco pisarlas.
+        d = {k: v for k, v in d.items() if k not in CONFIG_CLAVES_MONETARIAS}
     for clave, valor in d.items():
         execute("UPDATE configuracion SET valor=? WHERE clave=?", (str(valor), clave))
     return jsonify({"ok": True})
@@ -10702,8 +12529,12 @@ def _build_ot_pdf(oid):
 
     mostrar_costos  = cfg.get("pdf_mostrar_costos",  "0") == "1"
     mostrar_precios = cfg.get("pdf_mostrar_precios", "0") == "1"
+    # Sin el permiso no hay importes en el PDF, aunque la configuración los pida.
+    ver_monetario_pdf = puede_ver_monetario()
+    if not ver_monetario_pdf:
+        mostrar_costos = mostrar_precios = False
 
-    empresa_nombre    = "Mecanizados Ituzaingo"
+    empresa_nombre    = "Mecanizado Ituzaingo"
     empresa_subtitulo = cfg.get("empresa_subtitulo", "")
     empresa_dir       = cfg.get("empresa_direccion", "")
     empresa_tel       = cfg.get("empresa_telefono",  "")
@@ -10835,13 +12666,17 @@ def _build_ot_pdf(oid):
          P("Fecha inicio", size=8, bold=True, color=MUTED),
          P(fmt_date(ot["fecha_inicio"]), size=9)],
 
+        # Sin permiso no queda ni la etiqueta: con los flags apagados esta
+        # celda mostraba igual el rótulo "Precio venta" con un guión debajo,
+        # que es un rastro de que ahí va un importe.
         [P("Costo material" if mostrar_costos else "Fecha entrega",
            size=8, bold=True, color=MUTED),
          P(fmt_money(ot["costo_mat"]) if mostrar_costos else fmt_date(ot["fecha_entrega"]), size=9),
-         P("Fecha entrega" if mostrar_costos else "Precio venta",
+         P(("Fecha entrega" if mostrar_costos else "Precio venta") if ver_monetario_pdf else "",
            size=8, bold=True, color=MUTED),
-         P(fmt_date(ot["fecha_entrega"]) if mostrar_costos else
-           (fmt_money(ot["precio_venta"]) if mostrar_precios else "—"), size=9)],
+         P((fmt_date(ot["fecha_entrega"]) if mostrar_costos else
+            (fmt_money(ot["precio_venta"]) if mostrar_precios else "—"))
+           if ver_monetario_pdf else "", size=9)],
     ]
 
     c1, c2, c3, c4 = 32*mm, CW/2-32*mm, 28*mm, CW/2-28*mm
@@ -11147,11 +12982,11 @@ def _build_op_pdf(oid, opid):
     # Materias primas asociadas a este paso puntual del proceso (si el
     # proceso definió consumos para esta operación).
     mats = []
-    if op["proceso_op_id"]:
+    if True:
         mats = query("""SELECT mt.codigo,mt.descripcion,mt.unidad
-            FROM operacion_materiales om
+            FROM orden_operacion_materiales om
             JOIN materiales mt ON mt.id=om.material_id
-            WHERE om.operacion_id=? AND om.material_id IS NOT NULL""", (op["proceso_op_id"],))
+            WHERE om.orden_operacion_id=? AND om.material_id IS NOT NULL""", (op["id"],))
     mat_prima_txt = ", ".join(f'{m["codigo"]} — {m["descripcion"]}' for m in mats) if mats else "—"
 
     maquina_txt = op["maquina_nombre"] or op["cat_maquina_nombre"] or ("Tercerizado — " + (op["proveedor_nombre"] or "—") if op["es_tercerizada"] else "—")
@@ -11179,7 +13014,7 @@ def _build_op_pdf(oid, opid):
     BLACK     = colors.HexColor("#1A1A1A")
     MUTED     = colors.HexColor("#666666")
 
-    empresa_nombre    = "Mecanizados Ituzaingo"
+    empresa_nombre    = "Mecanizado Ituzaingo"
     empresa_subtitulo = cfg.get("empresa_subtitulo", "")
     empresa_dir       = cfg.get("empresa_direccion", "")
     empresa_tel       = cfg.get("empresa_telefono",  "")
@@ -11402,6 +13237,7 @@ def _build_op_pdf(oid, opid):
 # ── Emisión de OC (PDF con ReportLab, misma estética que la OT) ─────────────
 @app.route("/api/ordenes_compra/<int:ocid>/pdf")
 @login_required()
+@solo_con_monetario
 def emitir_oc_pdf(ocid):
     try:
         return _build_oc_pdf(ocid)
@@ -11476,7 +13312,7 @@ def _build_oc_pdf(ocid):
     BLACK     = colors.HexColor("#1A1A1A")
     MUTED     = colors.HexColor("#666666")
 
-    empresa_nombre    = "Mecanizados Ituzaingo"
+    empresa_nombre    = "Mecanizado Ituzaingo"
     empresa_subtitulo = cfg.get("empresa_subtitulo", "")
     empresa_dir       = cfg.get("empresa_direccion", "")
     empresa_tel       = cfg.get("empresa_telefono",  "")
@@ -11777,11 +13613,22 @@ FILES_BASE = _os.path.join(_os.path.dirname(__file__), "documentos")
 
 def _prod_dir(pid):
     """Returns the directory path for a product's files, creating it if needed."""
-    prod = query("SELECT codigo FROM productos WHERE id=?", (pid,), one=True)
+    prod = query("SELECT codigo FROM materiales WHERE id=?", (pid,), one=True)
     if not prod:
         return None, None
     safe_code = "".join(c if c.isalnum() or c in "-_." else "_" for c in prod["codigo"])
     path = _os.path.join(FILES_BASE, f"{safe_code}__{pid}")
+    if not _os.path.isdir(path) and _os.path.isdir(FILES_BASE):
+        # Si el código del artículo cambió (ahora se puede editar desde
+        # Procesos o desde Inventario), la carpeta vieja sigue llamándose
+        # <código viejo>__<id>: se la renombra para no "perder" los archivos.
+        previas = [x for x in _os.listdir(FILES_BASE)
+                   if x.endswith(f"__{pid}") and _os.path.isdir(_os.path.join(FILES_BASE, x))]
+        if previas:
+            try:
+                _os.rename(_os.path.join(FILES_BASE, previas[0]), path)
+            except OSError:
+                return _os.path.join(FILES_BASE, previas[0]), prod["codigo"]
     _os.makedirs(path, exist_ok=True)
     return path, prod["codigo"]
 
@@ -11837,26 +13684,76 @@ def delete_version(pid, vid):
     execute("DELETE FROM producto_versiones WHERE id=? AND producto_id=?", (vid, pid))
     return jsonify({"ok": True})
 
+def _sub_path(base, sub):
+    """Resuelve una subcarpeta relativa dentro de la carpeta del artículo, sin permitir salir de ella."""
+    sub = (sub or "").replace("\\", "/").strip("/")
+    parts = [_secure(x) for x in sub.split("/") if x and x not in (".", "..")]
+    full = _os.path.realpath(_os.path.join(base, *parts)) if parts else _os.path.realpath(base)
+    root = _os.path.realpath(base)
+    if full != root and not full.startswith(root + _os.sep):
+        return None, ""
+    return full, "/".join(parts)
+
 @app.route("/api/productos/<int:pid>/archivos", methods=["GET"])
 @login_required()
 def list_archivos(pid):
+    """Lista archivos y carpetas del artículo. ?sub=carpeta/subcarpeta navega la estructura."""
     path, codigo = _prod_dir(pid)
     if not path:
         return jsonify({"error": "Producto no encontrado"}), 404
-    files = []
-    for fname in sorted(_os.listdir(path)):
-        fpath = _os.path.join(path, fname)
-        if _os.path.isfile(fpath):
+    full, sub = _sub_path(path, request.args.get("sub"))
+    if not full or not _os.path.isdir(full):
+        return jsonify({"error": "Carpeta no encontrada"}), 404
+    files, folders = [], []
+    for fname in sorted(_os.listdir(full), key=str.lower):
+        fpath = _os.path.join(full, fname)
+        if _os.path.isdir(fpath):
+            folders.append({"nombre": fname, "items": len(_os.listdir(fpath))})
+        elif _os.path.isfile(fpath):
             stat = _os.stat(fpath)
             mime, _ = _mimetypes.guess_type(fname)
             files.append({
                 "nombre": fname,
+                "ruta":   (sub + "/" if sub else "") + fname,
                 "size":   stat.st_size,
                 "mime":   mime or "application/octet-stream",
                 "is_img": (mime or "").startswith("image/"),
                 "is_pdf": mime == "application/pdf",
             })
-    return jsonify({"archivos": files, "carpeta": path})
+    return jsonify({"archivos": files, "carpetas": folders, "sub": sub, "carpeta": path})
+
+@app.route("/api/productos/<int:pid>/carpetas", methods=["POST"])
+@login_required(roles=["admin", "operario"])
+def create_carpeta_archivos(pid):
+    path, _ = _prod_dir(pid)
+    if not path:
+        return jsonify({"error": "Producto no encontrado"}), 404
+    d = request.json or {}
+    nombre = _secure((d.get("nombre") or "").strip())
+    if not nombre:
+        return jsonify({"error": "Nombre de carpeta requerido"}), 400
+    base, _s = _sub_path(path, d.get("sub"))
+    if not base:
+        return jsonify({"error": "Ruta inválida"}), 400
+    dest = _os.path.join(base, nombre)
+    if _os.path.exists(dest):
+        return jsonify({"error": "Ya existe una carpeta o archivo con ese nombre"}), 409
+    _os.makedirs(dest)
+    return jsonify({"ok": True, "nombre": nombre}), 201
+
+@app.route("/api/productos/<int:pid>/carpetas", methods=["DELETE"])
+@login_required(roles=["admin"])
+def delete_carpeta_archivos(pid):
+    path, _ = _prod_dir(pid)
+    if not path:
+        return jsonify({"error": "Producto no encontrado"}), 404
+    full, sub = _sub_path(path, request.args.get("sub"))
+    if not full or not sub or not _os.path.isdir(full):
+        return jsonify({"error": "Carpeta no encontrada"}), 404
+    if _os.listdir(full):
+        return jsonify({"error": "La carpeta no está vacía. Eliminá primero su contenido."}), 400
+    _os.rmdir(full)
+    return jsonify({"ok": True})
 
 @app.route("/api/productos/<int:pid>/archivos", methods=["POST"])
 @login_required(roles=["admin", "operario"])
@@ -11870,8 +13767,12 @@ def upload_archivo(pid):
     f = _req.files["file"]
     if not f.filename:
         return jsonify({"error": "Nombre vacío"}), 400
+    full, _s = _sub_path(path, _req.form.get("sub") or _req.args.get("sub"))
+    if not full:
+        return jsonify({"error": "Ruta inválida"}), 400
+    _os.makedirs(full, exist_ok=True)
     safe = _secure(f.filename)
-    dest = _os.path.join(path, safe)
+    dest = _os.path.join(full, safe)
     f.save(dest)
     return jsonify({"ok": True, "nombre": safe}), 201
 
@@ -11890,8 +13791,8 @@ def delete_archivo(pid, nombre):
     path, _ = _prod_dir(pid)
     if not path:
         return jsonify({"error": "Producto no encontrado"}), 404
-    fpath = _os.path.join(path, nombre)
-    if not _os.path.isfile(fpath):
+    fpath = _os.path.realpath(_os.path.join(path, nombre))
+    if not fpath.startswith(_os.path.realpath(path) + _os.sep) or not _os.path.isfile(fpath):
         return jsonify({"error": "Archivo no encontrado"}), 404
     _os.remove(fpath)
     return jsonify({"ok": True})
@@ -12040,7 +13941,7 @@ def bulk_import():
 def debug_pt_materiales():
     """Diagnóstico: muestra estado de materiales PT y ejecuta migración si faltan."""
     db = get_db()
-    prods = query("SELECT id,codigo,nombre,unidad FROM productos")
+    prods = query("SELECT id,codigo,nombre,unidad FROM productos WHERE tipo_articulo='Producto terminado'")
     result = []
     for p in prods:
         existia = query("SELECT id FROM materiales WHERE producto_id=?", (p["id"],), one=True)
@@ -12062,7 +13963,7 @@ def diagnostico_page():
     def sep(msg): lines.append(f'<div class="sep">{msg}</div>')
 
     sep("1. Productos y sus materiales PT")
-    prods = query("SELECT id,codigo,nombre,unidad FROM productos")
+    prods = query("SELECT id,codigo,nombre,unidad FROM productos WHERE tipo_articulo='Producto terminado'")
     for p in prods:
         existia = query("SELECT id FROM materiales WHERE producto_id=?", (p["id"],), one=True)
         mat = get_or_create_pt_material(p)
@@ -12150,7 +14051,7 @@ def diagnostico_page():
 
             if es_ultima and qty_prod >= qty_req and qty_req > 0:
                 prod = query("SELECT * FROM productos WHERE id=?", (ot6["producto_id"],), one=True)
-                existia_mat = query("SELECT id FROM materiales WHERE codigo=? AND categoria='Producto terminado'", (prod["codigo"],), one=True)
+                existia_mat = query("SELECT id FROM materiales WHERE id=?", (prod["id"],), one=True)
                 mat_pt = get_or_create_pt_material(prod)
                 if not existia_mat:
                     info(f"Material PT creado on-the-fly id={mat_pt['id']}")
@@ -12289,10 +14190,126 @@ def _backfill_requerimientos_desde_pedidos():
             _sync_requerimiento_desde_pedido(row["id"])
         print("[requerimientos_productivos] Backfill completo (pedidos de cliente).")
 
+# ── Bitácora de auditoría — API (solo lectura, solo admin) ───────────────────
+AUDITORIA_ACCIONES = ("alta", "modificacion", "baja")
+
+
+def _aud_cargar(txt):
+    if not txt:
+        return {}
+    try:
+        v = _json.loads(txt)
+        return v if isinstance(v, dict) else {}
+    except Exception:
+        return {}
+
+
+def _aud_cambios(fila):
+    """Comparación campo por campo entre el valor anterior y el nuevo."""
+    antes, despues = _aud_cargar(fila["valores_antes"]), _aud_cargar(fila["valores_despues"])
+    if not puede_ver_monetario():
+        antes, despues = _aud_enmascarar(antes), _aud_enmascarar(despues)
+    campos = sorted(set(antes) | set(despues))
+    return [{"campo": c, "antes": antes.get(c), "despues": despues.get(c)} for c in campos]
+
+
+def _aud_filtros():
+    """WHERE + parámetros armados con los filtros de la query string."""
+    w, p = ["1=1"], []
+    desde = (request.args.get("desde") or "").strip()
+    hasta = (request.args.get("hasta") or "").strip()
+    origen = (request.args.get("origen") or "").strip()
+    actor = (request.args.get("usuario") or "").strip()
+    entidad = (request.args.get("entidad") or "").strip()
+    accion = (request.args.get("accion") or "").strip()
+    q = (request.args.get("q") or "").strip()
+    if desde:
+        w.append("fecha >= ?"); p.append(desde + " 00:00:00")
+    if hasta:
+        w.append("fecha <= ?"); p.append(hasta + " 23:59:59")
+    if origen in ("usuario", "sistema"):
+        w.append("origen = ?"); p.append(origen)
+    if actor:
+        w.append("actor = ?"); p.append(actor)
+    if entidad:
+        w.append("entidad = ?"); p.append(entidad)
+    if accion in AUDITORIA_ACCIONES:
+        w.append("accion = ?"); p.append(accion)
+    if q:
+        if puede_ver_monetario():
+            w.append("(entidad LIKE ? OR actor LIKE ? OR IFNULL(registro_id,'') LIKE ?"
+                     " OR IFNULL(valores_antes,'') LIKE ? OR IFNULL(valores_despues,'') LIKE ?)")
+            p += [f"%{q}%"] * 5
+        else:
+            # Buscar dentro de los JSON permitiría adivinar importes probando
+            # números hasta que un asiento aparezca: para el restringido la
+            # búsqueda libre se limita a los metadatos del asiento.
+            w.append("(entidad LIKE ? OR actor LIKE ? OR IFNULL(registro_id,'') LIKE ?)")
+            p += [f"%{q}%"] * 3
+    return " AND ".join(w), p
+
+
+@app.route("/api/auditoria")
+@login_required(roles=["admin"])
+def get_auditoria():
+    where, params = _aud_filtros()
+    try:
+        pagina = max(1, int(request.args.get("pagina", 1)))
+    except (TypeError, ValueError):
+        pagina = 1
+    try:
+        por_pagina = int(request.args.get("por_pagina", 50))
+    except (TypeError, ValueError):
+        por_pagina = 50
+    por_pagina = min(200, max(10, por_pagina))
+    total = query(f"SELECT COUNT(*) c FROM auditoria WHERE {where}", params, one=True)["c"]
+    filas = query(
+        f"SELECT * FROM auditoria WHERE {where} ORDER BY fecha DESC, id DESC LIMIT ? OFFSET ?",
+        (*params, por_pagina, (pagina - 1) * por_pagina))
+    rows = []
+    for f in filas:
+        cambios = _aud_cambios(f)
+        rows.append({
+            "id": f["id"], "fecha": f["fecha"], "origen": f["origen"],
+            "usuario_id": f["usuario_id"], "actor": f["actor"],
+            "entidad": f["entidad"], "registro_id": f["registro_id"],
+            "accion": f["accion"], "ruta": f["ruta"],
+            "campos": [c["campo"] for c in cambios],
+        })
+    return jsonify({
+        "total": total, "pagina": pagina, "por_pagina": por_pagina,
+        "paginas": max(1, -(-total // por_pagina)), "rows": rows,
+    })
+
+
+@app.route("/api/auditoria/opciones")
+@login_required(roles=["admin"])
+def get_auditoria_opciones():
+    return jsonify({
+        "entidades": [r["entidad"] for r in query("SELECT DISTINCT entidad FROM auditoria ORDER BY entidad")],
+        "usuarios": [r["actor"] for r in query("SELECT DISTINCT actor FROM auditoria ORDER BY actor")],
+        "acciones": list(AUDITORIA_ACCIONES),
+        "origenes": ["usuario", "sistema"],
+    })
+
+
+@app.route("/api/auditoria/<int:aid>")
+@login_required(roles=["admin"])
+def get_auditoria_detalle(aid):
+    f = query("SELECT * FROM auditoria WHERE id=?", (aid,), one=True)
+    if not f:
+        return jsonify({"error": "Asiento no encontrado"}), 404
+    d = dict(f)
+    d["cambios"] = _aud_cambios(f)
+    d.pop("valores_antes", None)
+    d.pop("valores_despues", None)
+    return jsonify(d)
+
+
 if __name__ == "__main__":
     print("="*52+"\n   MetalERP v3.0 - Taller Metalurgico\n"+"="*52)
     init_db()
-    with app.app_context():
+    with app.app_context(), auditoria_proceso("backfill de requerimientos"):
         _backfill_requerimientos_desde_ott()
         _backfill_requerimientos_desde_compras()
         _backfill_requerimientos_desde_pedidos()

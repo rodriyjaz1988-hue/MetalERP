@@ -1,9 +1,9 @@
 """
 Recalcula rendimiento_pct (y desvio) de novedades_produccion ya cargadas,
-usando el tiempo_ciclo_min ACTUAL de proceso_operaciones.
+usando el tiempo_ciclo_seg ACTUAL de proceso_operaciones.
 
 Caso que soluciona: se cargó una novedad cuando la operación todavía no
-tenía tiempo_ciclo_min definido (el sistema usó el fallback de 1 min/pieza),
+tenía tiempo_ciclo_seg definido (el sistema usó el fallback de 60 seg/pieza),
 y después se cargó el ciclo real -> la novedad quedó con un rendimiento_pct
 inflado/incorrecto (ej. 186.7% en vez del valor real).
 
@@ -52,7 +52,7 @@ def main():
         SELECT n.id, n.numero, n.cantidad_producida, n.tiempo_real_min,
                n.tiempo_perdido, n.rendimiento_pct, n.desvio,
                oo.orden_id, oo.nombre op_nombre,
-               po.tiempo_ciclo_min std_ciclo,
+               po.tiempo_ciclo_seg std_ciclo,
                o.numero ot_numero
         FROM novedades_produccion n
         JOIN orden_operaciones oo ON oo.id = n.orden_operacion_id
@@ -75,7 +75,9 @@ def main():
     sin_ciclo = []
 
     for r in rows:
-        std_ciclo = r["std_ciclo"] or 0
+        # La columna guarda SEGUNDOS por pieza y el tiempo real se declara en
+        # minutos, así que se convierte antes de comparar.
+        std_ciclo = (r["std_ciclo"] or 0) / 60.0
         if not std_ciclo:
             # Operación sigue sin ciclo estándar definido: no se puede
             # recalcular correctamente, se deja como está (usaría el mismo
@@ -103,7 +105,7 @@ def main():
 
     for r, nuevo_rend, nuevo_desvio, std_ciclo in cambios:
         print(f"{r['numero']:<14} OT {r['ot_numero']:<10} {r['op_nombre']:<20} "
-              f"ciclo={std_ciclo}min  {r['rendimiento_pct']}% -> {nuevo_rend}%  "
+              f"ciclo={std_ciclo*60:g}seg  {r['rendimiento_pct']}% -> {nuevo_rend}%  "
               f"(desvio {r['desvio']} -> {nuevo_desvio})")
 
     if sin_ciclo:
