@@ -2785,7 +2785,24 @@ const VER_MONETARIO = {{ ver_monetario|tojson }} === true;
 let _cli=[],_prod=[],_mat=[],_maq=[],_catM=[],_catP=[],_prov=[];
 let opN=0,curProdId=null,curProdNom='';
 
-const $=id=>document.getElementById(id);
+// Sin el permiso monetario, los campos de importes se BORRAN del DOM (ver
+// _borrarMonetarioDOM). Las funciones que abren y guardan formularios (PT, OT,
+// tickets, operaciones, config...) siguen haciendo $('prod-pv').value=... y,
+// con el nodo borrado, tiraban TypeError y el formulario no abría ni guardaba.
+// Por eso $ devuelve, para esos ids, un nodo suelto que nunca entra al
+// documento: se puede leer y escribir sin error y lo que se manda al
+// servidor de todos modos se descarta en before_request.
+const _MON_BORRADOS=new Map();
+function _registrarMonBorrado(nodo){
+  if(!nodo||!nodo.querySelectorAll) return;
+  [nodo].concat(Array.from(nodo.querySelectorAll('[id]'))).forEach(function(el){
+    if(!el.id||_MON_BORRADOS.has(el.id)) return;
+    const s=el.cloneNode(false);
+    if('value' in s) s.value='';
+    _MON_BORRADOS.set(el.id,s);
+  });
+}
+const $=id=>document.getElementById(id)||_MON_BORRADOS.get(id)||null;
 // ── Valores monetarios ─────────────────────────────────────────────────────
 // Regla: para quien no tiene el permiso, lo monetario NO SE GENERA. Nada de
 // display:none ni de placeholders tipo "$ —": un recuadro vacío donde debería
@@ -3062,6 +3079,7 @@ function setupRoles(){
       var el=document.getElementById(id);
       if(!el) return;
       var cont=el.closest('.fg')||el.closest('[id$="-wrap"]')||el;
+      _registrarMonBorrado(cont);
       cont.remove();
     });
   }
@@ -3693,11 +3711,11 @@ function _borrarMonetarioDOM(root){
     if(_zonaExentaMonetario(fg)) return;
     const lb=fg.querySelector('label'); if(!lb) return;
     const t=lb.textContent.replace(/\s+/g,' ').trim();
-    if(/\(\$\)|^precio|^costo (mat|mo|terc|rep)|^subtotal|^total con|^valor mano|^iva \(%\)|^precio acordado|^costo materiales/i.test(t) && !/centro de costo|condici[oó]n/i.test(t)) fg.remove();
+    if(/\(\$\)|^precio|^costo (mat|mo|terc|rep)|^subtotal|^total con|^valor mano|^iva \(%\)|^precio acordado|^costo materiales/i.test(t) && !/centro de costo|condici[oó]n/i.test(t)){ _registrarMonBorrado(fg); fg.remove(); }
   });
   // HTML estático marcado a mano por quien lo escribió.
   (root||document).querySelectorAll('[data-monetario]').forEach(function(el){
-    if(!_zonaExentaMonetario(el)) el.remove();
+    if(!_zonaExentaMonetario(el)){ _registrarMonBorrado(el); el.remove(); }
   });
 }
 if(!VER_MONETARIO){
@@ -5588,7 +5606,9 @@ async function saveOp(){
   const tercChecked=!!($('op-terc') && $('op-terc').checked);
   const provId=$('op-prv')?($('op-prv').value||null):null;
   const precio=parseFloat($('op-prec')?$('op-prec').value:0)||0;
-  const esTerc=tercChecked && (!!provId || precio>0);
+  // Sin permiso monetario el precio no se ve ni se manda: no alcanza para
+  // decidir. El servidor resuelve con el precio que ya tiene guardado.
+  const esTerc=tercChecked && (!!provId || precio>0 || !VER_MONETARIO);
   const body={producto_id:pid,orden:$('op-ord').value,nombre:$('op-nom').value,
     descripcion:$('op-desc').value,
     categoria_maquina_id:esTerc?null:($('op-catm').value||null),
@@ -11377,7 +11397,9 @@ async function saveOpEdit(){
   const precio=parseFloat($('ope-precio').value)||0;
   // "Terciarizado" solo se guarda como tal si, además de tildar el check,
   // se cargó alguna información en sus campos (proveedor o precio).
-  const esTerc=tercChecked && (!!provId || precio>0);
+  // Sin permiso monetario el precio no se ve ni se manda: no alcanza para
+  // decidir. El servidor resuelve con el precio que ya tiene guardado.
+  const esTerc=tercChecked && (!!provId || precio>0 || !VER_MONETARIO);
   const materiales=[...$('ope-mats').querySelectorAll('.mr')].map(function(row){
     const hidId=row.querySelector('.mat-id-field');
     const numInputs=row.querySelectorAll('input[type="number"]');

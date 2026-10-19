@@ -1368,6 +1368,16 @@ def _sin_monetario(dato):
     return dato
 
 
+def _mon_o_actual(d, clave, tabla, rid):
+    """Valor monetario a grabar en un UPDATE: el del payload si vino, y si no
+    (un usuario sin ver_monetario nunca lo manda: lo descarta el before_request
+    de abajo) el que ya está guardado, para no pisarlo con 0."""
+    if clave in d:
+        return d[clave]
+    fila = query(f"SELECT {clave} v FROM {tabla} WHERE id=?", (rid,), one=True)
+    return (fila["v"] if fila else None) or 0
+
+
 @app.before_request
 def _descartar_monetario_entrante():
     """Un usuario restringido no puede escribir importes: se descartan del
@@ -3562,7 +3572,7 @@ def update_ticket(tid):
         t_existing = query("SELECT horas_paro FROM tickets_reparacion WHERE id=?", (tid,), one=True)
         horas_paro_calc = t_existing["horas_paro"] if t_existing else 0.0
     execute("UPDATE tickets_reparacion SET descripcion=?,tipo=?,prioridad=?,estado=?,responsable=?,fecha_cierre=?,horas_paro=?,horas_ajuste=?,costo=?,solucion=? WHERE id=?",
-        (d["descripcion"],d.get("tipo","Correctivo"),d.get("prioridad","Normal"),d.get("estado","Abierto"),d.get("responsable"),fecha_cierre,horas_paro_calc,horas_ajuste,d.get("costo",0),d.get("solucion"),tid))
+        (d["descripcion"],d.get("tipo","Correctivo"),d.get("prioridad","Normal"),d.get("estado","Abierto"),d.get("responsable"),fecha_cierre,horas_paro_calc,horas_ajuste,_mon_o_actual(d,"costo","tickets_reparacion",tid),d.get("solucion"),tid))
     if d.get("estado") == "Cerrado":
         t = query("SELECT maquina_id FROM tickets_reparacion WHERE id=?", (tid,), one=True)
         if t:
@@ -4211,9 +4221,11 @@ def update_operacion(oid):
     guardar_version_producto(prod_id, motivo="Operación editada: "+d.get("nombre","op #"+str(oid)), creado_por=session.get("username","sistema"))
     nuevo_orden = d.get("orden", 1)
     es_terc = 1 if d.get("es_tercerizada") else 0
+    # Sin ver_monetario el precio no viene en el payload: se usa el guardado.
+    precio_terc = _mon_o_actual(d, "precio_tercerizado", "proceso_operaciones", oid)
     # Idem create_operacion: mutuamente excluyente y solo persiste como
     # tercerizada si se cargó proveedor o precio.
-    if es_terc and not (d.get("proveedor_id") or (d.get("precio_tercerizado") or 0)):
+    if es_terc and not (d.get("proveedor_id") or (precio_terc or 0)):
         es_terc = 0
     if es_terc:
         if "materiales" in d:
@@ -4232,7 +4244,7 @@ def update_operacion(oid):
         (nuevo_orden, d["nombre"], d.get("descripcion"), d.get("categoria_maquina_id"),
          d.get("maquina_id"), d.get("tiempo_setup_min",0), d.get("tiempo_ciclo_seg",0),
          es_terc, d.get("proveedor_id") if es_terc else None,
-         d.get("precio_tercerizado",0) if es_terc else 0,
+         precio_terc if es_terc else 0,
          d.get("tiempo_minimo_dias",0), d.get("obs"),
          vol_agrup, d.get("valor_recalculado",0) if vol_agrup else 0, oid))
     # Update materials if provided
@@ -5945,7 +5957,7 @@ def update_orden(oid):
     estado_a_grabar = (orden_actual["estado"] if orden_actual else "Pendiente") if completando_ahora else nuevo_estado
 
     execute("UPDATE ordenes SET cliente_id=?,producto_id=?,descripcion=?,detalle=?,cantidad=?,prioridad=?,estado=?,fecha_inicio=?,fecha_entrega=?,costo_mat=?,costo_mo=?,precio_venta=0,obs=?,actualizado=datetime('now','localtime') WHERE id=?",
-        (d.get("cliente_id"),d["producto_id"],descripcion,d.get("detalle"),d.get("cantidad",1),d.get("prioridad","Normal"),estado_a_grabar,d.get("fecha_inicio"),d.get("fecha_entrega"),d.get("costo_mat",0),d.get("costo_mo",0),d.get("obs"),oid))
+        (d.get("cliente_id"),d["producto_id"],descripcion,d.get("detalle"),d.get("cantidad",1),d.get("prioridad","Normal"),estado_a_grabar,d.get("fecha_inicio"),d.get("fecha_entrega"),_mon_o_actual(d,"costo_mat","ordenes",oid),_mon_o_actual(d,"costo_mo","ordenes",oid),d.get("obs"),oid))
 
     # Punto 4 (v147): flag "requiere materia prima" de la OT. Solo se toca si el
     # body lo trae (el cambio rápido de estado no lo manda).
@@ -7113,7 +7125,7 @@ def update_ott(oid):
         return jsonify({"error":"No se puede cambiar el proveedor: la OTT ya inició (tiene envíos)."}), 400
     execute("""UPDATE ordenes_tercerizado SET estado=?,proveedor_id=?,precio_acordado=?,
         fecha_retorno_est=?,fecha_envio=?,obs=? WHERE id=?""",
-        (d.get("estado"), d.get("proveedor_id"), d.get("precio_acordado",0),
+        (d.get("estado"), d.get("proveedor_id"), _mon_o_actual(d, "precio_acordado", "ordenes_tercerizado", oid),
          d.get("fecha_retorno_est"), d.get("fecha_envio"), d.get("obs"), oid))
     _sync_requerimiento_desde_ott(oid)
     return jsonify({"ok": True})
