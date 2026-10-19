@@ -2563,21 +2563,48 @@
   <div class="ma"><button class="btn" onclick="closeMo('mo-cajon')">Cerrar</button></div>
 </div></div>
 
-<div class="ov" id="mo-cajon-cal"><div class="mo" style="width:480px">
+<div class="ov" id="mo-cajon-cal"><div class="mo" style="width:560px">
   <div class="mh"><span id="cajcal-title">Calidad del cajón</span> <span class="mx" onclick="closeMo('mo-cajon-cal')">×</span></div>
   <input type="hidden" id="cajcal-id"><input type="hidden" id="cajcal-term">
-  <div id="cajcal-info" style="background:var(--color-background-secondary);border-radius:8px;padding:10px 14px;font-size:12px;margin-bottom:12px"></div>
+  <div id="cajcal-info" style="background:var(--color-background-secondary);border-radius:8px;padding:10px 14px;font-size:12px;margin-bottom:14px"></div>
+
   <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">
-    <button class="btn btn-s" onclick="cajCalQuick('liberar')">Liberar lo pendiente</button>
-    <button class="btn btn-s" onclick="cajCalQuick('rechazar')">Rechazar lo pendiente</button>
+    <button class="btn btn-s" type="button" onclick="cajCalQuick('aprobar_todo')">✓ Aprobar todo</button>
+    <button class="btn btn-s" type="button" onclick="cajCalQuick('rechazar_todo')">✗ Rechazar todo</button>
+    <button class="btn btn-s" type="button" onclick="cajCalQuick('reset')">⏳ Marcar todo pendiente</button>
   </div>
+
   <div class="fg2">
-    <div class="fg"><label>Liberadas</label><input type="number" id="cajcal-lib" min="0" step="1" oninput="cajCalRecalc()"></div>
-    <div class="fg"><label>Rechazadas</label><input type="number" id="cajcal-rech" min="0" step="1" oninput="cajCalRecalc()"></div>
-    <div class="fg"><label>Pendientes</label><input type="number" id="cajcal-pend" readonly style="background:var(--color-background-secondary)"></div>
-    <div class="fg s2"><label>Observaciones</label><textarea id="cajcal-obs" style="min-height:45px"></textarea></div>
+    <div class="fg s2"><label style="color:#1B5E20">✓ Aprobado</label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input type="number" id="cajcal-lib" min="0" step="1" oninput="cajCalRecalc('aprobado')"
+          style="flex:1;font-size:13px;padding:7px 9px;border:1.5px solid #A8D08D;border-radius:6px;background:#F4F9EE;color:#1B5E20">
+        <span style="font-size:12px;color:var(--color-text-secondary)">pz</span>
+      </div>
+    </div>
+    <div class="fg s2"><label style="color:#c62828">✗ Rechazado</label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input type="number" id="cajcal-rech" min="0" step="1" oninput="cajCalRecalc('rechazado')"
+          style="flex:1;font-size:13px;padding:7px 9px;border:1.5px solid #E8A6A6;border-radius:6px;background:#FDF4F4;color:#A32D2D">
+        <span style="font-size:12px;color:var(--color-text-secondary)">pz</span>
+      </div>
+    </div>
+    <div class="fg s2"><label style="color:#E65100">⏳ Pendiente (sin gestionar)</label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input type="number" id="cajcal-pend" readonly tabindex="-1"
+          style="flex:1;font-size:13px;padding:7px 9px;border:1.5px solid #F0C896;border-radius:6px;background:#FDF8EF;color:#9A5300">
+        <span style="font-size:12px;color:var(--color-text-secondary)">pz</span>
+      </div>
+    </div>
+    <div class="fg s2"><label>Total terminadas</label>
+      <div id="cajcal-total-lbl" style="font-size:13px;font-weight:600;padding:6px 0"></div>
+    </div>
+    <div class="fg s2"><label>Observaciones</label><textarea id="cajcal-obs" style="min-height:40px"></textarea></div>
   </div>
-  <div class="ma"><button class="btn" onclick="closeMo('mo-cajon-cal')">Cancelar</button><button class="btn btn-p" onclick="saveCajCal()">Guardar</button></div>
+  <div class="ma">
+    <button class="btn" onclick="closeMo('mo-cajon-cal')">Cancelar</button>
+    <button class="btn btn-p" onclick="saveCajCal()">Confirmar</button>
+  </div>
 </div></div>
 
 <div class="ov" id="mo-cajon-transf"><div class="mo" style="width:440px">
@@ -12104,20 +12131,30 @@ async function openCajon(id){
 function openCajCal(c){
   $('cajcal-id').value=c.id; $('cajcal-term').value=c.terminadas||0;
   $('cajcal-title').textContent='Calidad — '+c.numero;
-  $('cajcal-info').innerHTML='Terminadas por la última operación: <b>'+(c.terminadas||0)+'</b> de '+c.cantidad
+  $('cajcal-info').innerHTML='<b>'+schEsc(c.numero)+'</b> — '+schEsc(c.producto_nombre||'')
+    +' | Terminadas: <b>'+(c.terminadas||0)+'</b> de '+c.cantidad+' pz'
+    +' | Estado actual: <b>'+schEsc(c.estado)+'</b>'
     +(c.cantidad_remitida?' | Ya remitidas: <b>'+c.cantidad_remitida+'</b>':'');
   $('cajcal-lib').value=c.cantidad_liberada||0; $('cajcal-rech').value=c.cantidad_rechazada||0;
   $('cajcal-obs').value=c.calidad_obs||'';
+  $('cajcal-total-lbl').textContent=(c.terminadas||0)+' pz';
   cajCalRecalc(); openMo('mo-cajon-cal');
 }
-function cajCalRecalc(){
+function cajCalRecalc(changed){
   const t=parseFloat($('cajcal-term').value)||0;
-  $('cajcal-pend').value=Math.max(0,t-(parseFloat($('cajcal-lib').value)||0)-(parseFloat($('cajcal-rech').value)||0));
+  let l=Math.max(0,parseFloat($('cajcal-lib').value)||0), r=Math.max(0,parseFloat($('cajcal-rech').value)||0);
+  // Igual que en Gestionar lote: se recorta el campo editado para no superar el total
+  if(l+r>t+0.001){
+    if(changed==='aprobado'){ l=Math.max(0,t-r); $('cajcal-lib').value=l; }
+    else { r=Math.max(0,t-l); $('cajcal-rech').value=r; }
+  }
+  $('cajcal-pend').value=Math.max(0,t-l-r);
 }
 function cajCalQuick(a){
   const t=parseFloat($('cajcal-term').value)||0;
-  const l=parseFloat($('cajcal-lib').value)||0, r=parseFloat($('cajcal-rech').value)||0;
-  if(a==='liberar') $('cajcal-lib').value=Math.max(0,t-r); else $('cajcal-rech').value=Math.max(0,t-l);
+  if(a==='aprobar_todo'){ $('cajcal-lib').value=t; $('cajcal-rech').value=0; }
+  else if(a==='rechazar_todo'){ $('cajcal-lib').value=0; $('cajcal-rech').value=t; }
+  else { $('cajcal-lib').value=0; $('cajcal-rech').value=0; }
   cajCalRecalc();
 }
 async function saveCajCal(){
