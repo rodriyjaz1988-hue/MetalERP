@@ -12010,13 +12010,13 @@ function renderCajones(){
     $('caj-list').innerHTML='<div class="em">No hay cajones para mostrar.</div>';
     actualizarToolbarCaj(); return;
   }
-  let h='<table><tr><th style="width:24px"></th><th>Cajón</th><th>Estado</th><th>OT</th><th>Producto</th><th>Lote</th>'
+  let h='<table><tr><th style="width:24px"></th><th>Cajón</th><th>OT</th><th>Producto</th><th>Lote</th>'
     +'<th>Piezas</th><th>Terminadas</th><th style="color:#2e7d32">Liberadas</th><th style="color:#c62828">Rechazadas</th>'
     +'<th>Pendiente Calidad</th><th>Remitidas</th><th>Creado</th></tr>';
   _caj.forEach(function(c){
     h+='<tr class="'+(_cajSel===c.id?'ot-sel':'')+'" style="cursor:pointer" onclick="selCaj('+c.id+')" ondblclick="openCajon('+c.id+')">'
       +'<td><input type="radio" name="caj-sel"'+(_cajSel===c.id?' checked':'')+' onclick="event.stopPropagation();selCaj('+c.id+')"></td>'
-      +'<td><b>'+schEsc(c.numero)+'</b></td><td>'+cajBadge(c.estado)+'</td>'
+      +'<td><b>'+schEsc(c.numero)+'</b></td>'
       +'<td>'+schEsc(c.ot_numero||'—')+(c.ot_origen_numero&&c.ot_origen_numero!==c.ot_numero?' <span style="font-size:11px;color:var(--color-text-secondary)">(de '+schEsc(c.ot_origen_numero)+')</span>':'')+'</td>'
       +'<td>'+schEsc(c.producto_codigo||'')+'</td><td>'+schEsc(c.lote_numero||'—')+'</td>'
       +'<td>'+c.cantidad+' / '+c.capacidad+'</td><td>'+(c.terminadas||0)+'</td>'
