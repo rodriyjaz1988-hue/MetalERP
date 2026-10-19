@@ -986,10 +986,10 @@
               <span class="vh-badge" id="caj-sel-label" title="Cajón seleccionado">–</span>
             </div>
             <div class="vh-acciones" id="caj-toolbar">
-              <button class="btn" id="caj-b-ver" onclick="cajSelAccion('ver')" disabled title="Trazabilidad del cajón seleccionado"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="3.6" cy="3.6" r="1.7"/><circle cx="12.4" cy="12.4" r="1.7"/><path d="M5.3 3.6h4.2a2 2 0 0 1 2 2v5.1"/></svg>Trazar</button>
-              <button class="btn" id="caj-b-cal" onclick="cajSelAccion('calidad')" disabled title="Liberar o rechazar piezas del cajón">Calidad</button>
-              <button class="btn" id="caj-b-transf" onclick="cajSelAccion('transferir')" disabled title="Pasar el cajón en espera a otra OT del mismo producto">Pasar a otra OT</button>
-              <button class="btn btn-warn" id="caj-b-baja" onclick="cajSelAccion('baja')" disabled title="Dar de baja el cajón en espera">Dar de baja</button>
+              <button class="btn" id="caj-b-ver" data-sin-guia onclick="cajSelAccion('ver')" disabled title="Trazabilidad del cajón seleccionado"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="3.6" cy="3.6" r="1.7"/><circle cx="12.4" cy="12.4" r="1.7"/><path d="M5.3 3.6h4.2a2 2 0 0 1 2 2v5.1"/></svg>Trazar</button>
+              <button class="btn" id="caj-b-cal" data-sin-guia onclick="cajSelAccion('calidad')" disabled title="Liberar o rechazar piezas del cajón">Calidad</button>
+              <button class="btn" id="caj-b-transf" data-sin-guia onclick="cajSelAccion('transferir')" disabled title="Pasar el cajón en espera a otra OT del mismo producto">Pasar a otra OT</button>
+              <button class="btn btn-warn" id="caj-b-baja" data-sin-guia onclick="cajSelAccion('baja')" disabled title="Dar de baja el cajón en espera">Dar de baja</button>
             </div>
           </div>
           <div class="vhead-row vhead-fil">
@@ -1331,7 +1331,7 @@
             <option value="upsert">Insertar o reemplazar (UPSERT)</option>
           </select>
           <div id="bulk-sheets" style="margin-bottom:10px"></div>
-          <button class="btn btn-p" style="width:100%" onclick="runBulkImport()" id="bulk-run-btn" disabled>Importar</button>
+          <button class="btn btn-p" style="width:100%" onclick="runBulkImport()" id="bulk-run-btn" disabled title="Primero elegí un archivo Excel con al menos una hoja válida">Importar</button>
           <div id="bulk-log" style="margin-top:10px;font-size:11px;max-height:200px;overflow-y:auto"></div>
         </div>
         <div class="card">
@@ -4042,7 +4042,7 @@ function renderOT(){
   if(!isNaN(totalHasta)) rows=rows.filter(function(r){return parseFloat(r.cantidad)<=totalHasta;});
 
   if(!rows.length){
-    $('ot-list').innerHTML='<div class="em">'+(_otRawRows.length?'Sin resultados para los filtros seleccionados.':'No hay órdenes.')+'</div>';
+    $('ot-list').innerHTML='<div class="em">'+(_otRawRows.length?'Sin resultados para los filtros seleccionados.':'No hay órdenes. Creá la primera con «Nueva OT».')+'</div>';
     return;
   }
   if(_otSortCol){
@@ -4081,6 +4081,7 @@ function renderOT(){
   });
   h+='</tr>';
   const estadoColoresOT={'Pendiente':{bg:'#FAEEDA',fg:'#633806'},'En proceso':{bg:'#E6F1FB',fg:'#0C447C'},'Completada':{bg:'#EAF3DE',fg:'#27500A'},'Cancelada':{bg:'#F1F1F1',fg:'#555'}};
+  const _hoyOT=(function(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})(new Date());
   rows.forEach(r=>{
     const estadoCol=['admin','operario','vendedor'].includes(ROL)
       ?'<select onchange="cambiarEstadoOT('+r.id+',this)" style="font-family:inherit;font-size:11px;font-weight:500;padding:3px 9px;border-radius:7px;border:1px solid transparent;background:'+(estadoColoresOT[r.estado]?estadoColoresOT[r.estado].bg:'#fff')+';color:'+(estadoColoresOT[r.estado]?estadoColoresOT[r.estado].fg:'#1a1a1a')+';cursor:pointer">'
@@ -4088,8 +4089,8 @@ function renderOT(){
         +'</select>'
       :sb(r.estado);
     h+=`<tr id="ot-row-${r.id}" class="${_otSel===r.id?'ot-sel':''}" style="cursor:pointer" title="Doble clic: ver el avance de las operaciones" onclick="selOT(${r.id})"><td><input type="radio" name="ot-sel" ${_otSel===r.id?'checked':''} onclick="event.stopPropagation();selOT(${r.id})"></td><td>${r.lista_para_completar?`<span title="Todas las operaciones al 100% — lista para marcar como Completada" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#2E9E44;color:#fff;font-size:11px;font-weight:700;margin-right:6px;vertical-align:middle">!</span>`:''}<b>${r.numero}</b></td><td>${r.producto_codigo||'—'}</td><td>${r.producto_nombre||r.descripcion}</td><td>${r.cliente_nombre||'—'}</td>
-    <td>${r.cantidad}</td><td>${r.total_realizado||0}</td><td title="${VER_MONETARIO?('Materiales: '+fmtM(r.costo_mat||0)+(r.costo_terciarizado?' + Terciarizado: '+fmtM(r.costo_terciarizado):'')):''}">${fmtM(r.costo_total!==undefined?r.costo_total:r.costo_mat)}</td><td>${r.costo_mo||0}</td>
-    <td onclick="event.stopPropagation()">${estadoCol}</td><td>${fmtD(r.fecha_entrega)}</td>
+    <td>${r.cantidad}</td><td${(r.cantidad>0&&(r.total_realizado||0)>=r.cantidad)?' style="color:#2e7d32;font-weight:600" title="Ya se realizó toda la cantidad pedida"':''}>${r.total_realizado||0}</td><td title="${VER_MONETARIO?('Materiales: '+fmtM(r.costo_mat||0)+(r.costo_terciarizado?' + Terciarizado: '+fmtM(r.costo_terciarizado):'')):''}">${fmtM(r.costo_total!==undefined?r.costo_total:r.costo_mat)}</td><td>${r.costo_mo||0}</td>
+    <td onclick="event.stopPropagation()">${estadoCol}</td><td${(r.fecha_entrega&&String(r.fecha_entrega).slice(0,10)<_hoyOT&&!['Completada','Cancelada'].includes(r.estado))?' style="color:#A32D2D;font-weight:600" title="Fecha de entrega vencida"':''}>${fmtD(r.fecha_entrega)}</td>
     <td>${r.oc_numero?`<span style="cursor:pointer;color:var(--color-accent);text-decoration:underline dotted" onclick="verAvanceOC(${r.oc_id},'${r.oc_numero}')" title="Ver avance de entrega">${r.oc_numero}</span>`:'—'}</td>`;
     h+='</tr>';
     if(_otAvanceAbierto===r.id) h+='<tr id="ot-avance-row"><td colspan="'+(cols.length+1)+'" style="background:#fafaf8;padding:8px 14px"><div id="ot-avance-box"><div class="ld">Cargando operaciones...</div></div></td></tr>';
@@ -4131,6 +4132,7 @@ function actualizarToolbarOT(){
   $('ot-b-ops').disabled=!r||!puede;
   $('ot-b-edit').disabled=!r||!puede;
   $('ot-b-emitir').disabled=!r||!puede;
+  ['ot-b-ops','ot-b-edit','ot-b-emitir'].forEach(function(id){ $(id).dataset.motivo=(r&&!puede)?'Tu usuario no tiene permiso para esta acción':''; });
 }
 function otSelAccion(a){
   const r=_otSel&&_ot_cache?_ot_cache.get(_otSel):null;
@@ -5405,7 +5407,7 @@ function renderProd(){
   const rows=q?rowsAll.filter(function(r){
     return (r.codigo||'').toLowerCase().includes(q)||(r.nombre||'').toLowerCase().includes(q);
   }):rowsAll;
-  if(!rowsAll.length){$('prod-list').innerHTML='<div class="em">No hay productos terminados.</div>';return;}
+  if(!rowsAll.length){$('prod-list').innerHTML='<div class="em">No hay productos terminados. Usá «Nuevo producto» para crear el primero.</div>';return;}
   if(!rows.length){$('prod-list').innerHTML='<div class="em">No se encontraron productos para "'+q+'".</div>';return;}
   let h='<table><tr><th style="width:24px"></th><th>Código</th><th>Nombre</th><th>Cliente</th><th>Categoría</th><th>Precio venta</th><th>Costo total</th><th>Costo MO</th><th>Costo mat.</th><th>Costo terc.</th><th>Ciclo total</th><th>Peso (kg)</th><th>Rend. ponderado</th><th>Estado</th></tr>';
   window._prodRows=new Map(rows.map(function(r){return [r.id,r];}));
@@ -6054,7 +6056,7 @@ function renderMaq(){
   _maqCache=new Map(rows.map(r=>[r.id,r]));
   if(_maqSel.listado!=null&&!_maqCache.has(_maqSel.listado))_maqSel.listado=null;
   if(!rows.length){
-    $('maq-list').innerHTML='<div class="em">'+(_maqRaw.length?'Sin resultados para la búsqueda.':'No hay máquinas registradas.')+'</div>';
+    $('maq-list').innerHTML='<div class="em">'+(_maqRaw.length?'Sin resultados para la búsqueda.':'No hay máquinas registradas. Usá «Nueva máquina» para cargar la primera.')+'</div>';
     actualizarToolbarMaq();return;
   }
   let h='<table><tr><th style="width:24px"></th><th>Código</th><th>Nombre</th><th>Categoría</th><th>Marca/Modelo</th><th>Ubicación</th><th>Horas</th><th>Reemplazos</th><th>Estado</th></tr>';
@@ -6127,7 +6129,7 @@ function renderMant(){
   _mantCache=new Map(rows.map(r=>[r.id,r]));
   if(_maqSel.mantenimiento!=null&&!_mantCache.has(_maqSel.mantenimiento))_maqSel.mantenimiento=null;
   if(!rows.length){
-    $('mant-list').innerHTML='<div class="em">'+(_mantRaw.length?'Sin resultados para la búsqueda.':'No hay tareas de mantenimiento.')+'</div>';
+    $('mant-list').innerHTML='<div class="em">'+(_mantRaw.length?'Sin resultados para la búsqueda.':'No hay tareas de mantenimiento. Usá «Nueva tarea» para programar la primera.')+'</div>';
     actualizarToolbarMaq();return;
   }
   let h='<table><tr><th style="width:24px"></th><th>Máquina</th><th>Tarea</th><th>Tipo</th><th>Frecuencia</th><th>Última</th><th>Próxima</th><th>Responsable</th><th>Estado</th></tr>';
@@ -6202,7 +6204,7 @@ function renderTkt(){
   _tktCache=new Map(rows.map(r=>[r.id,r]));
   if(_maqSel.tickets!=null&&!_tktCache.has(_maqSel.tickets))_maqSel.tickets=null;
   if(!rows.length){
-    $('tkt-list').innerHTML='<div class="em">No hay tickets.</div>';
+    $('tkt-list').innerHTML='<div class="em">No hay tickets. Usá «Nuevo ticket» para reportar una falla de máquina.</div>';
     actualizarToolbarMaq();return;
   }
   let h='<table><tr><th style="width:24px"></th><th>Ticket</th><th>Máquina</th><th>Tipo</th><th>Descripción</th><th>Prioridad</th><th>Estado</th><th>Responsable</th><th>Tiempo de paro</th><th>Apertura</th><th>Cierre</th></tr>';
@@ -6460,7 +6462,7 @@ function renderInvFiltered(){
     actualizarToolbarInv();
     return;
   }
-  if(!rows.length){$('inv-list').innerHTML='<div class="em">'+(q?'No hay ítems que coincidan con la búsqueda.':'No hay ítems.')+'</div>';actualizarToolbarInv();return;}
+  if(!rows.length){$('inv-list').innerHTML='<div class="em">'+(q?'No hay ítems que coincidan con la búsqueda.':'No hay ítems. Usá «Agregar» para cargar el primero.')+'</div>';actualizarToolbarInv();return;}
   let h='<table><tr><th style="width:24px"></th><th>Código</th><th>Descripción</th><th>Tipo</th><th>Cat. producto</th><th>Stock</th><th>Nivel</th><th>Mín.</th><th>Máximo</th><th>Precio unit.</th><th>Proveedor</th><th>Estado</th></tr>';
   rows.forEach(r=>{
     const _cod='<a href="#" onclick="event.stopPropagation();goToMatMov('+r.id+');return false;" style="color:var(--color-text-info);text-decoration:none;font-weight:500">'+r.codigo+'</a>';
@@ -6567,7 +6569,7 @@ async function loadRecOCPend(){
       && (r.items||[]).some(function(i){return !i.sc_ott_id && (i.cantidad-i.cantidad_recibida)>0.0001;});
   });
   _recOcCache=new Map(pend.map(function(r){return [r.id,r];}));
-  if(!pend.length){$('rec-oc-pend-list').innerHTML='<div class="em">No hay OC pendientes de recibir.</div>';return;}
+  if(!pend.length){$('rec-oc-pend-list').innerHTML='<div class="em">No hay OC pendientes de recibir. Acá aparecen las OC aprobadas que todavía esperan mercadería.</div>';return;}
   let h='<table><tr><th>N°</th><th>Proveedor</th><th>Estado</th><th>Pendiente</th><th></th></tr>';
   pend.forEach(function(r){
     const pendCant=(r.items||[]).reduce(function(a,i){return a+(i.sc_ott_id?0:Math.max(0,i.cantidad-i.cantidad_recibida));},0);
@@ -6617,7 +6619,7 @@ async function saveRecOC(){
 async function loadRecOTTPend(){
   const rows=await api('/api/ott');
   const pend=(rows||[]).filter(function(r){return r.estado==='Remito emitido'||r.estado==='En proceso';});
-  if(!pend.length){$('rec-ott-pend-list').innerHTML='<div class="em">No hay OTT pendientes de retorno.</div>';return;}
+  if(!pend.length){$('rec-ott-pend-list').innerHTML='<div class="em">No hay OTT pendientes de retorno. Acá aparecen las OTT enviadas a terceros que todavía no volvieron.</div>';return;}
   let h='<table><tr><th>N°</th><th>OT origen</th><th>Producto</th><th>Proveedor</th><th>Nivel</th><th>En espera</th><th></th></tr>';
   pend.forEach(function(r){
     const enEspera=Math.max((r.cantidad_enviada||0)-(r.cantidad_recibida||0),0);
@@ -6754,7 +6756,7 @@ function provSelAccion(a){
 async function loadProv(){
   if(!_prov.length)_prov=await api('/api/proveedores');
   const el=$('prov-list');
-  if(!_prov.length){el.innerHTML='<div class="em">No hay proveedores.</div>';actualizarToolbarProv();return;}
+  if(!_prov.length){el.innerHTML='<div class="em">No hay proveedores. Usá «Agregar» para cargar el primero.</div>';actualizarToolbarProv();return;}
   const q=($('prov-search')?$('prov-search').value:'').trim().toLowerCase();
   let list=_prov;
   if(_provF) list=list.filter(function(r){return (r.estado||'Activo')===_provF;});
@@ -7106,7 +7108,7 @@ async function savePcot(){
 async function loadPres(){
   if(_presTab==='pcot') loadPcot();
   const rows=await api('/api/presupuestos');
-  if(!rows.length){$('pres-list').innerHTML='<div class="em">No hay presupuestos.</div>';return;}
+  if(!rows.length){$('pres-list').innerHTML='<div class="em">No hay presupuestos. Usá «+ Nuevo» para crear el primero.</div>';return;}
   let h='<table><tr><th>N°</th><th>Cliente</th><th>Descripción</th><th>Total</th><th>Validez</th><th>Fecha</th><th>Estado</th></tr>';
   rows.forEach(r=>{h+=`<tr><td><b>${r.numero}</b></td><td>${r.cliente_nombre||'—'}</td><td>${r.descripcion}</td><td><b>${fmtM(r.total)}</b></td><td>${r.validez_dias}d</td><td>${fmtD(r.creado)}</td><td>${sb(r.estado)}</td></tr>`;});
   $('pres-list').innerHTML=h+'</table>';
@@ -7149,7 +7151,7 @@ async function loadPronosticoVentas(){
 function renderPV(){
   const rows=_pvRows||[];
   if(!rows.length){
-    $('pv-lista').innerHTML='<div class="em">No hay pronósticos generados.</div>';
+    $('pv-lista').innerHTML='<div class="em">No hay pronósticos generados. Usá «Nuevo pronóstico» para crear el primero.</div>';
     _pvActualId = null;
     actualizarToolbarPV();
     return;
@@ -7449,7 +7451,7 @@ function _cliPuedeEditar(){ return ['admin','operario'].includes(ROL); }
 function renderCli(){
   const el=$('cli-list');
   if(!el) return;
-  if(!_cli.length){el.innerHTML='<div class="em">No hay clientes.</div>';_cliSel=null;actualizarToolbarCli();return;}
+  if(!_cli.length){el.innerHTML='<div class="em">No hay clientes. Usá «Nuevo cliente» para cargar el primero.</div>';_cliSel=null;actualizarToolbarCli();return;}
   const q=($('cli-search')?$('cli-search').value:'').trim().toLowerCase();
   let list=_cli;
   if(_cliF) list=list.filter(function(r){return (r.categoria||'')===_cliF;});
@@ -8265,7 +8267,7 @@ function empSelAccion(a){
 }
 
 function renderEmpleados(lista,q){
-  if(!_emp.length){$('emp-list').innerHTML='<div class="em">No hay empleados registrados.</div>';actualizarToolbarEmp();return;}
+  if(!_emp.length){$('emp-list').innerHTML='<div class="em">No hay empleados registrados. Usá «Nuevo empleado» para cargar el primero.</div>';actualizarToolbarEmp();return;}
   if(!lista.length){$('emp-list').innerHTML='<div class="em">No se encontraron empleados'+(q?' para "'+q+'"':'')+'.</div>';actualizarToolbarEmp(lista);return;}
   lista=lista.slice();
   if(_empSortCol){
@@ -9433,7 +9435,7 @@ function renderOCC(){
   if(qCod) rows=rows.filter(function(r){return (r.items||[]).some(function(i){return (i.producto_codigo||'').toLowerCase().includes(qCod);});});
 
   if(!rows.length){
-    $('occ-list').innerHTML='<div class="em">'+(_occRawRows.length?'Sin resultados para los filtros seleccionados.':'No hay pedidos de clientes registrados.')+'</div>';
+    $('occ-list').innerHTML='<div class="em">'+(_occRawRows.length?'Sin resultados para los filtros seleccionados.':'No hay pedidos de clientes registrados. Usá «Nueva OC» para cargar el primero.')+'</div>';
     _occSel=null;_occExpandido=null;actualizarToolbarOCC();
     return;
   }
@@ -9922,36 +9924,40 @@ function mostrarVistaCompras(v){
 // Remitos): un radio por fila, clic en la fila selecciona y los botones del
 // encabezado se habilitan según el estado de la fila elegida.
 let _scSel=null, _cotSel=null, _ocSel=null, _cotRows=new Map();
-function _cmpBtn(id,visible,habilitado){
+function _cmpBtn(id,visible,habilitado,motivo){
   const b=$(id); if(!b) return;
   b.style.display=visible?'':'none';
   b.disabled=!habilitado;
+  b.dataset.motivo=motivo||'';
 }
 function actualizarToolbarCompras(){
   const v=compView, lbl=$('cmp-sel-label');
   // Solicitudes
   const sc=_scSel?(_scRows||[]).find(function(x){return x.id===_scSel;}):null;
   const scCerrada=sc?['OC Emitida','Cerrada','Cancelada','Rechazada'].indexOf(sc.estado)!==-1:true;
-  _cmpBtn('sc-b-edit', v==='solicitudes', sc&&sc.estado!=='OC Emitida'&&sc.estado!=='Cancelada');
-  _cmpBtn('sc-b-cot', v==='solicitudes', sc&&!scCerrada);
-  _cmpBtn('sc-b-cancel', v==='solicitudes', sc&&!scCerrada);
-  _cmpBtn('sc-b-reabrir', v==='solicitudes', sc&&sc.estado==='Cancelada');
+  const scMot=sc?'La solicitud está '+sc.estado:'';
+  _cmpBtn('sc-b-edit', v==='solicitudes', sc&&sc.estado!=='OC Emitida'&&sc.estado!=='Cancelada', scMot);
+  _cmpBtn('sc-b-cot', v==='solicitudes', sc&&!scCerrada, scMot);
+  _cmpBtn('sc-b-cancel', v==='solicitudes', sc&&!scCerrada, scMot);
+  _cmpBtn('sc-b-reabrir', v==='solicitudes', sc&&sc.estado==='Cancelada', sc?'Solo para solicitudes canceladas':'');
   // Cotizaciones
   const c=_cotSel?_cotRows.get(_cotSel):null;
   const cAbierta=c&&['OC Emitida','Cerrada','Cancelada','Rechazada'].indexOf(c.solicitud_estado)===-1;
-  _cmpBtn('cot-b-sel', v==='cotizaciones', cAbierta&&!c.seleccionada);
-  _cmpBtn('cot-b-desel', v==='cotizaciones', cAbierta&&!!c.seleccionada);
-  _cmpBtn('cot-b-edit', v==='cotizaciones', cAbierta);
+  const cotMot=c&&!cAbierta?'La solicitud de esta cotización está '+(c.solicitud_estado||'cerrada'):'';
+  _cmpBtn('cot-b-sel', v==='cotizaciones', cAbierta&&!c.seleccionada, cotMot||(c?'Ya es la cotización elegida':''));
+  _cmpBtn('cot-b-desel', v==='cotizaciones', cAbierta&&!!c.seleccionada, cotMot||(c?'Esta cotización no está elegida':''));
+  _cmpBtn('cot-b-edit', v==='cotizaciones', cAbierta, cotMot);
   // OC emitidas (los botones que el rol no puede usar no se muestran)
   const oc=_ocSel&&typeof _oc_cache!=='undefined'&&_oc_cache?_oc_cache.get(_ocSel):null;
   const e=oc?oc.estado:'';
   const rolGestion=['admin','almacen','vendedor'].includes(ROL);
-  _cmpBtn('oc-b-aprobar', v==='ocs'&&['admin','vendedor'].includes(ROL), e==='Pendiente aprobacion');
+  const ocMot=oc?'No disponible para una OC en estado '+e:'';
+  _cmpBtn('oc-b-aprobar', v==='ocs'&&['admin','vendedor'].includes(ROL), e==='Pendiente aprobacion', oc?'Solo para OC pendientes de aprobación':'');
   _cmpBtn('oc-b-emitir', v==='ocs', !!oc);
-  _cmpBtn('oc-b-completar', v==='ocs'&&rolGestion, ['Aprobada','Enviada','Recibida parcial','Recibida','Cerrada'].includes(e));
-  _cmpBtn('oc-b-cerrar', v==='ocs', ['Aprobada','Enviada','Recibida parcial'].includes(e));
-  _cmpBtn('oc-b-dev', v==='ocs', !!oc&&(oc.rechazado_pendiente_devolver||0)>0.0001);
-  _cmpBtn('oc-b-anular', v==='ocs'&&rolGestion, ['Pendiente aprobacion','Aprobada','Enviada','Recibida parcial'].includes(e));
+  _cmpBtn('oc-b-completar', v==='ocs'&&rolGestion, ['Aprobada','Enviada','Recibida parcial','Recibida','Cerrada'].includes(e), ocMot);
+  _cmpBtn('oc-b-cerrar', v==='ocs', ['Aprobada','Enviada','Recibida parcial'].includes(e), oc?'Solo para OC aprobadas, enviadas o con recepción parcial':'');
+  _cmpBtn('oc-b-dev', v==='ocs', !!oc&&(oc.rechazado_pendiente_devolver||0)>0.0001, oc?'La OC no tiene piezas rechazadas pendientes de devolver':'');
+  _cmpBtn('oc-b-anular', v==='ocs'&&rolGestion, ['Pendiente aprobacion','Aprobada','Enviada','Recibida parcial'].includes(e), oc?'Solo se anula una OC que no recibió mercadería (estado actual: '+e+')':'');
   if(lbl) lbl.textContent = v==='solicitudes'?(sc?sc.numero:'–')
     : v==='cotizaciones'?(c?(c.proveedor_nombre||'Cotización'):'–')
     : (oc?oc.numero:'–');
@@ -10083,7 +10089,7 @@ function renderSC(){
   }
   if(_scSel && !rows.some(function(r){return r.id===_scSel;})) _scSel=null;
   actualizarToolbarCompras();
-  if(!rows.length){$('sc-list').innerHTML='<div class="em">No hay solicitudes.</div>';return;}
+  if(!rows.length){$('sc-list').innerHTML='<div class="em">No hay solicitudes. Usá «Nueva solicitud» o generalas desde Planificación MRP.</div>';return;}
   const cots = _scCots||[];
   const cotBySC = {};
   cots.forEach(function(c){
@@ -10272,7 +10278,7 @@ async function loadCot(){
   _cotRows=new Map(rows.map(function(r){return [r.id,r];}));
   if(_cotSel && !_cotRows.has(_cotSel)) _cotSel=null;
   actualizarToolbarCompras();
-  if(!rows.length){$('cot-list').innerHTML='<div class="em">No hay cotizaciones cargadas.</div>';return;}
+  if(!rows.length){$('cot-list').innerHTML='<div class="em">No hay cotizaciones cargadas. Seleccioná una solicitud y usá «Cotización», o «Nueva cotización».</div>';return;}
   let grouped={};
   rows.forEach(r=>{if(!grouped[r.solicitud_id])grouped[r.solicitud_id]={desc:r.solicitud_desc,qty:r.sol_cantidad,uni:r.sol_unidad,estado:r.solicitud_estado,items:[]};grouped[r.solicitud_id].items.push(r);});
   const ESTADOS_CERRADOS=['OC Emitida','Cerrada','Cancelada','Rechazada'];
@@ -10699,7 +10705,7 @@ async function loadMRP(){
     });
     $('mrp-mat').innerHTML=h+'</table>';
   }
-  if(!d.ordenes_activas.length){$('mrp-ot').innerHTML='<div class="em">No hay órdenes activas.</div>';}
+  if(!d.ordenes_activas.length){$('mrp-ot').innerHTML='<div class="em">No hay órdenes activas. Acá aparecen las OT pendientes o en proceso.</div>';}
   else{
     let h='<table><tr><th>N° OT</th><th>Cliente</th><th>Producto</th><th>Cant.</th><th>Estado</th><th>Entrega</th></tr>';
     d.ordenes_activas.forEach(r=>{h+=`<tr><td><b>${r.numero}</b></td><td>${r.cliente||'—'}</td><td>${r.producto||r.descripcion}</td><td>${r.cantidad}</td><td>${sb(r.estado)}</td><td>${fmtD(r.fecha_entrega)}</td></tr>`;});
@@ -11023,7 +11029,7 @@ function renderReq(){
   }):_reqRows;
   if(_reqSel && !filtradas.some(function(r){return r.id===_reqSel;})) _reqSel=null;
   actualizarToolbarReq();
-  if(!filtradas.length){$('req-list').innerHTML='<div class="em">No hay requerimientos.</div>';return;}
+  if(!filtradas.length){$('req-list').innerHTML='<div class="em">'+(q?'No hay requerimientos que coincidan con la búsqueda.':'No hay requerimientos.')+'</div>';return;}
   let h='<table><tr><th style="width:24px"></th><th>Número</th><th>Cliente</th><th>Código</th><th>Material / Proceso</th><th>Proveedor</th>'
     +'<th>Cant. pedida</th><th>F. Estimada</th><th>F. Entrega</th><th>Estado</th><th>Calidad</th></tr>';
   filtradas.forEach(r=>{
@@ -14129,6 +14135,71 @@ setupRoles();
     const s=t&&t.tagName==='OPTION'?t.parentNode:t;
     if(s&&s.tagName==='SELECT')filtroMultiple(s);
   },true);
+})();
+</script>
+<script>
+// ── Ayudas de guía (2026-10-19) ──────────────────────────────────────────
+// 1) Botones grises de la barra de acciones: al pasar el mouse por el
+//    encabezado, cada botón deshabilitado suma a su título el motivo
+//    (data-motivo si la pantalla lo define; si no hay fila elegida, que hay
+//    que elegir una). Los botones con data-sin-guia arman su propio título.
+// 2) Campos de los formularios: título explicativo al pasar el mouse.
+(function(){
+  function guiaBarra(card){
+    const lbl=card.querySelector('.vh-badge[id$="-sel-label"]');
+    const sinSel=!!lbl&&lbl.textContent.trim()==='–';
+    card.querySelectorAll('.vh-acciones button').forEach(function(b){
+      if(b.hasAttribute('data-sin-guia')) return;
+      if(b.title!==b.dataset.tg) b.dataset.t0=b.title||'';
+      if(b.disabled){
+        const m=b.dataset.motivo||(sinSel?'Primero seleccioná una fila de la tabla':(lbl?'No disponible para la fila seleccionada':''));
+        if(!m) return;
+        const t=b.dataset.t0?b.dataset.t0+'\n→ '+m:m;
+        b.title=t; b.dataset.tg=t;
+      }else if(b.dataset.tg&&b.title===b.dataset.tg){
+        b.title=b.dataset.t0; b.dataset.tg='';
+      }
+    });
+  }
+  document.addEventListener('mouseover',function(e){
+    const card=e.target&&e.target.closest&&e.target.closest('.vhead-card');
+    if(card) guiaBarra(card);
+  },true);
+
+  const AYUDAS={
+    'mat-min':'Por debajo de este valor el artículo aparece en Alertas de stock y como faltante en Planificación MRP',
+    'emat-min':'Por debajo de este valor el artículo aparece en Alertas de stock y como faltante en Planificación MRP',
+    'emat-max':'Hasta dónde reponer: si es mayor que el mínimo, el MRP sugiere comprar hasta este valor',
+    'op-set':'Minutos para preparar la máquina antes de empezar a producir',
+    'ope-set':'Minutos para preparar la máquina antes de empezar a producir',
+    'otop-set':'Minutos para preparar la máquina antes de empezar a producir',
+    'op-cic':'Segundos que lleva hacer una pieza en esta operación',
+    'ope-cic':'Segundos que lleva hacer una pieza en esta operación',
+    'otop-cic':'Segundos que lleva hacer una pieza en esta operación',
+    'op-tdays':'Días que tarda el tercero en devolver las piezas',
+    'lm-pla':'Días que tarda el proveedor en entregar desde que se le pide',
+    'cot-pla':'Días que tarda el proveedor en entregar desde que se le pide',
+    'pres-val':'Días que el presupuesto mantiene el precio desde su fecha',
+    'nov-qty':'Piezas buenas terminadas en esta novedad',
+    'nov-obs-qty':'Piezas con defecto o para revisar: no se cuentan como producidas OK',
+    'nov-tmin':'Horas que realmente llevó el trabajo (ej.: 1,5 = una hora y media)',
+    'reqent-noconforme':'Lo que no pasa el control: se descuenta de la cantidad aprobada',
+    'prov-cal':'1 = muy malo · 5 = excelente',
+    'maq-rep':'Otras máquinas que pueden hacer el mismo trabajo que esta',
+    'et-xbulto':'Piezas que entran en cada bulto: con el total se calcula la cantidad de bultos',
+    'mant-ftp':'Unidad con la que se mide cada cuánto se repite la tarea',
+    'mant-fvl':'Cada cuántas horas, días o semanas (según Frecuencia) se repite la tarea',
+    'ottn-ret':'Fecha en que se espera que el tercero devuelva las piezas'
+  };
+  function aplicarAyudas(){
+    Object.keys(AYUDAS).forEach(function(id){
+      const el=document.getElementById(id); if(!el) return;
+      if(!el.title) el.title=AYUDAS[id];
+      const fg=el.closest('.fg'); const lb=fg&&fg.querySelector('label');
+      if(lb&&!lb.title){ lb.title=AYUDAS[id]; lb.style.cursor='help'; }
+    });
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',aplicarAyudas); else aplicarAyudas();
 })();
 </script>
 </body>
