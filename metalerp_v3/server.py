@@ -821,14 +821,8 @@ def get_db():
         # clave cuando hay varias cuentas conectadas por la misma red local
         g.db.execute("PRAGMA journal_mode = WAL")
         g.db.execute("PRAGMA busy_timeout = 30000")
+        g.db.create_function("cant_material", 3, cant_material, deterministic=True)
     return g.db
-
-def _articulos_unificados(db=None):
-    """True si la base ya tiene productos y materiales unificados en la
-    tabla `materiales` (y `productos` es una vista de compatibilidad)."""
-    db = db or get_db()
-    r = db.execute("SELECT type FROM sqlite_master WHERE name='productos'").fetchone()
-    return bool(r) and r[0] == "view"
 
 @app.teardown_appcontext
 def close_db(e=None):
@@ -867,45 +861,95 @@ def _sc_automaticas_activas():
         return False
 
 
+def cant_material(cantidad_unit, piezas, vida_util):
+    """Cantidad de un material de una operación para procesar `piezas` piezas.
+
+    Herramienta con vida útil (piezas que hace cada una): ceil(piezas / vida
+    útil), p.ej. 100 piezas con vida útil 4 -> 25 herramientas, 101 -> 26.
+    Sin vida útil (vacía o 0): cantidad por pieza x piezas, como siempre.
+    También está registrada como función SQL (ver get_db):
+    cant_material(om.cantidad, oo.qty_requerida, om.vida_util_herramienta)."""
+    try:
+        piezas = float(piezas or 0)
+        vida = float(vida_util or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    if vida > 0:
+        return float(math.ceil(piezas / vida - 1e-9)) if piezas > 0 else 0.0
+    return float(cantidad_unit or 0) * piezas
+
+
+def _vida_util_valida(material_id, valor):
+    """Vida útil a guardar para un material de una operación: entero > 0 solo
+    si el material es de categoría Herramienta; en cualquier otro caso None."""
+    try:
+        vida = int(float(valor))
+    except (TypeError, ValueError):
+        return None
+    if vida <= 0 or not material_id:
+        return None
+    mat = query("SELECT categoria FROM materiales WHERE id=?", (material_id,), one=True)
+    return vida if mat and mat["categoria"] == "Herramienta" else None
+
+
+def siguiente_numero(tabla, prefijo, ancho, reservar=False):
+    """Próximo número correlativo de `tabla` con la forma <prefijo><N>, N con
+    `ancho` dígitos: siguiente_numero("ordenes", "OT-", 3) -> "OT-169". Las
+    series por año llevan el año en el prefijo ("LOTE-2026-").
+
+    Parte del número más alto ya cargado con ese prefijo exacto; los que
+    después del prefijo no son solo dígitos (otra serie, o cargados a mano con
+    otro formato) no cuentan. Si el resultado ya existe, sigue sumando hasta
+    encontrar uno libre.
+
+    reservar=True lo hace atómico: toma el lock de escritura de la base
+    (BEGIN IMMEDIATE) antes de leer, así ninguna otra conexión puede sacar el
+    mismo número entre esta lectura y el INSERT del que llama, cuyo commit
+    libera el lock. Junto con el UNIQUE de la columna `numero`, dos altas
+    simultáneas nunca comparten número."""
+    if reservar:
+        db = get_db()
+        if not db.in_transaction:
+            db.execute("BEGIN IMMEDIATE")
+    filas = query(f"""SELECT numero FROM {tabla} WHERE SUBSTR(numero, 1, ?) = ?
+        ORDER BY CAST(SUBSTR(numero, ?) AS INTEGER) DESC, id DESC LIMIT 20""",
+        (len(prefijo), prefijo, len(prefijo) + 1))
+    n = 1
+    for f in filas:
+        resto = (f["numero"] or "")[len(prefijo):]
+        if resto.isdigit():
+            n = int(resto) + 1
+            break
+    numero = f"{prefijo}{n:0{ancho}d}"
+    while query(f"SELECT 1 FROM {tabla} WHERE numero=?", (numero,), one=True):
+        n += 1
+        numero = f"{prefijo}{n:0{ancho}d}"
+    return numero
+
+
 def next_numero_sc():
-    # Genera el próximo numero de SC (SC-0001, SC-0002, ...) de forma segura
-    # ante condiciones de carrera: antes se calculaba con un SELECT MAX+1
-    # suelto en varios lugares del código, y si dos solicitudes se creaban
-    # casi al mismo tiempo (ej: una manual y otra automática por stock bajo)
-    # ambas calculaban el mismo número -> UNIQUE constraint failed.
-    # Con BEGIN IMMEDIATE tomamos el lock de escritura antes de leer, así
-    # ninguna otra conexión puede colarse entre el SELECT y el INSERT.
+    # Próximo número de SC (SC-0001, SC-0002, ...) a salvo de condiciones de
+    # carrera: si dos solicitudes se crean casi al mismo tiempo (ej: una
+    # manual y otra automática por stock bajo) podían calcular el mismo número
+    # -> UNIQUE constraint failed. Con BEGIN IMMEDIATE tomamos el lock de
+    # escritura antes de leer, así ninguna otra conexión puede colarse entre
+    # el SELECT y el INSERT. Las series SC-PROD-0003 y SC-TERC-0005 (MRP y
+    # faltantes de terceros) son independientes y no cuentan acá.
     db = get_db()
     db.execute("BEGIN IMMEDIATE")
     try:
-        # Solo consideramos numeros con el formato SC-0001 (excluyendo
-        # variantes como SC-PROD-0003 o SC-TERC-0005, que son series
-        # independientes generadas por MRP y por faltantes de terceros).
-        last = db.execute("""SELECT numero FROM solicitudes_compra
-            WHERE numero GLOB 'SC-[0-9][0-9][0-9][0-9]'
-            ORDER BY CAST(SUBSTR(numero,4) AS INTEGER) DESC LIMIT 1""").fetchone()
-        try: n = int(last["numero"].split("-")[1]) + 1 if last else 1
-        except: n = 1
-        return f"SC-{n:04d}"
+        return siguiente_numero("solicitudes_compra", "SC-", 4)
     except:
         db.rollback()
         raise
 
 def next_numero_oc():
-    # Mismo problema que next_numero_sc: antes se calculaba con un SELECT
-    # MAX(id)+1 suelto (además parseando el numero del último id, sin
-    # filtrar por formato), y dos OC creadas casi al mismo tiempo (o un
-    # doble-click) podían calcular el mismo número -> UNIQUE constraint
-    # failed. BEGIN IMMEDIATE toma el lock de escritura antes de leer.
+    # Mismo problema que next_numero_sc (dos OC creadas casi al mismo tiempo,
+    # o un doble-click): BEGIN IMMEDIATE toma el lock de escritura antes de leer.
     db = get_db()
     db.execute("BEGIN IMMEDIATE")
     try:
-        last = db.execute("""SELECT numero FROM ordenes_compra
-            WHERE numero GLOB 'OCP-[0-9][0-9][0-9][0-9]'
-            ORDER BY CAST(SUBSTR(numero,5) AS INTEGER) DESC LIMIT 1""").fetchone()
-        try: n = int(last["numero"].split("-")[1]) + 1 if last else 1
-        except: n = 1
-        return f"OCP-{n:04d}"
+        return siguiente_numero("ordenes_compra", "OCP-", 4)
     except:
         db.rollback()
         raise
@@ -1060,9 +1104,9 @@ def _copiar_materiales_a_ot_op(oo_id, proceso_op_id):
     if not oo_id or not proceso_op_id:
         return
     execute("DELETE FROM orden_operacion_materiales WHERE orden_operacion_id=?", (oo_id,))
-    for r in query("SELECT material_id,producto_id,cantidad,unidad,tipo FROM operacion_materiales WHERE operacion_id=?", (proceso_op_id,)):
-        execute("""INSERT INTO orden_operacion_materiales (orden_operacion_id,material_id,producto_id,cantidad,unidad,tipo)
-                   VALUES (?,?,?,?,?,?)""", (oo_id, r["material_id"], r["producto_id"], r["cantidad"], r["unidad"], r["tipo"] or "material"))
+    for r in query("SELECT material_id,producto_id,cantidad,unidad,tipo,vida_util_herramienta FROM operacion_materiales WHERE operacion_id=?", (proceso_op_id,)):
+        execute("""INSERT INTO orden_operacion_materiales (orden_operacion_id,material_id,producto_id,cantidad,unidad,tipo,vida_util_herramienta)
+                   VALUES (?,?,?,?,?,?,?)""", (oo_id, r["material_id"], r["producto_id"], r["cantidad"], r["unidad"], r["tipo"] or "material", r["vida_util_herramienta"]))
 
 
 def _tiene_insumo_material(materiales):
@@ -1120,7 +1164,7 @@ def _materiales_ott_pendientes_por_operacion(orden_id, oo_id):
     if not op or op["orden_id"] != orden_id:
         return []
     try:
-        orden_num = int(op["orden"])
+        orden_num = float(op["orden"])
     except (TypeError, ValueError):
         return []
     # Tercerizada previa MÁS CERCANA (mayor "orden" que sea < la de esta
@@ -1132,8 +1176,8 @@ def _materiales_ott_pendientes_por_operacion(orden_id, oo_id):
         JOIN ordenes_tercerizado ott ON ott.operacion_id=oo.id
         LEFT JOIN lotes l ON l.id=ott.lote_retorno_id
         WHERE oo.orden_id=? AND oo.es_tercerizada=1 AND ott.es_ultimo_nivel=0
-          AND CAST(oo.orden AS INTEGER) < ?
-        ORDER BY CAST(oo.orden AS INTEGER) DESC LIMIT 1""", (orden_id, orden_num), one=True)
+          AND CAST(oo.orden AS REAL) < ?
+        ORDER BY CAST(oo.orden AS REAL) DESC LIMIT 1""", (orden_id, orden_num), one=True)
     if not terc_prev or not terc_prev["material_id"]:
         return []
     mat = query("SELECT id,descripcion,unidad,categoria FROM materiales WHERE id=?",
@@ -1239,7 +1283,7 @@ CAMPOS_MONETARIOS = frozenset({
     # Montos / totales de dinero
     "monto", "monto_total", "monto_pedido", "monto_entregado",
     "monto_compras_pend", "total_monto_pedido", "total_monto_entregado",
-    "subtotal", "importe", "exceso_monto",
+    "subtotal", "importe", "exceso_monto", "precio_total",
     # Facturación
     "facturacion", "facturacion_mes", "facturacion_historico",
     "facturado", "total_facturado",
@@ -1367,115 +1411,208 @@ PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS usuarios (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL, password TEXT NOT NULL,
+    username TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
     nombre TEXT NOT NULL,
     rol TEXT NOT NULL,
     activo INTEGER DEFAULT 1,
-    creado TEXT DEFAULT (datetime('now','localtime')));
+    creado TEXT DEFAULT (datetime('now','localtime'))
+);
 
 CREATE TABLE IF NOT EXISTS categorias_maquina (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nombre TEXT UNIQUE NOT NULL, descripcion TEXT,
-    creado TEXT DEFAULT (datetime('now','localtime')));
+    nombre TEXT UNIQUE NOT NULL,
+    descripcion TEXT,
+    creado TEXT DEFAULT (datetime('now','localtime'))
+);
 
 CREATE TABLE IF NOT EXISTS maquinas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    codigo TEXT UNIQUE NOT NULL, nombre TEXT NOT NULL,
+    codigo TEXT UNIQUE NOT NULL,
+    nombre TEXT NOT NULL,
     categoria_id INTEGER REFERENCES categorias_maquina(id),
-    marca TEXT, modelo TEXT, numero_serie TEXT, anio INTEGER,
-    ubicacion TEXT, estado TEXT DEFAULT 'Operativa',
-    horas_uso REAL DEFAULT 0, obs TEXT,
-    creado TEXT DEFAULT (datetime('now','localtime')));
+    marca TEXT,
+    modelo TEXT,
+    numero_serie TEXT,
+    anio INTEGER,
+    ubicacion TEXT,
+    estado TEXT DEFAULT 'Operativa',
+    horas_uso REAL DEFAULT 0,
+    obs TEXT,
+    creado TEXT DEFAULT (datetime('now','localtime'))
+);
 
 CREATE TABLE IF NOT EXISTS maquina_reemplazos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     maquina_id INTEGER NOT NULL REFERENCES maquinas(id) ON DELETE CASCADE,
     reemplazo_id INTEGER NOT NULL REFERENCES maquinas(id) ON DELETE CASCADE,
-    UNIQUE(maquina_id, reemplazo_id));
+    UNIQUE(maquina_id, reemplazo_id)
+);
 
 CREATE TABLE IF NOT EXISTS mantenimiento_plan (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     maquina_id INTEGER NOT NULL REFERENCES maquinas(id) ON DELETE CASCADE,
-    tarea TEXT NOT NULL, tipo TEXT DEFAULT 'Frecuencia fija',
-    frecuencia_tipo TEXT, frecuencia_valor INTEGER,
-    ultima_fecha TEXT, proxima_fecha TEXT,
-    responsable TEXT, obs TEXT,
-    creado TEXT DEFAULT (datetime('now','localtime')));
+    tarea TEXT NOT NULL,
+    tipo TEXT DEFAULT 'Frecuencia fija',
+    frecuencia_tipo TEXT,
+    frecuencia_valor INTEGER,
+    ultima_fecha TEXT,
+    proxima_fecha TEXT,
+    responsable TEXT,
+    obs TEXT,
+    creado TEXT DEFAULT (datetime('now','localtime'))
+);
 
 CREATE TABLE IF NOT EXISTS tickets_reparacion (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     numero TEXT UNIQUE NOT NULL,
     maquina_id INTEGER NOT NULL REFERENCES maquinas(id),
-    tipo TEXT DEFAULT 'Correctivo', descripcion TEXT NOT NULL,
-    prioridad TEXT DEFAULT 'Normal', estado TEXT DEFAULT 'Abierto',
+    tipo TEXT DEFAULT 'Correctivo',
+    descripcion TEXT NOT NULL,
+    prioridad TEXT DEFAULT 'Normal',
+    estado TEXT DEFAULT 'Abierto',
     responsable TEXT,
     fecha_apertura TEXT DEFAULT (datetime('now','localtime')),
-    fecha_cierre TEXT, horas_paro REAL DEFAULT 0,
-    horas_ajuste REAL DEFAULT 0,
-    costo REAL DEFAULT 0, solucion TEXT,
+    fecha_cierre TEXT,
+    horas_paro REAL DEFAULT 0,
+    costo REAL DEFAULT 0,
+    solucion TEXT,
     creado_por INTEGER REFERENCES usuarios(id),
-    creado TEXT DEFAULT (datetime('now','localtime')));
+    creado TEXT DEFAULT (datetime('now','localtime')),
+    horas_ajuste REAL DEFAULT 0
+);
 
 CREATE TABLE IF NOT EXISTS categorias_producto (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nombre TEXT UNIQUE NOT NULL, descripcion TEXT,
-    creado TEXT DEFAULT (datetime('now','localtime')));
+    nombre TEXT UNIQUE NOT NULL,
+    descripcion TEXT,
+    creado TEXT DEFAULT (datetime('now','localtime'))
+);
 
 CREATE TABLE IF NOT EXISTS proveedores (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    razon TEXT NOT NULL, cuit TEXT, contacto TEXT,
-    telefono TEXT, email TEXT, materiales TEXT,
-    plazo_dias INTEGER DEFAULT 3, calificacion INTEGER DEFAULT 5,
-    estado TEXT DEFAULT 'Activo', obs TEXT,
-    creado TEXT DEFAULT (datetime('now','localtime')));
+    razon TEXT NOT NULL,
+    cuit TEXT,
+    contacto TEXT,
+    telefono TEXT,
+    email TEXT,
+    materiales TEXT,
+    plazo_dias INTEGER DEFAULT 3,
+    calificacion INTEGER DEFAULT 5,
+    estado TEXT DEFAULT 'Activo',
+    obs TEXT,
+    creado TEXT DEFAULT (datetime('now','localtime')),
+    categoria_compra TEXT
+);
 
 CREATE TABLE IF NOT EXISTS materiales (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    codigo TEXT UNIQUE NOT NULL, descripcion TEXT NOT NULL,
+    codigo TEXT UNIQUE NOT NULL,
+    descripcion TEXT NOT NULL,
     categoria TEXT DEFAULT 'Material',
     categoria_producto_id INTEGER REFERENCES categorias_producto(id),
-    producto_id INTEGER REFERENCES productos(id),
-    unidad TEXT DEFAULT 'kg', stock REAL DEFAULT 0,
-    stock_min REAL DEFAULT 0, stock_max REAL DEFAULT 0,
+    unidad TEXT DEFAULT 'kg',
+    stock REAL DEFAULT 0,
+    stock_min REAL DEFAULT 0,
+    stock_max REAL DEFAULT 0,
     precio_unit REAL DEFAULT 0,
     proveedor_id INTEGER REFERENCES proveedores(id),
     obs TEXT,
+    actualizado TEXT DEFAULT (datetime('now','localtime')),
     activo INTEGER DEFAULT 1,
-    actualizado TEXT DEFAULT (datetime('now','localtime')));
+    producto_id INTEGER REFERENCES materiales(id),
+    pse_firma TEXT,
+    operacion_id INTEGER REFERENCES proceso_operaciones(id),
+    tipo TEXT CHECK(tipo IN ('MP','PSE','PSET')),
+    cliente_id INTEGER REFERENCES clientes(id),
+    codigo_barras TEXT,
+    descripcion_larga TEXT,
+    tiempo_total_hs REAL DEFAULT 0,
+    costo_mat REAL DEFAULT 0,
+    costo_mo REAL DEFAULT 0,
+    precio_venta REAL DEFAULT 0,
+    peso_kg REAL DEFAULT 0,
+    capacidad_cajon INTEGER,
+    creado TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_materiales_producto_categoria_sinop ON materiales(producto_id, categoria) WHERE producto_id IS NOT NULL AND operacion_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_materiales_prod_cat_op_firma ON materiales(producto_id, categoria, operacion_id, COALESCE(pse_firma,'')) WHERE producto_id IS NOT NULL AND operacion_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_materiales_categoria ON materiales(categoria);
+CREATE VIEW IF NOT EXISTS productos AS
+SELECT id,
+       codigo,
+       descripcion            AS nombre,
+       descripcion_larga      AS descripcion,
+       categoria_producto_id  AS categoria_id,
+       unidad,
+       tiempo_total_hs,
+       costo_mat,
+       costo_mo,
+       precio_venta,
+       activo,
+       obs,
+       creado,
+       peso_kg,
+       cliente_id,
+       capacidad_cajon,
+       CASE WHEN categoria='Producto terminado' THEN 'PT' END AS tipo,
+       codigo_barras,
+       categoria              AS tipo_articulo
+FROM materiales;
+CREATE TRIGGER IF NOT EXISTS trg_materiales_pt_alta
+    AFTER INSERT ON materiales
+    WHEN NEW.categoria='Producto terminado' AND (NEW.producto_id IS NULL OR NEW.producto_id<>NEW.id)
+    BEGIN
+        UPDATE materiales SET producto_id=NEW.id WHERE id=NEW.id;
+    END;
+CREATE TRIGGER IF NOT EXISTS trg_materiales_pt_cambio
+    AFTER UPDATE OF categoria, producto_id ON materiales
+    WHEN NEW.categoria='Producto terminado' AND (NEW.producto_id IS NULL OR NEW.producto_id<>NEW.id)
+    BEGIN
+        UPDATE materiales SET producto_id=NEW.id WHERE id=NEW.id;
+    END;
+CREATE TRIGGER IF NOT EXISTS trg_materiales_pt_baja
+    AFTER UPDATE OF categoria ON materiales
+    WHEN OLD.categoria='Producto terminado' AND NEW.categoria<>'Producto terminado'
+         AND NEW.producto_id=NEW.id
+    BEGIN
+        UPDATE materiales SET producto_id=NULL WHERE id=NEW.id;
+    END;
 
 CREATE TABLE IF NOT EXISTS proveedor_materiales (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     proveedor_id INTEGER NOT NULL REFERENCES proveedores(id) ON DELETE CASCADE,
     material_id INTEGER NOT NULL REFERENCES materiales(id) ON DELETE CASCADE,
-    precio_unit REAL DEFAULT 0, plazo_dias INTEGER DEFAULT 3,
+    precio_unit REAL DEFAULT 0,
+    plazo_dias INTEGER DEFAULT 3,
     es_principal INTEGER DEFAULT 0,
-    UNIQUE(proveedor_id, material_id));
+    UNIQUE(proveedor_id, material_id)
+);
 
 CREATE TABLE IF NOT EXISTS clientes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    razon TEXT NOT NULL, cuit TEXT UNIQUE, iva TEXT,
-    rubro TEXT, localidad TEXT, direccion TEXT,
-    contacto TEXT, cargo TEXT, telefono TEXT, email TEXT,
-    categoria TEXT DEFAULT 'Regular', plazo_pago TEXT,
-    trabajos TEXT, obs TEXT,
-    creado TEXT DEFAULT (datetime('now','localtime')));
-
-CREATE TABLE IF NOT EXISTS productos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    codigo TEXT UNIQUE NOT NULL, nombre TEXT NOT NULL,
-    descripcion TEXT,
-    categoria_id INTEGER REFERENCES categorias_producto(id),
-    unidad TEXT DEFAULT 'unid',
-    tiempo_total_hs REAL DEFAULT 0,
-    costo_mat REAL DEFAULT 0, costo_mo REAL DEFAULT 0,
-    precio_venta REAL DEFAULT 0,
-    activo INTEGER DEFAULT 1, obs TEXT,
-    creado TEXT DEFAULT (datetime('now','localtime')));
+    razon TEXT NOT NULL,
+    cuit TEXT UNIQUE,
+    iva TEXT,
+    rubro TEXT,
+    localidad TEXT,
+    direccion TEXT,
+    contacto TEXT,
+    cargo TEXT,
+    telefono TEXT,
+    email TEXT,
+    categoria TEXT DEFAULT 'Regular',
+    plazo_pago TEXT,
+    trabajos TEXT,
+    obs TEXT,
+    creado TEXT DEFAULT (datetime('now','localtime'))
+);
 
 CREATE TABLE IF NOT EXISTS proceso_operaciones (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    producto_id INTEGER NOT NULL REFERENCES productos(id) ON DELETE CASCADE,
-    orden INTEGER DEFAULT 1, nombre TEXT NOT NULL,
+    producto_id INTEGER NOT NULL REFERENCES materiales(id) ON DELETE CASCADE,
+    orden INTEGER DEFAULT 1,
+    nombre TEXT NOT NULL,
     descripcion TEXT,
     categoria_maquina_id INTEGER REFERENCES categorias_maquina(id),
     maquina_id INTEGER REFERENCES maquinas(id),
@@ -1485,39 +1622,128 @@ CREATE TABLE IF NOT EXISTS proceso_operaciones (
     proveedor_id INTEGER REFERENCES proveedores(id),
     precio_tercerizado REAL DEFAULT 0,
     tiempo_minimo_dias INTEGER DEFAULT 0,
+    obs TEXT,
     volumen_agrupado INTEGER DEFAULT 0,
-    valor_recalculado REAL DEFAULT 0,
-    obs TEXT);
+    valor_recalculado REAL DEFAULT 0
+);
 
 CREATE TABLE IF NOT EXISTS operacion_materiales (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     operacion_id INTEGER NOT NULL REFERENCES proceso_operaciones(id) ON DELETE CASCADE,
-    material_id INTEGER NOT NULL REFERENCES materiales(id),
-    cantidad REAL NOT NULL, unidad TEXT);
+    material_id INTEGER REFERENCES materiales(id),
+    producto_id INTEGER REFERENCES materiales(id),
+    cantidad REAL NOT NULL,
+    unidad TEXT,
+    tipo TEXT DEFAULT 'material',
+    vida_util_herramienta INTEGER
+);
 
 CREATE TABLE IF NOT EXISTS ordenes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     numero TEXT UNIQUE NOT NULL,
     cliente_id INTEGER REFERENCES clientes(id),
-    producto_id INTEGER REFERENCES productos(id),
-    descripcion TEXT NOT NULL, detalle TEXT,
-    cantidad REAL DEFAULT 1, operario TEXT, maquina TEXT,
-    prioridad TEXT DEFAULT 'Normal', estado TEXT DEFAULT 'Pendiente',
-    fecha_inicio TEXT, fecha_entrega TEXT,
-    costo_mat REAL DEFAULT 0, costo_mo REAL DEFAULT 0,
-    precio_venta REAL DEFAULT 0, obs TEXT,
+    producto_id INTEGER REFERENCES materiales(id),
+    descripcion TEXT NOT NULL,
+    detalle TEXT,
+    cantidad REAL DEFAULT 1,
+    operario TEXT,
+    maquina TEXT,
+    prioridad TEXT DEFAULT 'Normal',
+    estado TEXT DEFAULT 'Pendiente',
+    fecha_inicio TEXT,
+    fecha_entrega TEXT,
+    costo_mat REAL DEFAULT 0,
+    costo_mo REAL DEFAULT 0,
+    precio_venta REAL DEFAULT 0,
+    obs TEXT,
     creado TEXT DEFAULT (datetime('now','localtime')),
-    actualizado TEXT DEFAULT (datetime('now','localtime')));
+    actualizado TEXT DEFAULT (datetime('now','localtime')),
+    stock_descontado INTEGER DEFAULT 0,
+    requiere_material INTEGER DEFAULT 1
+);
+
+-- Pedidos de cotización que llegan de clientes (pestaña dentro de
+-- Presupuestos). Un pedido = un producto terminado, una cantidad y el precio
+-- total por esa cantidad; el unitario se deriva en pantalla.
+CREATE TABLE IF NOT EXISTS pedidos_cotizacion (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    numero TEXT UNIQUE NOT NULL,
+    fecha TEXT NOT NULL DEFAULT (date('now','localtime')),
+    cliente_id INTEGER NOT NULL REFERENCES clientes(id),
+    producto_id INTEGER NOT NULL REFERENCES materiales(id),
+    cantidad REAL NOT NULL CHECK(cantidad > 0),
+    precio_total REAL,
+    creado_por INTEGER REFERENCES usuarios(id),
+    creado TEXT DEFAULT (datetime('now','localtime'))
+);
+
+-- Cajones: piezas físicas de una OT agrupadas desde la 1ª operación hasta que
+-- Calidad las libera (numero = cajon-<código de la pieza>-NNN, nunca se
+-- reutiliza: un cajón no se borra, pasa a Baja). Lo que hizo cada paso en
+-- cada cajón queda en novedad_cajones (operaciones internas) y ott_cajones
+-- (tercerizadas); lo que salió por remito, en remito_item_cajones.
+CREATE TABLE IF NOT EXISTS cajones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    numero TEXT UNIQUE NOT NULL,
+    orden_id INTEGER NOT NULL REFERENCES ordenes(id),
+    orden_origen_id INTEGER REFERENCES ordenes(id),
+    producto_id INTEGER NOT NULL REFERENCES materiales(id),
+    lote_id INTEGER REFERENCES lotes(id),
+    capacidad INTEGER NOT NULL,
+    cantidad REAL NOT NULL DEFAULT 0,
+    cantidad_liberada REAL NOT NULL DEFAULT 0,
+    cantidad_rechazada REAL NOT NULL DEFAULT 0,
+    cantidad_remitida REAL NOT NULL DEFAULT 0,
+    estado TEXT NOT NULL DEFAULT 'En proceso',
+    calidad_por INTEGER REFERENCES usuarios(id),
+    calidad_fecha TEXT,
+    calidad_obs TEXT,
+    obs TEXT,
+    creado TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_cajones_orden ON cajones(orden_id);
+CREATE INDEX IF NOT EXISTS idx_cajones_lote ON cajones(lote_id);
+
+CREATE TABLE IF NOT EXISTS novedad_cajones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    novedad_id INTEGER NOT NULL REFERENCES novedades_produccion(id) ON DELETE CASCADE,
+    cajon_id INTEGER NOT NULL REFERENCES cajones(id),
+    cantidad REAL NOT NULL CHECK(cantidad > 0),
+    UNIQUE(novedad_id, cajon_id)
+);
+CREATE INDEX IF NOT EXISTS idx_novedad_cajones_cajon ON novedad_cajones(cajon_id);
+
+CREATE TABLE IF NOT EXISTS ott_cajones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    orden_operacion_id INTEGER NOT NULL REFERENCES orden_operaciones(id) ON DELETE CASCADE,
+    cajon_id INTEGER NOT NULL REFERENCES cajones(id),
+    cantidad REAL NOT NULL CHECK(cantidad > 0),
+    UNIQUE(orden_operacion_id, cajon_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ott_cajones_cajon ON ott_cajones(cajon_id);
+
+CREATE TABLE IF NOT EXISTS remito_item_cajones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    remito_item_id INTEGER NOT NULL REFERENCES remito_items(id) ON DELETE CASCADE,
+    cajon_id INTEGER NOT NULL REFERENCES cajones(id),
+    cantidad REAL NOT NULL CHECK(cantidad > 0)
+);
+CREATE INDEX IF NOT EXISTS idx_remito_item_cajones_cajon ON remito_item_cajones(cajon_id);
 
 CREATE TABLE IF NOT EXISTS presupuestos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     numero TEXT UNIQUE NOT NULL,
     cliente_id INTEGER REFERENCES clientes(id),
-    descripcion TEXT NOT NULL, items TEXT,
-    subtotal REAL DEFAULT 0, iva_pct REAL DEFAULT 21,
-    total REAL DEFAULT 0, validez_dias INTEGER DEFAULT 30,
-    estado TEXT DEFAULT 'Borrador', obs TEXT,
-    creado TEXT DEFAULT (datetime('now','localtime')));
+    descripcion TEXT NOT NULL,
+    items TEXT,
+    subtotal REAL DEFAULT 0,
+    iva_pct REAL DEFAULT 21,
+    total REAL DEFAULT 0,
+    validez_dias INTEGER DEFAULT 30,
+    estado TEXT DEFAULT 'Borrador',
+    obs TEXT,
+    creado TEXT DEFAULT (datetime('now','localtime'))
+);
 
 CREATE TABLE IF NOT EXISTS lotes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1527,17 +1753,17 @@ CREATE TABLE IF NOT EXISTS lotes (
     cantidad_disponible REAL NOT NULL,
     cantidad_activa REAL DEFAULT 0,
     cantidad_rechazada REAL DEFAULT 0,
+    cantidad_reservada REAL DEFAULT 0,
     proveedor_id INTEGER REFERENCES proveedores(id),
     fecha_ingreso TEXT DEFAULT (datetime('now','localtime')),
     referencia_proveedor TEXT,
     certificado TEXT,
-    estado TEXT DEFAULT 'Ingresado' CHECK(estado IN ('Ingresado','Aprobado','Agotado','Rechazado')),
+    estado TEXT DEFAULT 'Ingresado' CHECK(estado IN ('Ingresado','Abierto','Aprobado','Agotado','Rechazado')),
     obs TEXT,
     creado_por INTEGER REFERENCES usuarios(id),
-    -- 1 = las piezas de este lote YA se sumaron a materiales.stock al crearlo
-    -- (entraron al deposito). Calidad no vuelve a moverlas al clasificarlas.
-    stock_computado INTEGER DEFAULT 0,
-    creado TEXT DEFAULT (datetime('now','localtime')));
+    creado TEXT DEFAULT (datetime('now','localtime')),
+    stock_computado INTEGER DEFAULT 0
+);
 
 CREATE TABLE IF NOT EXISTS remitos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1548,7 +1774,12 @@ CREATE TABLE IF NOT EXISTS remitos (
     estado TEXT DEFAULT 'Emitido',
     obs TEXT,
     creado_por INTEGER REFERENCES usuarios(id),
-    creado TEXT DEFAULT (datetime('now','localtime')));
+    creado TEXT DEFAULT (datetime('now','localtime')),
+    tipo TEXT DEFAULT 'entrega_cliente',
+    ott_id INTEGER REFERENCES ordenes_tercerizado(id),
+    oc_id INTEGER REFERENCES ordenes_compra(id),
+    ott_cantidad REAL
+);
 
 CREATE TABLE IF NOT EXISTS remito_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1557,7 +1788,8 @@ CREATE TABLE IF NOT EXISTS remito_items (
     lote_id INTEGER NOT NULL REFERENCES lotes(id),
     orden_cliente_item_id INTEGER REFERENCES ordenes_cliente_items(id),
     cantidad REAL NOT NULL,
-    obs TEXT);
+    obs TEXT
+);
 
 CREATE TABLE IF NOT EXISTS orden_lotes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1566,15 +1798,20 @@ CREATE TABLE IF NOT EXISTS orden_lotes (
     material_id INTEGER NOT NULL REFERENCES materiales(id),
     cantidad_usada REAL NOT NULL,
     fecha TEXT DEFAULT (datetime('now','localtime')),
-    UNIQUE(orden_id, lote_id));
+    cantidad_consumida REAL DEFAULT 0,
+    UNIQUE(orden_id, lote_id)
+);
 
 CREATE TABLE IF NOT EXISTS movimientos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     material_id INTEGER REFERENCES materiales(id),
     lote_id INTEGER REFERENCES lotes(id),
-    tipo TEXT NOT NULL, cantidad REAL NOT NULL,
-    referencia TEXT, usuario_id INTEGER REFERENCES usuarios(id),
-    fecha TEXT DEFAULT (datetime('now','localtime')));
+    tipo TEXT NOT NULL,
+    cantidad REAL NOT NULL,
+    referencia TEXT,
+    usuario_id INTEGER REFERENCES usuarios(id),
+    fecha TEXT DEFAULT (datetime('now','localtime'))
+);
 
 CREATE TABLE IF NOT EXISTS recepciones (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1587,13 +1824,15 @@ CREATE TABLE IF NOT EXISTS recepciones (
     lote_id INTEGER REFERENCES lotes(id),
     obs TEXT,
     creado_por INTEGER REFERENCES usuarios(id),
-    fecha TEXT DEFAULT (datetime('now','localtime')));
+    fecha TEXT DEFAULT (datetime('now','localtime'))
+);
 
 CREATE TABLE IF NOT EXISTS producto_clientes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    producto_id INTEGER NOT NULL REFERENCES productos(id) ON DELETE CASCADE,
+    producto_id INTEGER NOT NULL REFERENCES materiales(id) ON DELETE CASCADE,
     cliente_id INTEGER NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
-    UNIQUE(producto_id, cliente_id));
+    UNIQUE(producto_id, cliente_id)
+);
 
 CREATE TABLE IF NOT EXISTS orden_operaciones (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1611,7 +1850,8 @@ CREATE TABLE IF NOT EXISTS orden_operaciones (
     es_tercerizada INTEGER DEFAULT 0,
     proveedor_id INTEGER REFERENCES proveedores(id),
     precio_tercerizado REAL DEFAULT 0,
-    tiempo_minimo_dias INTEGER DEFAULT 0);
+    tiempo_minimo_dias INTEGER DEFAULT 0
+);
 
 -- Scheduling de producción: cada renglón es un bloque de trabajo (una jornada
 -- de 9 o 12 h) de una operación de OT en una máquina, con su operario.
@@ -1625,10 +1865,11 @@ CREATE TABLE IF NOT EXISTS planificacion (
     jornada_horas INTEGER DEFAULT 9,
     cantidad_plan REAL DEFAULT 0,
     obs TEXT,
-    creado TEXT DEFAULT (datetime('now','localtime')));
+    creado TEXT DEFAULT (datetime('now','localtime'))
+);
 CREATE INDEX IF NOT EXISTS idx_planif_maq ON planificacion(maquina_id, inicio);
 CREATE INDEX IF NOT EXISTS idx_planif_emp ON planificacion(empleado_id, inicio);
-CREATE INDEX IF NOT EXISTS idx_planif_op  ON planificacion(orden_operacion_id);
+CREATE INDEX IF NOT EXISTS idx_planif_op ON planificacion(orden_operacion_id);
 
 CREATE TABLE IF NOT EXISTS orden_materiales (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1636,27 +1877,30 @@ CREATE TABLE IF NOT EXISTS orden_materiales (
     material_id INTEGER NOT NULL REFERENCES materiales(id),
     cantidad_requerida REAL DEFAULT 0,
     cantidad_asignada REAL DEFAULT 0,
-    unidad TEXT);
+    unidad TEXT
+);
 
 CREATE TABLE IF NOT EXISTS empleados (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     legajo TEXT UNIQUE NOT NULL,
     nombre TEXT NOT NULL,
-    apellido TEXT NOT NULL,
+    apellido TEXT,
     cargo TEXT,
-    tipo TEXT DEFAULT 'Indirecto' CHECK(tipo IN ('Directo','Indirecto')),
+    tipo TEXT DEFAULT 'Indirecto',
     turno TEXT,
     activo INTEGER DEFAULT 1,
     obs TEXT,
+    creado TEXT DEFAULT (datetime('now','localtime')),
     fecha_alta TEXT,
-    fecha_baja TEXT,
-    creado TEXT DEFAULT (datetime('now','localtime')));
+    fecha_baja TEXT
+);
 
 CREATE TABLE IF NOT EXISTS empleado_maquinas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     empleado_id INTEGER NOT NULL REFERENCES empleados(id) ON DELETE CASCADE,
     categoria_maquina_id INTEGER NOT NULL REFERENCES categorias_maquina(id) ON DELETE CASCADE,
-    UNIQUE(empleado_id, categoria_maquina_id));
+    UNIQUE(empleado_id, categoria_maquina_id)
+);
 
 CREATE TABLE IF NOT EXISTS ordenes_cliente (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1666,24 +1910,27 @@ CREATE TABLE IF NOT EXISTS ordenes_cliente (
     fecha_entrega TEXT,
     estado TEXT DEFAULT 'Recibida',
     obs TEXT,
-    creado TEXT DEFAULT (datetime('now','localtime')));
+    creado TEXT DEFAULT (datetime('now','localtime'))
+);
 
 CREATE TABLE IF NOT EXISTS ordenes_cliente_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     orden_cliente_id INTEGER NOT NULL REFERENCES ordenes_cliente(id) ON DELETE CASCADE,
-    producto_id INTEGER NOT NULL REFERENCES productos(id),
+    producto_id INTEGER NOT NULL REFERENCES materiales(id),
     cantidad REAL NOT NULL,
     precio_unit REAL DEFAULT 0,
     fecha_deseada TEXT,
     ot_id INTEGER REFERENCES ordenes(id),
-    obs TEXT);
+    obs TEXT
+);
 
 CREATE TABLE IF NOT EXISTS orden_cliente_item_ots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     item_id INTEGER NOT NULL REFERENCES ordenes_cliente_items(id) ON DELETE CASCADE,
     ot_id INTEGER NOT NULL REFERENCES ordenes(id),
     creado TEXT DEFAULT (datetime('now','localtime')),
-    UNIQUE(item_id, ot_id));
+    UNIQUE(item_id, ot_id)
+);
 
 CREATE TABLE IF NOT EXISTS novedades_produccion (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1691,7 +1938,6 @@ CREATE TABLE IF NOT EXISTS novedades_produccion (
     orden_id INTEGER NOT NULL REFERENCES ordenes(id),
     orden_operacion_id INTEGER NOT NULL REFERENCES orden_operaciones(id),
     empleado_id INTEGER REFERENCES empleados(id),
-    maquina_id INTEGER REFERENCES maquinas(id),
     cantidad_producida REAL NOT NULL,
     tiempo_real_min REAL NOT NULL,
     turno TEXT,
@@ -1699,24 +1945,43 @@ CREATE TABLE IF NOT EXISTS novedades_produccion (
     rendimiento_pct REAL DEFAULT 0,
     desvio INTEGER DEFAULT 0,
     obs TEXT,
-    creado_por INTEGER REFERENCES usuarios(id));
+    creado_por INTEGER REFERENCES usuarios(id),
+    maquina_id INTEGER REFERENCES maquinas(id),
+    piezas_observadas REAL DEFAULT 0,
+    tiempo_perdido REAL DEFAULT 0
+);
 
 CREATE TABLE IF NOT EXISTS novedades_eliminadas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     novedad_numero TEXT NOT NULL,
-    orden_id INTEGER, orden_numero TEXT,
-    orden_operacion_id INTEGER, operacion_nombre TEXT,
-    producto_id INTEGER, producto_nombre TEXT,
-    empleado_id INTEGER, empleado_nombre TEXT,
-    maquina_id INTEGER, maquina_nombre TEXT,
-    cantidad_producida REAL, piezas_observadas REAL,
-    tiempo_real_min REAL, tiempo_perdido REAL,
-    turno TEXT, fecha_novedad TEXT, rendimiento_pct REAL, obs TEXT,
-    novedad_creado_por INTEGER, novedad_creado_por_nombre TEXT,
+    orden_id INTEGER,
+    orden_numero TEXT,
+    orden_operacion_id INTEGER,
+    operacion_nombre TEXT,
+    producto_id INTEGER,
+    producto_nombre TEXT,
+    empleado_id INTEGER,
+    empleado_nombre TEXT,
+    maquina_id INTEGER,
+    maquina_nombre TEXT,
+    cantidad_producida REAL,
+    piezas_observadas REAL,
+    tiempo_real_min REAL,
+    tiempo_perdido REAL,
+    turno TEXT,
+    fecha_novedad TEXT,
+    rendimiento_pct REAL,
+    obs TEXT,
+    novedad_creado_por INTEGER,
+    novedad_creado_por_nombre TEXT,
     detalle_json TEXT,
     eliminado_por INTEGER REFERENCES usuarios(id),
     eliminado_por_nombre TEXT,
-    eliminado TEXT DEFAULT (datetime('now','localtime')));
+    eliminado TEXT DEFAULT (datetime('now','localtime')),
+    restaurado TEXT,
+    restaurado_por INTEGER REFERENCES usuarios(id),
+    restaurado_por_nombre TEXT
+);
 
 CREATE TABLE IF NOT EXISTS trabajo_no_productivo (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1726,7 +1991,8 @@ CREATE TABLE IF NOT EXISTS trabajo_no_productivo (
     tiempo_min REAL NOT NULL,
     fecha TEXT DEFAULT (datetime('now','localtime')),
     creado_por INTEGER REFERENCES usuarios(id),
-    creado TEXT DEFAULT (datetime('now','localtime')));
+    creado TEXT DEFAULT (datetime('now','localtime'))
+);
 
 CREATE TABLE IF NOT EXISTS solicitudes_compra (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1742,7 +2008,10 @@ CREATE TABLE IF NOT EXISTS solicitudes_compra (
     centro_costo TEXT,
     solicitante_id INTEGER REFERENCES usuarios(id),
     obs TEXT,
-    creado TEXT DEFAULT (datetime('now','localtime')));
+    creado TEXT DEFAULT (datetime('now','localtime')),
+    ott_id INTEGER REFERENCES ordenes_tercerizado(id),
+    ott_remito TEXT
+);
 
 CREATE TABLE IF NOT EXISTS cotizaciones_compra (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1753,7 +2022,8 @@ CREATE TABLE IF NOT EXISTS cotizaciones_compra (
     condicion_pago TEXT,
     seleccionada INTEGER DEFAULT 0,
     obs TEXT,
-    creado TEXT DEFAULT (datetime('now','localtime')));
+    creado TEXT DEFAULT (datetime('now','localtime'))
+);
 
 CREATE TABLE IF NOT EXISTS ordenes_compra (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1767,7 +2037,13 @@ CREATE TABLE IF NOT EXISTS ordenes_compra (
     fecha_entrega_est TEXT,
     obs TEXT,
     creado_por INTEGER REFERENCES usuarios(id),
-    creado TEXT DEFAULT (datetime('now','localtime')));
+    creado TEXT DEFAULT (datetime('now','localtime')),
+    remito_devolucion_id INTEGER REFERENCES remitos(id),
+    remito_numero TEXT,
+    fecha_completada TEXT,
+    motivo_anulacion TEXT,
+    fecha_anulada TEXT
+);
 
 CREATE TABLE IF NOT EXISTS ordenes_compra_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1778,7 +2054,12 @@ CREATE TABLE IF NOT EXISTS ordenes_compra_items (
     cantidad REAL NOT NULL,
     cantidad_recibida REAL DEFAULT 0,
     precio_unit REAL NOT NULL,
-    unidad TEXT);
+    unidad TEXT,
+    lote_id INTEGER REFERENCES lotes(id),
+    cantidad_rechazada_devuelta REAL DEFAULT 0,
+    cantidad_rechazada_reingresada REAL DEFAULT 0,
+    fecha_recibida TEXT
+);
 
 CREATE TABLE IF NOT EXISTS pronosticos_venta (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1786,22 +2067,25 @@ CREATE TABLE IF NOT EXISTS pronosticos_venta (
     estado TEXT NOT NULL DEFAULT 'Alta',
     fecha_emision TEXT NOT NULL,
     periodos INTEGER NOT NULL DEFAULT 3,
-    cliente_id INTEGER REFERENCES clientes(id),
-    creado TEXT DEFAULT (datetime('now','localtime')));
+    creado TEXT DEFAULT (datetime('now','localtime')),
+    cliente_id INTEGER REFERENCES clientes(id)
+);
 
 CREATE TABLE IF NOT EXISTS pronostico_venta_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     pronostico_id INTEGER NOT NULL REFERENCES pronosticos_venta(id) ON DELETE CASCADE,
-    producto_id INTEGER NOT NULL REFERENCES productos(id),
+    producto_id INTEGER NOT NULL REFERENCES materiales(id),
     mes TEXT NOT NULL,
     cantidad REAL NOT NULL DEFAULT 0,
-    UNIQUE(pronostico_id, producto_id, mes));
+    UNIQUE(pronostico_id, producto_id, mes)
+);
 
 CREATE TABLE IF NOT EXISTS pronostico_item_ots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     item_id INTEGER NOT NULL REFERENCES pronostico_venta_items(id) ON DELETE CASCADE,
     ot_id INTEGER NOT NULL REFERENCES ordenes(id),
-    UNIQUE(item_id, ot_id));
+    UNIQUE(item_id, ot_id)
+);
 
 CREATE TABLE IF NOT EXISTS requerimientos_productivos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1814,7 +2098,10 @@ CREATE TABLE IF NOT EXISTS requerimientos_productivos (
     unidad TEXT,
     proveedor_id INTEGER REFERENCES proveedores(id),
     nro_oc_remito TEXT,
-    f_pedido TEXT, f_necesidad TEXT, f_estimada TEXT, f_entrega TEXT,
+    f_pedido TEXT,
+    f_necesidad TEXT,
+    f_estimada TEXT,
+    f_entrega TEXT,
     estado TEXT DEFAULT 'PROXIMO',
     cantidad_entregada REAL,
     remito TEXT,
@@ -1826,81 +2113,325 @@ CREATE TABLE IF NOT EXISTS requerimientos_productivos (
     cant_no_conforme REAL,
     ubicacion_remito TEXT,
     obs TEXT,
-    creado TEXT DEFAULT (datetime('now','localtime')));
+    creado TEXT DEFAULT (datetime('now','localtime')),
+    origen_item_id INTEGER,
+    ot_origen_id INTEGER REFERENCES ordenes(id),
+    cantidad_aprobada REAL
+);
 
 -- Bitacora de auditoria: una fila por alta / modificacion / baja de datos.
 -- La escribe la capa de conexion (ver _AuditConnection), no los controladores.
 CREATE TABLE IF NOT EXISTS auditoria (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     fecha TEXT NOT NULL,
-    origen TEXT NOT NULL,            -- 'usuario' | 'sistema'
-    usuario_id INTEGER,              -- NULL cuando origen='sistema'
-    actor TEXT NOT NULL,             -- nombre del usuario o del proceso
-    entidad TEXT NOT NULL,           -- tabla afectada
-    registro_id TEXT,                -- clave primaria del registro afectado
-    accion TEXT NOT NULL,            -- 'alta' | 'modificacion' | 'baja'
-    ruta TEXT,                       -- endpoint que origino el cambio
-    valores_antes TEXT,              -- JSON (solo los campos que cambiaron)
-    valores_despues TEXT);           -- JSON (solo los campos que cambiaron)
-CREATE INDEX IF NOT EXISTS ix_auditoria_fecha   ON auditoria(fecha);
+    origen TEXT NOT NULL,                -- 'usuario' | 'sistema'
+    usuario_id INTEGER,                  -- NULL cuando origen='sistema'
+    actor TEXT NOT NULL,                 -- nombre del usuario o del proceso
+    entidad TEXT NOT NULL,               -- tabla afectada
+    registro_id TEXT,                    -- clave primaria del registro afectado
+    accion TEXT NOT NULL,                -- 'alta' | 'modificacion' | 'baja'
+    ruta TEXT,                           -- endpoint que origino el cambio
+    valores_antes TEXT,                  -- JSON (solo los campos que cambiaron)
+    valores_despues TEXT                 -- JSON (solo los campos que cambiaron)
+);
+CREATE INDEX IF NOT EXISTS ix_auditoria_fecha ON auditoria(fecha);
 CREATE INDEX IF NOT EXISTS ix_auditoria_entidad ON auditoria(entidad, registro_id);
-CREATE INDEX IF NOT EXISTS ix_auditoria_actor   ON auditoria(actor);
+CREATE INDEX IF NOT EXISTS ix_auditoria_actor ON auditoria(actor);
 
+CREATE TABLE IF NOT EXISTS ordenes_tercerizado (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    numero TEXT UNIQUE NOT NULL,
+    ot_origen_id INTEGER REFERENCES ordenes(id) ON DELETE SET NULL,
+    operacion_id INTEGER REFERENCES orden_operaciones(id) ON DELETE SET NULL,
+    proceso_op_id INTEGER REFERENCES proceso_operaciones(id),
+    proveedor_id INTEGER REFERENCES proveedores(id),
+    precio_acordado REAL DEFAULT 0,
+    estado TEXT DEFAULT 'Pendiente' CHECK(estado IN ('Pendiente','Remito emitido','En proceso','Recibido','Completado','Cancelado')),
+    es_ultimo_nivel INTEGER DEFAULT 0,
+    remito_traslado_id INTEGER REFERENCES remitos(id),
+    lote_retorno_id INTEGER REFERENCES lotes(id),
+    fecha_envio TEXT,
+    fecha_retorno_est TEXT,
+    fecha_retorno_real TEXT,
+    obs TEXT,
+    creado TEXT DEFAULT (datetime('now','localtime')),
+    creado_por INTEGER REFERENCES usuarios(id),
+    cantidad_enviada REAL DEFAULT 0,
+    cantidad_recibida REAL DEFAULT 0,
+    cantidad_rechazada_devuelta REAL DEFAULT 0,
+    remito_devolucion_id INTEGER REFERENCES remitos(id),
+    material_se_id INTEGER REFERENCES materiales(id),
+    cantidad_plan REAL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS herramientas_operacion (
+    id INTEGER PRIMARY KEY,
+    operacion_id INTEGER NOT NULL REFERENCES proceso_operaciones(id) ON DELETE CASCADE,
+    orden INTEGER DEFAULT 1,
+    nombre TEXT NOT NULL,
+    descripcion TEXT,
+    duracion_min REAL DEFAULT 0,
+    unidad TEXT DEFAULT 'unid',
+    cantidad REAL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS usuario_permisos (
+    id INTEGER PRIMARY KEY,
+    usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    clave TEXT NOT NULL,
+    valor TEXT,
+    UNIQUE(usuario_id, clave)
+);
+
+CREATE TABLE IF NOT EXISTS configuracion (
+    clave TEXT PRIMARY KEY,
+    valor TEXT,
+    descripcion TEXT
+);
+
+CREATE TABLE IF NOT EXISTS roles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT UNIQUE NOT NULL,
+    descripcion TEXT,
+    base_rol TEXT NOT NULL,
+    permisos TEXT DEFAULT '{}',
+    es_sistema INTEGER DEFAULT 0,
+    creado TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS orden_operacion_materiales (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    orden_operacion_id INTEGER NOT NULL REFERENCES orden_operaciones(id) ON DELETE CASCADE,
+    material_id INTEGER REFERENCES materiales(id),
+    producto_id INTEGER REFERENCES materiales(id),
+    cantidad REAL DEFAULT 0,
+    unidad TEXT,
+    tipo TEXT DEFAULT 'material',
+    vida_util_herramienta INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_ooom_oo ON orden_operacion_materiales(orden_operacion_id);
+
+CREATE TABLE IF NOT EXISTS producto_versiones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    producto_id INTEGER NOT NULL REFERENCES materiales(id) ON DELETE CASCADE,
+    version_num INTEGER NOT NULL DEFAULT 1,
+    motivo TEXT,
+    snapshot TEXT NOT NULL,
+    creado_por TEXT,
+    creado TEXT DEFAULT (datetime('now','localtime'))
+);
 """
 
-# ── Seed data ─────────────────────────────────────────────────────────────────
+def _backfill_remitos_ott_cantidad(db):
+    """Completa remitos.ott_cantidad en remitos de OTT emitidos antes de que
+    existiera la columna. Fuentes, en orden: la SC generada por ese envío,
+    los movimientos de salida que citan el remito, el "envío parcial: X" de
+    la observación, y por último (si en la OTT queda un solo remito sin
+    cantidad) lo enviado/devuelto de la OTT menos lo ya identificado."""
+    import re
+    pend = db.execute("""SELECT r.id, r.numero, r.tipo, r.obs, r.ott_id, ott.numero ott_numero
+        FROM remitos r JOIN ordenes_tercerizado ott ON ott.id=r.ott_id
+        WHERE r.tipo IN ('traslado_ott','devolucion_ott') AND r.ott_cantidad IS NULL""").fetchall()
+    cols_rem = {c[1] for c in db.execute("PRAGMA table_info(remitos)")}
+    for r in pend:
+        cant = None
+        if "cantidad_ott" in cols_rem:
+            # Columna de una versión anterior, sin uso hoy pero con datos.
+            v = db.execute("SELECT cantidad_ott FROM remitos WHERE id=?", (r["id"],)).fetchone()[0]
+            if v: cant = v
+        if cant is None and r["tipo"] == "traslado_ott":
+            # La auditoría guarda cantidad_enviada antes/después de cada envío.
+            try:
+                import json as _json
+                for a in db.execute("""SELECT valores_antes, valores_despues FROM auditoria
+                        WHERE entidad='ordenes_tercerizado' AND registro_id=?
+                        AND ruta LIKE '%/emitir_remito'""", (str(r["ott_id"]),)):
+                    antes = _json.loads(a["valores_antes"] or "{}")
+                    desp = _json.loads(a["valores_despues"] or "{}")
+                    if desp.get("remito_traslado_id") == r["id"]:
+                        delta = float(desp.get("cantidad_enviada") or 0) - float(antes.get("cantidad_enviada") or 0)
+                        if delta > 0: cant = delta
+                        break
+            except Exception:
+                pass
+        if cant is None and r["tipo"] == "traslado_ott":
+            sc = db.execute("""SELECT SUM(cantidad) FROM solicitudes_compra
+                WHERE ott_id=? AND ott_remito=?""", (r["ott_id"], r["numero"])).fetchone()[0]
+            if sc: cant = sc
+            if cant is None:
+                mov = db.execute("""SELECT SUM(cantidad) FROM movimientos WHERE tipo='salida'
+                    AND (referencia=? OR referencia LIKE ?)""",
+                    (f"Envío a tercerizado OTT {r['ott_numero']} — {r['numero']}",
+                     f"Reenvío a tercerizado OTT {r['ott_numero']} — {r['numero']} (%")).fetchone()[0]
+                if mov: cant = mov
+            if cant is None:
+                m = re.search(r"envío parcial:\s*([\d.]+)", r["obs"] or "")
+                if m: cant = float(m.group(1))
+        if cant is not None:
+            db.execute("UPDATE remitos SET ott_cantidad=? WHERE id=?", (cant, r["id"]))
+    # Un único remito sin cantidad en la OTT: se deduce del total de la OTT.
+    for tipo, col in (("traslado_ott", "cantidad_enviada"), ("devolucion_ott", "cantidad_rechazada_devuelta")):
+        for o in db.execute(f"""SELECT r.ott_id, ott.{col} total,
+                SUM(r.ott_cantidad IS NULL) sin_cant, COALESCE(SUM(r.ott_cantidad),0) conocida
+            FROM remitos r JOIN ordenes_tercerizado ott ON ott.id=r.ott_id
+            WHERE r.tipo=? GROUP BY r.ott_id""", (tipo,)).fetchall():
+            resto = float(o["total"] or 0) - float(o["conocida"] or 0)
+            if o["sin_cant"] == 1 and resto > 0.0001:
+                db.execute("""UPDATE remitos SET ott_cantidad=?
+                    WHERE ott_id=? AND tipo=? AND ott_cantidad IS NULL""", (resto, o["ott_id"], tipo))
+    db.commit()
+
+# ── Versión del esquema ───────────────────────────────────────────────────────
+# SCHEMA (arriba) describe la base completa tal como la usa este código: una
+# instalación nueva se crea directamente así, sin migraciones. La versión de
+# cada base queda guardada en PRAGMA user_version.
+#
+# Para cambiar el esquema más adelante:
+#   1. Agregar la tabla o columna en SCHEMA (para las instalaciones nuevas).
+#   2. Agregar en MIGRACIONES una función con el número siguiente que haga el
+#      mismo cambio sobre una base existente (por ejemplo un ALTER TABLE).
+#   3. Subir ESQUEMA_VERSION a ese número.
+# Cada migración corre una sola vez por base.
+ESQUEMA_VERSION = 4
+
+
+def _agregar_columna(db, tabla, columna, tipo):
+    """ALTER TABLE ADD COLUMN solo si la columna no existe (idempotente)."""
+    if columna not in {r[1] for r in db.execute(f"PRAGMA table_info({tabla})")}:
+        db.execute(f"ALTER TABLE {tabla} ADD COLUMN {columna} {tipo}")
+
+
+def _crear_tabla_de_schema(db, tabla):
+    """Crea `tabla` (con sus índices) tal como está escrita en SCHEMA, solo si
+    todavía no existe (idempotente). Evita repetir el CREATE TABLE."""
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (tabla,)).fetchone():
+        return
+    ref = sqlite3.connect(":memory:")
+    ref.executescript(SCHEMA)
+    for (sql,) in ref.execute("""SELECT sql FROM sqlite_master
+            WHERE tbl_name=? AND sql IS NOT NULL ORDER BY type='index'""", (tabla,)).fetchall():
+        db.execute(sql)
+    ref.close()
+
+
+def _migracion_2(db):
+    # Vida útil de herramienta (piezas que hace cada una), en la plantilla
+    # del proceso y en la copia propia de cada OT.
+    _agregar_columna(db, "operacion_materiales", "vida_util_herramienta", "INTEGER")
+    _agregar_columna(db, "orden_operacion_materiales", "vida_util_herramienta", "INTEGER")
+
+
+def _migracion_4(db):
+    # Cajones y su trazabilidad por paso, calidad y remito.
+    for tabla in ("cajones", "novedad_cajones", "ott_cajones", "remito_item_cajones"):
+        _crear_tabla_de_schema(db, tabla)
+
+
+MIGRACIONES = {
+    2: _migracion_2,
+    3: lambda db: _crear_tabla_de_schema(db, "pedidos_cotizacion"),
+    4: _migracion_4,
+}
+
+
+def _verificar_base_sin_version(db):
+    """Base con datos pero sin versión (user_version=0): viene de antes de que
+    existiera el versionado, cuando las migraciones corrían todas en cada
+    arranque. Si ya tiene todas las tablas y columnas del SCHEMA actual (el
+    caso normal: se venía actualizando), se la toma como versión 1. Si le falta
+    algo es una base más vieja que este server.py ya no sabe migrar, y se corta
+    el arranque sin tocarla."""
+    ref = sqlite3.connect(":memory:")
+    ref.executescript(SCHEMA)
+    faltan = []
+    for nombre, tipo in ref.execute("""SELECT name, type FROM sqlite_master
+            WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%'""").fetchall():
+        fila = db.execute("SELECT type FROM sqlite_master WHERE name=?", (nombre,)).fetchone()
+        if not fila or fila[0] != tipo:
+            faltan.append(f"{tipo} {nombre}")
+        elif tipo == "table":
+            cols = {r[1] for r in db.execute(f"PRAGMA table_info({nombre})")}
+            faltan += [f"{nombre}.{r[1]}" for r in ref.execute(f"PRAGMA table_info({nombre})")
+                       if r[1] not in cols]
+    ref.close()
+    if faltan:
+        db.close()
+        raise SystemExit(
+            "La base de datos es de una versión anterior de MetalERP. Le falta: "
+            + ", ".join(faltan[:10]) + (" ..." if len(faltan) > 10 else "") + ".\n"
+            "Para actualizarla, arrancá UNA vez con un server.py anterior (un "
+            "server.py.bak_* que todavía tenga las migraciones viejas, junto con "
+            "migracion_unificacion.py) y después volvé a este. La base no se tocó.")
+
+
+# ── Arranque de la base ───────────────────────────────────────────────────────
 def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     db = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
-    db.executescript(SCHEMA)
-    def cnt(t): return db.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
 
-    if cnt("usuarios") == 0:
+    nueva = not db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='usuarios'").fetchone()
+    if nueva:
+        db.executescript(SCHEMA)
+        db.execute(f"PRAGMA user_version = {ESQUEMA_VERSION}")
+    else:
+        version = db.execute("PRAGMA user_version").fetchone()[0]
+        if version == 0:
+            _verificar_base_sin_version(db)
+            version = 1
+        for v in range(version + 1, ESQUEMA_VERSION + 1):
+            MIGRACIONES[v](db)
+            db.execute(f"PRAGMA user_version = {v}")
+            db.commit()
+        db.execute(f"PRAGMA user_version = {max(version, ESQUEMA_VERSION)}")
+        # Crea lo que falte (todo es IF NOT EXISTS: no toca lo que ya existe).
+        db.executescript(SCHEMA)
+
+    # ── Datos iniciales ──────────────────────────────────────────────────────
+    if db.execute("SELECT COUNT(*) FROM usuarios").fetchone()[0] == 0:
         db.execute("INSERT INTO usuarios (username,password,nombre,rol) VALUES (?,?,?,?)",
             ("admin", hash_pw("admin123"), "Administrador", "admin"))
 
-    # categorias_maquina: sin seed (configurar desde app)
+    # Configuración por defecto (INSERT OR IGNORE: no pisa lo ya cargado).
+    _cfg_defaults = [
+        ('empresa_nombre',      'Mecanizado Ituzaingo',    'Nombre del taller / empresa'),
+        ('empresa_subtitulo',   'Taller de Mecanizados', 'Subtítulo o rubro'),
+        ('empresa_direccion',   '',                   'Dirección'),
+        ('empresa_telefono',    '',                   'Teléfono / WhatsApp'),
+        ('empresa_email',       '',                   'Email'),
+        ('pdf_color_hex',       '2C5F8A',             'Color principal PDF (hex sin #)'),
+        ('pdf_mostrar_costos',  '0',                  'Mostrar costos en PDF (0/1)'),
+        ('pdf_mostrar_precios', '0',                  'Mostrar precio de venta en PDF (0/1)'),
+        ('pdf_nota_pie',        '',                   'Nota al pie del PDF de OT'),
+        ('valor_hora_mo',       '0',                  'Valor de mano de obra por hora ($)'),
+        ('sc_automaticas',      '0',                  'Generar Solicitudes de Compra automáticamente (0/1)'),
+    ]
+    for _k, _v, _d in _cfg_defaults:
+        db.execute("INSERT OR IGNORE INTO configuracion (clave,valor,descripcion) VALUES (?,?,?)",
+                   (_k, _v, _d))
+
+    # Roles del sistema (los demás se administran desde Configuración).
+    for _rn, _desc in (("admin","Administrador — acceso total"),
+                       ("operario","Producción — órdenes de trabajo, procesos, novedades"),
+                       ("vendedor","Comercial — clientes, presupuestos, pedidos, compras"),
+                       ("almacen","Almacén — inventario, lotes, recepción"),
+                       ("logistica","Logística — remitos y stock, sin valores monetarios")):
+        db.execute("INSERT OR IGNORE INTO roles (nombre,descripcion,base_rol,permisos,es_sistema) VALUES (?,?,?,?,1)",
+                   (_rn, _desc, _rn, _json.dumps(DEFAULT_PERMISIONES.get(_rn, {}))))
+
+    _reparar_datos_al_arrancar(db)
+    db.close()
 
 
-    # ── Migrations: add columns for existing DBs ─────────────────────────────
-    def _cols(table):
-        return [r[1] for r in db.execute(f"PRAGMA table_info({table})").fetchall()]
+def _reparar_datos_al_arrancar(db):
+    """Correcciones de datos que corren en cada arranque. No cambian el
+    esquema: completan o corrigen filas que quedaron mal por errores ya
+    arreglados. Todas son idempotentes (si no hay nada que corregir, no
+    hacen nada)."""
 
-    # Semielaborado (PSE) versionado: materiales.pse_firma guarda con qué
-    # insumos se creó ese semielaborado, y ordenes_tercerizado.material_se_id
-    # congela cuál le toca a cada OTT (ver _get_or_create_pse). Sin esto,
-    # editar los insumos de una operación tercerizada mezclaba dos piezas
-    # distintas bajo el mismo código de material.
-    try:
-        db.execute("ALTER TABLE materiales ADD COLUMN pse_firma TEXT")
-    except Exception: pass
-    try:
-        db.execute("ALTER TABLE ordenes_tercerizado ADD COLUMN material_se_id "
-                   "INTEGER REFERENCES materiales(id)")
-    except Exception: pass
-
-    # tiempo_ciclo_min -> tiempo_ciclo_seg. El tiempo de ciclo de una operación
-    # es por pieza y en el taller se mide en segundos, no en minutos: cargarlo
-    # en minutos obligaba a escribir fracciones (0,25 min) y se prestaba a
-    # errores. El tiempo de SETUP sigue en minutos, porque es la preparación de
-    # la máquina y se hace una vez por lote.
-    # Esta migración va primero que el resto porque el recálculo de rendimiento
-    # que corre más abajo ya lee la columna con el nombre nuevo.
-    for _t in ("proceso_operaciones", "orden_operaciones"):
-        if "tiempo_ciclo_seg" not in _cols(_t):
-            db.execute(f"ALTER TABLE {_t} RENAME COLUMN tiempo_ciclo_min TO tiempo_ciclo_seg")
-            db.execute(f"UPDATE {_t} SET tiempo_ciclo_seg = COALESCE(tiempo_ciclo_seg,0)*60")
-
-    # ordenes_cliente_items: fecha_deseada, ot_id
-    oci = _cols("ordenes_cliente_items")
-    if "fecha_deseada" not in oci:
-        db.execute("ALTER TABLE ordenes_cliente_items ADD COLUMN fecha_deseada TEXT")
-    if "ot_id" not in oci:
-        db.execute("ALTER TABLE ordenes_cliente_items ADD COLUMN ot_id INTEGER REFERENCES ordenes(id)")
-
-    # Migración: volcar los vínculos OC-item -> OT ya existentes (columna
-    # ot_id, de a uno por ítem) a la tabla orden_cliente_item_ots, que ahora
+    # Vínculos OC-item -> OT: volcar los que estén en la columna vieja
+    # ot_id (de a uno por ítem) a la tabla orden_cliente_item_ots, que ahora
     # permite vincular varias OTs por ítem (repartiendo la cantidad pedida
     # entre varias OTs del mismo material/producto).
     for row in db.execute("""SELECT id,ot_id FROM ordenes_cliente_items
@@ -1937,496 +2468,10 @@ def init_db():
     except Exception:
         pass
 
-    # materiales: producto_id (vínculo explícito material PT -> producto,
-    # en vez de depender solo de que coincida el string de código)
     try:
-        mc = _cols("materiales")
-        if "producto_id" not in mc:
-            db.execute("ALTER TABLE materiales ADD COLUMN producto_id INTEGER REFERENCES productos(id)")
-        # materiales: activo (usado por el flujo de OTT — emitir remito de
-        # traslado — para filtrar el material vigente de un producto; no
-        # existía en el esquema original y rompía esas consultas con
-        # "no such column: activo". Default 1 para no desactivar nada existente.
-        if "activo" not in mc:
-            db.execute("ALTER TABLE materiales ADD COLUMN activo INTEGER DEFAULT 1")
-            db.execute("UPDATE materiales SET activo=1 WHERE activo IS NULL")
-        # Backfill SOLO para materiales que:
-        #  a) tienen categoria='Producto terminado'
-        #  b) su codigo matchea el codigo de UN SOLO producto
-        #  c) la descripcion del material coincide con el nombre del producto
-        #     (evita heredar el vínculo en casos de colisión como Acero/Soporte,
-        #      donde el codigo coincide mas la descripcion NO corresponde)
-        db.execute("""
-            UPDATE materiales SET producto_id = (
-                SELECT p.id FROM productos p
-                WHERE p.codigo = materiales.codigo
-                  AND p.nombre = materiales.descripcion
-            )
-            WHERE categoria='Producto terminado' AND producto_id IS NULL
-              AND (SELECT COUNT(*) FROM productos p2 WHERE p2.codigo = materiales.codigo) = 1
-        """)
-        db.execute("""
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_materiales_producto_id
-            ON materiales(producto_id) WHERE producto_id IS NOT NULL
-        """)
-    except Exception: pass
-
-    # El índice único de arriba (producto_id) permitía UN SOLO material por
-    # producto. Se mantiene único por (producto_id, categoria) para no romper
-    # instalaciones existentes con más de un material por producto — EXCEPTO
-    # para 'Semielaborado', donde ott_registrar_retorno crea a propósito un
-    # material por CADA operación intermedia tercerizada de un mismo
-    # producto (ver comentario ahí: "no compartir stock entre sí"). Con el
-    # índice viejo, la segunda operación tercerizada de un producto fallaba
-    # con "UNIQUE constraint failed" al intentar crear su propio
-    # semielaborado. Se separa en dos índices parciales: uno para materiales
-    # sin operación (PT y demás — sigue siendo uno solo por producto+categoría)
-    # y otro para los que sí tienen operación (uno por producto+categoría+operación).
-    try:
-        db.execute("DROP INDEX IF EXISTS idx_materiales_producto_id")
-        db.execute("DROP INDEX IF EXISTS idx_materiales_producto_categoria")
-        db.execute("""
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_materiales_producto_categoria_sinop
-            ON materiales(producto_id, categoria) WHERE producto_id IS NOT NULL AND operacion_id IS NULL
-        """)
-        db.execute("""
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_materiales_producto_categoria_op
-            ON materiales(producto_id, categoria, operacion_id) WHERE producto_id IS NOT NULL AND operacion_id IS NOT NULL
-        """)
-    except Exception: pass
-
-    # Un semielaborado ya no es uno por operación, sino uno por operación Y
-    # juego de insumos: cambiar lo que se le manda al proveedor genera otra
-    # pieza, con su propio código -v2 (ver _get_or_create_pse). El índice de
-    # arriba, único por (producto, categoría, operación), bloqueaba esa
-    # segunda versión con "UNIQUE constraint failed". Se reemplaza por uno
-    # que incluye la firma. Va COALESCE y no la columna pelada porque en
-    # SQLite dos NULL no chocan entre sí, y eso dejaría entrar duplicados
-    # justo en las filas viejas que todavía no tienen firma.
-    try:
-        db.execute("DROP INDEX IF EXISTS idx_materiales_producto_categoria_op")
-        db.execute("""
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_materiales_prod_cat_op_firma
-            ON materiales(producto_id, categoria, operacion_id, COALESCE(pse_firma,''))
-            WHERE producto_id IS NOT NULL AND operacion_id IS NOT NULL
-        """)
-    except Exception: pass
-
-    # Backfill: materiales.codigo es una copia denormalizada del código del
-    # producto vinculado (producto_id). Si el código del producto se editó
-    # después de vincularlo, el material de inventario quedaba con el código
-    # viejo. Se sincroniza una vez al arrancar para corregir datos existentes.
-    # Solo aplica al esquema viejo (productos como tabla aparte): con la
-    # tabla unificada el producto y su stock son la misma fila.
-    try:
-        if not _articulos_unificados(db):
-          db.execute("""
-            UPDATE materiales SET codigo = (
-                SELECT p.codigo FROM productos p WHERE p.id = materiales.producto_id
-            )
-            WHERE producto_id IS NOT NULL
-              AND codigo != (SELECT p.codigo FROM productos p WHERE p.id = materiales.producto_id)
-        """)
-    except Exception: pass
-
-    # lotes: cantidad_activa
-    try:
-        lc = _cols("lotes")
-        if "cantidad_activa" not in lc:
-            db.execute("ALTER TABLE lotes ADD COLUMN cantidad_activa REAL DEFAULT 0")
-            db.execute("UPDATE lotes SET cantidad_activa=cantidad_disponible WHERE estado='Aprobado'")
-    except Exception: pass
-
-    # lotes: cantidad_reservada — stock apartado para OTs en curso, aún no consumido
-    # Se descuenta de lo visible como "disponible libre" pero no del stock real hasta
-    # que la OT se complete.
-    try:
-        lc = _cols("lotes")
-        if "cantidad_reservada" not in lc:
-            db.execute("ALTER TABLE lotes ADD COLUMN cantidad_reservada REAL DEFAULT 0")
-    except Exception: pass
-
-    # lotes: cantidad_rechazada (antes se calculaba sumando movimientos historicos,
-    # lo cual podia superponerse con cantidad_activa y dar totales inconsistentes,
-    # ej. 800 aprobado + 200 rechazado sobre un total de 800. Ahora es una columna
-    # real que junto a cantidad_activa siempre respeta: activa+rechazada<=disponible)
-    try:
-        lc = _cols("lotes")
-        if "cantidad_rechazada" not in lc:
-            db.execute("ALTER TABLE lotes ADD COLUMN cantidad_rechazada REAL DEFAULT 0")
-            for lr in db.execute("SELECT id,cantidad_disponible,cantidad_activa,estado FROM lotes").fetchall():
-                disp = float(lr["cantidad_disponible"] or 0)
-                act = float(lr["cantidad_activa"] or 0)
-                hist = db.execute("""SELECT COALESCE(SUM(cantidad),0) FROM movimientos
-                    WHERE lote_id=? AND tipo='ajuste' AND referencia LIKE '%Rechazado%'""",
-                    (lr["id"],)).fetchone()[0]
-                cupo = max(0.0, disp - act)  # espacio aun no aprobado, lo unico que puede estar "rechazado"
-                rech = min(float(hist or 0), cupo)
-                if lr["estado"] == "Rechazado" and rech <= 0:
-                    rech = disp  # lote totalmente rechazado sin movimientos historicos detectables
-                db.execute("UPDATE lotes SET cantidad_rechazada=? WHERE id=?", (rech, lr["id"]))
-    except Exception: pass
-
-    # orden_lotes: cantidad_consumida — de lo reservado/usado de un lote para
-    # esta OT (cantidad_usada), cuánto ya fue efectivamente descontado del
-    # stock real (por una novedad de producción). El resto de cantidad_usada
-    # sigue siendo solo reserva. Permite que al quitar/reducir un lote
-    # asignado no se libere lo que ya se consumió — eso queda como historial.
-    try:
-        olc = _cols("orden_lotes")
-        if "cantidad_consumida" not in olc:
-            db.execute("ALTER TABLE orden_lotes ADD COLUMN cantidad_consumida REAL DEFAULT 0")
-    except Exception: pass
-
-    # movimientos: lote_id
-    try:
-        mc = _cols("movimientos")
-        if "lote_id" not in mc:
-            db.execute("ALTER TABLE movimientos ADD COLUMN lote_id INTEGER REFERENCES lotes(id)")
-    except Exception: pass
-
-    # lotes: agregar estado 'Abierto' al CHECK constraint. Un lote de PT
-    # "cajón" queda en 'Abierto' mientras todavía no llegó a la capacidad
-    # del producto (sigue recibiendo piezas de próximas novedades); al
-    # llenarse pasa a 'Ingresado' (igual que antes: pendiente de Calidad).
-    try:
-        lot_ddl = db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='lotes'").fetchone()
-        if lot_ddl and 'Abierto' not in lot_ddl[0]:
-            # Rebuild de tabla con FKs: si hay filas viejas con proveedor_id/
-            # creado_por huérfanos (datos de antes de que estas FKs se
-            # empezaran a validar), el INSERT de abajo falla con FK ON.
-            # Se desactiva sólo para este rebuild, como recomienda la propia
-            # documentación de SQLite para migraciones de este tipo.
-            db.commit()  # cerrar cualquier transacción pendiente: PRAGMA foreign_keys
-                         # es no-op si hay una transacción abierta (p.ej. el UPDATE de
-                         # cantidad_rechazada más arriba), lo que dejaba el FK enforcement
-                         # en ON y hacía fallar el INSERT de más abajo con filas huérfanas.
-            db.execute("PRAGMA foreign_keys = OFF")
-            db.execute("DROP TABLE IF EXISTS lotes_new")
-            db.execute("""CREATE TABLE lotes_new (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                numero TEXT UNIQUE NOT NULL,
-                material_id INTEGER NOT NULL REFERENCES materiales(id),
-                cantidad_original REAL NOT NULL,
-                cantidad_disponible REAL NOT NULL,
-                cantidad_activa REAL DEFAULT 0,
-                cantidad_rechazada REAL DEFAULT 0,
-                cantidad_reservada REAL DEFAULT 0,
-                proveedor_id INTEGER REFERENCES proveedores(id),
-                fecha_ingreso TEXT DEFAULT (datetime('now','localtime')),
-                referencia_proveedor TEXT,
-                certificado TEXT,
-                estado TEXT DEFAULT 'Ingresado' CHECK(estado IN ('Ingresado','Abierto','Aprobado','Agotado','Rechazado')),
-                obs TEXT,
-                creado_por INTEGER REFERENCES usuarios(id),
-                creado TEXT DEFAULT (datetime('now','localtime')))""")
-            cols_comunes = ",".join(_cols("lotes"))
-            db.execute(f"INSERT INTO lotes_new ({cols_comunes}) SELECT {cols_comunes} FROM lotes")
-            db.execute("DROP TABLE lotes")
-            db.execute("ALTER TABLE lotes_new RENAME TO lotes")
-            db.commit()
+        _backfill_remitos_ott_cantidad(db)
     except Exception as e:
-        print(f"[WARN] Migración lotes (estado Abierto) falló: {e}")
-    finally:
-        db.execute("PRAGMA foreign_keys = ON")
-
-    # orden_operaciones: tercerizada fields
-    ooc = _cols("orden_operaciones")
-    for col, typedef in [("es_tercerizada","INTEGER DEFAULT 0"),("proveedor_id","INTEGER"),
-                          ("precio_tercerizado","REAL DEFAULT 0"),("tiempo_minimo_dias","INTEGER DEFAULT 0")]:
-        if col not in ooc:
-            db.execute(f"ALTER TABLE orden_operaciones ADD COLUMN {col} {typedef}")
-
-    # proceso_operaciones: tercerizada fields
-    poc = _cols("proceso_operaciones")
-    for col, typedef in [("es_tercerizada","INTEGER DEFAULT 0"),("proveedor_id","INTEGER"),
-                          ("precio_tercerizado","REAL DEFAULT 0"),("tiempo_minimo_dias","INTEGER DEFAULT 0")]:
-        if col not in poc:
-            db.execute(f"ALTER TABLE proceso_operaciones ADD COLUMN {col} {typedef}")
-
-    # proveedores: categoría de compra (TRATAMIENTO SUPERFICIAL / MATERIA PRIMA / PROCESO)
-    # usada para clasificar los gráficos del dashboard de requerimientos productivos.
-    pvc = _cols("proveedores")
-    if "categoria_compra" not in pvc:
-        db.execute("ALTER TABLE proveedores ADD COLUMN categoria_compra TEXT")
-        # Seed inicial a partir del padrón de proveedores conocido (no pisa
-        # los que ya tengan una categoria_compra cargada a mano más adelante).
-        _CATEGORIA_COMPRA_SEED = {
-            'TRATAMIENTO SUPERFICIAL': ['ALUCOLOR','GALVATERM','PENELLA','SEA (PERILLO)','CECARELLI','TMA',
-                'MEGACOLOR','METALTECH','NEW METAL','ELECTROPLATERS','CHOUSA','ST. TRATAMIENTOS','TERMIA',
-                'BLENDOR','INDUSTERMIC','ALPEC','KUPPE','ARTELUM','PAVONADO ALCALINO LELOIR','GALVANOTECNIA',
-                'CAROLO','CEMENTA TEMP'],
-            'MATERIA PRIMA': ['HERMAC','PACHECO CHAPAS','LAMINACION BASCONIA','CIA. PANAMERICANA',
-                'ACEROS BOHLER (VOESTALPINE)','ACEROS BORRONI','ACEROS FB','ACEROS COFER','ACEROS CRYPTON',
-                'CORIFERSA','FECORT','CORTESTAMP S.A.','FORVIANCA','EG SAN MARTIN','REXCO','FAMIQ','KRUGER',
-                'PAGANI','NAM','METAL POL','MAPO','HYDRO','METRAR','LIT ALUMINIO','APERAM',
-                'OUTOKUMPU FORTINOX','BULONAR','MARCHESE','POLIMETAL','BOLLHOFF','PROVEMET','FORNIS',
-                'FASTENER','NUT ARGENTINA','MANCUL','ACEROS HAS','METALURGICA SM','NOMEN','ACEROS ANGELETTI',
-                'ETC','FORTINOX'],
-            'PROCESO': ['ETAR','ARGENFEN','CRAMSAC','BAINOX','MECANIZADOS NOT','ALAMBRES RUMBOS',
-                'M. N. RESORTES','DAG RESORTES','RAYMONDA'],
-        }
-        for _cat, _provs in _CATEGORIA_COMPRA_SEED.items():
-            for _p in _provs:
-                db.execute("UPDATE proveedores SET categoria_compra=? WHERE UPPER(TRIM(razon))=? AND categoria_compra IS NULL",
-                           (_cat, _p.upper()))
-
-    # proceso_operaciones: volumen agrupado — cuando está activo, la cantidad
-    # requerida de esta operación no es igual al total a realizar de la OT,
-    # sino el resultado de agrupar ese total en lotes de tamaño
-    # "valor_recalculado" (redondeado hacia arriba). Ej: OT total=100,
-    # valor_recalculado=33 → requerido=3 (ceil(100/33)).
-    poc = _cols("proceso_operaciones")
-    for col, typedef in [("volumen_agrupado","INTEGER DEFAULT 0"),("valor_recalculado","REAL DEFAULT 0")]:
-        if col not in poc:
-            db.execute(f"ALTER TABLE proceso_operaciones ADD COLUMN {col} {typedef}")
-
-    # solicitudes_compra: ot_origen_id
-    try:
-        sc = _cols("solicitudes_compra")
-        if "ot_origen_id" not in sc:
-            db.execute("ALTER TABLE solicitudes_compra ADD COLUMN ot_origen_id INTEGER REFERENCES ordenes(id)")
-    except Exception: pass
-
-    # novedades_produccion: maquina_id
-    try:
-        npc = _cols("novedades_produccion")
-        if "maquina_id" not in npc:
-            db.execute("ALTER TABLE novedades_produccion ADD COLUMN maquina_id INTEGER REFERENCES maquinas(id)")
-    except Exception: pass
-    try:
-        npc = _cols("novedades_produccion")
-        if "piezas_observadas" not in npc:
-            db.execute("ALTER TABLE novedades_produccion ADD COLUMN piezas_observadas REAL DEFAULT 0")
-    except Exception: pass
-    try:
-        npc = _cols("novedades_produccion")
-        if "tiempo_perdido" not in npc:
-            db.execute("ALTER TABLE novedades_produccion ADD COLUMN tiempo_perdido REAL DEFAULT 0")
-    except Exception: pass
-    try:
-        db.execute("ALTER TABLE productos ADD COLUMN peso_kg REAL DEFAULT 0")
-    except Exception: pass
-
-    # productos: capacidad_cajon — cantidad fija de piezas que entran en un
-    # cajón de este producto. Cuando se declara una novedad de la ÚLTIMA
-    # operación de la ruta, el PT generado se va acumulando en un lote de
-    # "cajón" (numero = OT-N-C1, OT-N-C2, ...) hasta llegar a esta cantidad;
-    # al llenarse, ese cajón queda listo para pasar a Calidad y se abre el
-    # siguiente. Si es NULL o 0, se mantiene el comportamiento anterior (un
-    # único lote de PT por OT, sin dividir en cajones).
-    try:
-        pc = _cols("productos")
-        if "capacidad_cajon" not in pc:
-            db.execute("ALTER TABLE productos ADD COLUMN capacidad_cajon INTEGER")
-    except Exception: pass
-
-    # ordenes: stock_descontado — flag para no descontar materiales dos veces al completar
-    try:
-        oc = _cols("ordenes")
-        if "stock_descontado" not in oc:
-            db.execute("ALTER TABLE ordenes ADD COLUMN stock_descontado INTEGER DEFAULT 0")
-    except Exception: pass
-
-    # El PT entra a inventario al entrar al deposito: el lote marca si su
-    # stock ya fue computado para que Calidad no lo sume de nuevo.
-    try:
-        if "stock_computado" not in _cols("lotes"):
-            db.execute("ALTER TABLE lotes ADD COLUMN stock_computado INTEGER DEFAULT 0")
-    except Exception: pass
-
-    # v147: circuito OTT (puntos 9 y 10)
-    for _tbl, _col, _ddl in (("solicitudes_compra","ott_id","INTEGER REFERENCES ordenes_tercerizado(id)"),
-                             ("solicitudes_compra","ott_remito","TEXT")):
-        try:
-            if _col not in _cols(_tbl):
-                db.execute(f"ALTER TABLE {_tbl} ADD COLUMN {_col} {_ddl}")
-        except Exception: pass
-
-    # v147: ordenes_compra — anulación / completado (punto 8)
-    for _col, _ddl in (("remito_numero","TEXT"),("fecha_completada","TEXT"),("motivo_anulacion","TEXT"),("fecha_anulada","TEXT")):
-        try:
-            if _col not in _cols("ordenes_compra"):
-                db.execute(f"ALTER TABLE ordenes_compra ADD COLUMN {_col} {_ddl}")
-        except Exception: pass
-
-    # v147: materiales.cliente_id (punto 6), codigo_barras en materiales/productos (punto 17)
-    for _tbl, _col, _ddl in (("materiales","cliente_id","INTEGER REFERENCES clientes(id)"),
-                             ("materiales","codigo_barras","TEXT"),
-                             ("productos","codigo_barras","TEXT")):
-        try:
-            if _col not in _cols(_tbl):
-                db.execute(f"ALTER TABLE {_tbl} ADD COLUMN {_col} {_ddl}")
-        except Exception: pass
-
-    # v148 (punto 4): la OT guarda su PROPIA copia de los materiales de cada
-    # operación (independiente del proceso del producto una vez generada).
-    try:
-        db.execute("CREATE TABLE IF NOT EXISTS configuracion (clave TEXT PRIMARY KEY, valor TEXT, descripcion TEXT)")
-        db.execute("""CREATE TABLE IF NOT EXISTS orden_operacion_materiales (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            orden_operacion_id INTEGER NOT NULL REFERENCES orden_operaciones(id) ON DELETE CASCADE,
-            material_id INTEGER REFERENCES materiales(id),
-            producto_id INTEGER REFERENCES productos(id),
-            cantidad REAL DEFAULT 0, unidad TEXT, tipo TEXT DEFAULT 'material')""")
-        db.execute("CREATE INDEX IF NOT EXISTS idx_ooom_oo ON orden_operacion_materiales(orden_operacion_id)")
-        _ya = db.execute("SELECT valor FROM configuracion WHERE clave='ooom_backfill_v148'").fetchone()
-        if not _ya:
-            # OTs ya existentes: se les copia el proceso vigente una única vez.
-            _pcol = "om.producto_id" if "producto_id" in [r[1] for r in db.execute("PRAGMA table_info(operacion_materiales)")] else "NULL"
-            _tcol = "COALESCE(om.tipo,'material')" if "tipo" in [r[1] for r in db.execute("PRAGMA table_info(operacion_materiales)")] else "'material'"
-            db.execute(f"""INSERT INTO orden_operacion_materiales (orden_operacion_id,material_id,producto_id,cantidad,unidad,tipo)
-                SELECT oo.id, om.material_id, {_pcol}, om.cantidad, om.unidad, {_tcol}
-                FROM orden_operaciones oo JOIN operacion_materiales om ON om.operacion_id=oo.proceso_op_id
-                WHERE oo.proceso_op_id IS NOT NULL
-                  AND NOT EXISTS (SELECT 1 FROM orden_operacion_materiales x WHERE x.orden_operacion_id=oo.id)""")
-            db.execute("INSERT OR REPLACE INTO configuracion (clave,valor) VALUES ('ooom_backfill_v148','1')")
-    except Exception as e:
-        print(f"[init_db] Advertencia orden_operacion_materiales: {e}")
-
-    # v148: PT existentes toman el cliente de su producto (punto 6)
-    # (solo esquema viejo: con la tabla unificada el cliente es uno solo)
-    try:
-      if not _articulos_unificados(db):
-        db.execute("""UPDATE materiales SET cliente_id=(SELECT p.cliente_id FROM productos p WHERE p.id=materiales.producto_id)
-                      WHERE cliente_id IS NULL AND producto_id IS NOT NULL""")
-        db.execute("""UPDATE materiales SET cliente_id=(SELECT p.cliente_id FROM productos p WHERE p.codigo=materiales.codigo)
-                      WHERE cliente_id IS NULL AND categoria='Producto terminado'
-                      AND EXISTS (SELECT 1 FROM productos p WHERE p.codigo=materiales.codigo AND p.cliente_id IS NOT NULL)""")
-    except Exception: pass
-
-    # ordenes: requiere_material — si la OT no necesita materia prima (aunque el
-    # proceso la pida) no se pide asignar lotes (fix v147, punto 4)
-    try:
-        oc = _cols("ordenes")
-        if "requiere_material" not in oc:
-            db.execute("ALTER TABLE ordenes ADD COLUMN requiere_material INTEGER DEFAULT 1")
-    except Exception: pass
-
-    # novedades_eliminadas: restaurado / restaurado_por / restaurado_por_nombre
-    # — para poder marcar un registro como restaurado (ver POST
-    # /api/novedades-eliminadas/<id>/restaurar) sin perder el historial.
-    try:
-        nec = _cols("novedades_eliminadas")
-        if "restaurado" not in nec:
-            db.execute("ALTER TABLE novedades_eliminadas ADD COLUMN restaurado TEXT")
-        if "restaurado_por" not in nec:
-            db.execute("ALTER TABLE novedades_eliminadas ADD COLUMN restaurado_por INTEGER REFERENCES usuarios(id)")
-        if "restaurado_por_nombre" not in nec:
-            db.execute("ALTER TABLE novedades_eliminadas ADD COLUMN restaurado_por_nombre TEXT")
-    except Exception: pass
-
-    # ── Órdenes de Trabajo de Terceros (OTT) ────────────────────────────────
-    db.execute("""CREATE TABLE IF NOT EXISTS ordenes_tercerizado (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        numero TEXT UNIQUE NOT NULL,
-        ot_origen_id INTEGER REFERENCES ordenes(id) ON DELETE SET NULL,
-        operacion_id INTEGER REFERENCES orden_operaciones(id) ON DELETE SET NULL,
-        proceso_op_id INTEGER REFERENCES proceso_operaciones(id),
-        proveedor_id INTEGER REFERENCES proveedores(id),
-        precio_acordado REAL DEFAULT 0,
-        estado TEXT DEFAULT 'Pendiente'
-            CHECK(estado IN ('Pendiente','Remito emitido','En proceso','Recibido','Completado','Cancelado')),
-        es_ultimo_nivel INTEGER DEFAULT 0,
-        remito_traslado_id INTEGER REFERENCES remitos(id),
-        lote_retorno_id INTEGER REFERENCES lotes(id),
-        fecha_envio TEXT,
-        fecha_retorno_est TEXT,
-        fecha_retorno_real TEXT,
-        obs TEXT,
-        creado TEXT DEFAULT (datetime('now','localtime')),
-        creado_por INTEGER REFERENCES usuarios(id)
-    )""")
-
-    # ── Tabla configuración del sistema (ensure remitos has tipo column) ─────
-    try:
-        db.execute("ALTER TABLE remitos ADD COLUMN tipo TEXT DEFAULT 'entrega_cliente'")
-    except Exception: pass
-    try:
-        db.execute("ALTER TABLE remitos ADD COLUMN ott_id INTEGER REFERENCES ordenes_tercerizado(id)")
-    except Exception: pass
-    # v147: columnas de ordenes_tercerizado que deben agregarse DESPUÉS de crear la tabla
-    # (en instalaciones nuevas material_se_id se intentaba agregar antes de existir la tabla).
-    for _col, _ddl in (("material_se_id","INTEGER REFERENCES materiales(id)"),
-                       ("cantidad_plan","REAL DEFAULT 0")):
-        try:
-            if _col not in [r[1] for r in db.execute("PRAGMA table_info(ordenes_tercerizado)").fetchall()]:
-                db.execute(f"ALTER TABLE ordenes_tercerizado ADD COLUMN {_col} {_ddl}")
-        except Exception: pass
-    try:
-        db.execute("ALTER TABLE ordenes_tercerizado ADD COLUMN cantidad_enviada REAL DEFAULT 0")
-    except Exception: pass
-    try:
-        db.execute("ALTER TABLE ordenes_tercerizado ADD COLUMN cantidad_recibida REAL DEFAULT 0")
-    except Exception: pass
-    try:
-        # Acumulado de piezas rechazadas (clasificadas en Lotes) que ya se
-        # devolvieron físicamente al proveedor vía el botón "Devolver" (ver
-        # ott_devolver_rechazo). Sirve para no devolver dos veces lo mismo
-        # cuando se clasifica el lote de a partes y para saber cuánto de lo
-        # recibido sigue "afuera" (rechazado y ya devuelto) vs. lo que
-        # todavía está físicamente en el taller esperando clasificación.
-        db.execute("ALTER TABLE ordenes_tercerizado ADD COLUMN cantidad_rechazada_devuelta REAL DEFAULT 0")
-    except Exception: pass
-    try:
-        db.execute("ALTER TABLE ordenes_tercerizado ADD COLUMN remito_devolucion_id INTEGER REFERENCES remitos(id)")
-    except Exception: pass
-    try:
-        # Vínculo directo ítem de OC -> lote que ese ítem generó al emitirse la
-        # OC (ver create_oc). Antes el lote solo se ubicaba por
-        # referencia_proveedor+material_id; guardarlo acá evita ambigüedad
-        # cuando una misma OC tiene dos ítems del mismo material, y es lo que
-        # usa devolver_rechazo_oc para saber qué lote mirar por ítem.
-        db.execute("ALTER TABLE ordenes_compra_items ADD COLUMN lote_id INTEGER REFERENCES lotes(id)")
-    except Exception: pass
-    try:
-        # Igual que ordenes_tercerizado.cantidad_rechazada_devuelta: acumulado
-        # de piezas rechazadas de ESTE ítem ya devueltas al proveedor, para no
-        # devolver dos veces lo mismo si el lote se clasifica de a partes.
-        db.execute("ALTER TABLE ordenes_compra_items ADD COLUMN cantidad_rechazada_devuelta REAL DEFAULT 0")
-    except Exception: pass
-    try:
-        # Acumulado de lo YA reingresado al lote (vía recibir_oc) de piezas
-        # que se habían devuelto por rechazo — evita reingresar dos veces al
-        # recibir el reemplazo en varias entregas parciales (ver recibir_oc).
-        db.execute("ALTER TABLE ordenes_compra_items ADD COLUMN cantidad_rechazada_reingresada REAL DEFAULT 0")
-    except Exception: pass
-    try:
-        db.execute("ALTER TABLE ordenes_compra ADD COLUMN remito_devolucion_id INTEGER REFERENCES remitos(id)")
-    except Exception: pass
-    try:
-        # Fecha de la primera recepción con cantidad>0 de este ítem (ver
-        # recibir_oc). La usa _sync_requerimiento_desde_compra como f_entrega
-        # del requerimiento_productivo espejo — antes no había forma de saber
-        # cuándo se recibió cada ítem, solo el acumulado en cantidad_recibida.
-        db.execute("ALTER TABLE ordenes_compra_items ADD COLUMN fecha_recibida TEXT")
-    except Exception: pass
-    try:
-        db.execute("ALTER TABLE remitos ADD COLUMN oc_id INTEGER REFERENCES ordenes_compra(id)")
-    except Exception: pass
-    try:
-        # Clave estable del ítem de OC que originó este requerimiento espejo
-        # (ver _sync_requerimiento_desde_compra). Antes el vínculo era el
-        # propio "numero" (numero="OCP-ITEM-{item_id}"), lo que obligaba a
-        # mostrar ese texto interno en vez de un correlativo como el resto de
-        # los requerimientos. Con esta columna el "numero" puede ser un
-        # correlativo normal y el upsert se hace por origen_item_id.
-        db.execute("ALTER TABLE requerimientos_productivos ADD COLUMN origen_item_id INTEGER")
-    except Exception: pass
-    try:
-        # OT de origen de la compra (vía solicitudes_compra.ot_origen_id), para
-        # poder mostrar "OT-024" en la columna Cliente de los requerimientos de
-        # compra que no tienen cliente propio (son materia prima, no pedidos).
-        db.execute("ALTER TABLE requerimientos_productivos ADD COLUMN ot_origen_id INTEGER REFERENCES ordenes(id)")
-    except Exception: pass
-    try:
-        # Cantidad Aprobada: columna calcada del Excel de Requerimientos
-        # Productivos. Para requerimientos que vienen de una OTT se calcula
-        # sola en _sync_requerimiento_desde_ott (cantidad_entregada menos
-        # cant_no_conforme); para los cargados a mano queda editable desde
-        # la pantalla.
-        db.execute("ALTER TABLE requerimientos_productivos ADD COLUMN cantidad_aprobada REAL")
-    except Exception: pass
+        print("[remitos] no se pudo completar ott_cantidad de remitos viejos:", e)
     try:
         # Backfill: los requerimientos de compra ya creados con el esquema
         # viejo tienen numero="OCP-ITEM-{item_id}" y origen_item_id NULL. Se
@@ -2436,21 +2481,6 @@ def init_db():
         db.execute("""UPDATE requerimientos_productivos
             SET origen_item_id = CAST(SUBSTR(numero, 10) AS INTEGER)
             WHERE numero LIKE 'OCP-ITEM-%' AND origen_item_id IS NULL""")
-    except Exception: pass
-    try:
-        # Backfill: materiales.descripcion es una copia denormalizada de
-        # productos.nombre para el material "espejo" de cada producto
-        # terminado (ver update_producto). Hasta ahora update_producto solo
-        # sincronizaba el código, así que cualquier producto renombrado antes
-        # de este fix dejó su material con el nombre viejo (se veía, por
-        # ejemplo, en "Lotes asignados" de la OT). Se corrige una sola vez acá.
-        # Solo esquema viejo: con la tabla unificada no hay copia que sincronizar
-        # (y pisaría la descripción de los semielaborados con la de su producto).
-        if not _articulos_unificados(db):
-          db.execute("""UPDATE materiales SET descripcion=(SELECT p.nombre FROM productos p WHERE p.id=materiales.producto_id),
-            actualizado=datetime('now','localtime')
-            WHERE producto_id IS NOT NULL
-            AND descripcion != (SELECT p.nombre FROM productos p WHERE p.id=materiales.producto_id)""")
     except Exception: pass
     try:
         # Backfill: antes, cantidad_original de un lote generado por retorno
@@ -2471,74 +2501,6 @@ def init_db():
             )""")
     except Exception: pass
 
-    # ── Herramientas por operación ───────────────────────────────────────────
-    db.execute("""CREATE TABLE IF NOT EXISTS herramientas_operacion (
-        id INTEGER PRIMARY KEY,
-        operacion_id INTEGER NOT NULL REFERENCES proceso_operaciones(id) ON DELETE CASCADE,
-        orden INTEGER DEFAULT 1,
-        nombre TEXT NOT NULL,
-        descripcion TEXT,
-        duracion_min REAL DEFAULT 0,
-        unidad TEXT DEFAULT 'unid',
-        cantidad REAL DEFAULT 1
-    )""")
-
-    # ── Permisos por usuario ──────────────────────────────────────────────────
-    db.execute("""CREATE TABLE IF NOT EXISTS usuario_permisos (
-        id INTEGER PRIMARY KEY,
-        usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
-        clave TEXT NOT NULL,
-        valor TEXT,
-        UNIQUE(usuario_id, clave)
-    )""")
-
-    try:
-        db.execute("ALTER TABLE productos ADD COLUMN cliente_id INTEGER REFERENCES clientes(id)")
-    except Exception: pass
-    try:
-        db.execute("ALTER TABLE pronosticos_venta ADD COLUMN cliente_id INTEGER REFERENCES clientes(id)")
-    except Exception: pass
-    try:
-        db.execute("ALTER TABLE operacion_materiales ADD COLUMN tipo TEXT DEFAULT 'material'")
-    except Exception: pass
-    try:
-        # Vínculo del material 'Semielaborado' con la operación tercerizada
-        # intermedia que lo genera (ver ott_registrar_retorno). Antes el
-        # material se buscaba/creaba solo por producto_id+categoria, así que
-        # dos operaciones intermedias distintas del MISMO producto terminaban
-        # compartiendo un único material/código de semielaborado y mezclando
-        # su stock entre sí. Con operacion_id cada operación intermedia tiene
-        # su propio material, con código "(codigo producto)-(nombre operacion)".
-        db.execute("ALTER TABLE materiales ADD COLUMN operacion_id INTEGER REFERENCES proceso_operaciones(id)")
-    except Exception: pass
-    try:
-        db.execute("ALTER TABLE operacion_materiales ADD COLUMN producto_id INTEGER REFERENCES productos(id)")
-    except Exception: pass
-    # material_id quedó como NOT NULL de la definición original de la tabla,
-    # pero desde que se soportan "productos como insumo" esa fila puede tener
-    # material_id NULL (y producto_id cargado en su lugar). SQLite no permite
-    # ALTER COLUMN para sacar el NOT NULL, así que reconstruimos la tabla si
-    # detectamos que la restricción sigue vigente.
-    try:
-        col_info = db.execute("PRAGMA table_info(operacion_materiales)").fetchall()
-        material_id_notnull = any(c[1] == "material_id" and c[3] for c in col_info)
-        if material_id_notnull:
-            db.execute("""CREATE TABLE operacion_materiales_new (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                operacion_id INTEGER NOT NULL REFERENCES proceso_operaciones(id) ON DELETE CASCADE,
-                material_id INTEGER REFERENCES materiales(id),
-                producto_id INTEGER REFERENCES productos(id),
-                cantidad REAL NOT NULL, unidad TEXT,
-                tipo TEXT DEFAULT 'material')""")
-            db.execute("""INSERT INTO operacion_materiales_new
-                (id,operacion_id,material_id,producto_id,cantidad,unidad,tipo)
-                SELECT id,operacion_id,material_id,producto_id,cantidad,unidad,tipo
-                FROM operacion_materiales""")
-            db.execute("DROP TABLE operacion_materiales")
-            db.execute("ALTER TABLE operacion_materiales_new RENAME TO operacion_materiales")
-            db.commit()
-    except Exception as e:
-        print(f"[init_db] Advertencia: no se pudo migrar operacion_materiales.material_id a NULLABLE: {e}")
     # Backfill: filas viejas de "producto como insumo" (tipo='producto') que
     # quedaron con material_id NULL — de antes de que estas filas se
     # resolvieran al material 'Producto terminado' del producto al guardar
@@ -2578,130 +2540,7 @@ def init_db():
             db.commit()
     except Exception as e:
         print(f"[init_db] Advertencia: no se pudo hacer backfill de operacion_materiales.material_id para tipo='producto': {e}")
-    try:
-        db.execute("ALTER TABLE proceso_operaciones ADD COLUMN es_tercerizada INTEGER DEFAULT 0")
-    except Exception: pass
-    try:
-        db.execute("ALTER TABLE proceso_operaciones ADD COLUMN proveedor_id INTEGER REFERENCES proveedores(id)")
-    except Exception: pass
-    try:
-        db.execute("ALTER TABLE proceso_operaciones ADD COLUMN precio_tercerizado REAL DEFAULT 0")
-    except Exception: pass
-    try:
-        db.execute("ALTER TABLE tickets_reparacion ADD COLUMN horas_ajuste REAL DEFAULT 0")
-    except Exception: pass
 
-    # ── Migrate empleados: make apellido nullable ────────────────────────────────
-    try:
-        emp_cols_info = db.execute("PRAGMA table_info(empleados)").fetchall()
-        for col in emp_cols_info:
-            if col[1] == 'apellido' and col[3] == 1:  # notnull flag
-                SCHEMA_EMP_NEW = (
-                    "CREATE TABLE IF NOT EXISTS empleados_new ("
-                    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-                    "legajo TEXT UNIQUE NOT NULL, nombre TEXT NOT NULL, apellido TEXT,"
-                    "cargo TEXT, tipo TEXT DEFAULT 'Indirecto',"
-                    "turno TEXT, activo INTEGER DEFAULT 1, obs TEXT,"
-                    "creado TEXT DEFAULT (datetime('now','localtime')))"
-                )
-                db.execute(SCHEMA_EMP_NEW)
-                db.execute("INSERT OR IGNORE INTO empleados_new SELECT id,legajo,nombre,apellido,cargo,tipo,turno,activo,obs,creado FROM empleados")
-                db.execute("DROP TABLE empleados")
-                db.execute("ALTER TABLE empleados_new RENAME TO empleados")
-                break
-    except Exception: pass
-
-    # ── Migrate empleados: add fecha_alta / fecha_baja ─────────────────────────
-    try:
-        emp_cols = [c[1] for c in db.execute("PRAGMA table_info(empleados)").fetchall()]
-        if 'fecha_alta' not in emp_cols:
-            db.execute("ALTER TABLE empleados ADD COLUMN fecha_alta TEXT")
-        if 'fecha_baja' not in emp_cols:
-            db.execute("ALTER TABLE empleados ADD COLUMN fecha_baja TEXT")
-    except Exception: pass
-
-    # ── Migrate lotes: rename old Activo→Aprobado, Bloqueado→Rechazado ─────────
-    try:
-        db.execute("UPDATE lotes SET estado='Aprobado' WHERE estado='Activo'")
-        db.execute("UPDATE lotes SET estado='Rechazado' WHERE estado='Bloqueado'")
-    except Exception: pass
-
-    # ── Tabla configuración del sistema ───────────────────────────────────────
-    db.execute("""CREATE TABLE IF NOT EXISTS configuracion (
-        clave TEXT PRIMARY KEY,
-        valor TEXT,
-        descripcion TEXT
-    )""")
-    _cfg_defaults = [
-        ('empresa_nombre',      'Mecanizado Ituzaingo',    'Nombre del taller / empresa'),
-        ('empresa_subtitulo',   'Taller de Mecanizados', 'Subtítulo o rubro'),
-        ('empresa_direccion',   '',                   'Dirección'),
-        ('empresa_telefono',    '',                   'Teléfono / WhatsApp'),
-        ('empresa_email',       '',                   'Email'),
-        ('pdf_color_hex',       '2C5F8A',             'Color principal PDF (hex sin #)'),
-        ('pdf_mostrar_costos',  '0',                  'Mostrar costos en PDF (0/1)'),
-        ('pdf_mostrar_precios', '0',                  'Mostrar precio de venta en PDF (0/1)'),
-        ('pdf_nota_pie',        '',                   'Nota al pie del PDF de OT'),
-        ('valor_hora_mo',       '0',                  'Valor de mano de obra por hora ($)'),
-        ('sc_automaticas',      '0',                  'Generar Solicitudes de Compra automáticamente (0/1)'),
-    ]
-    for _k, _v, _d in _cfg_defaults:
-        db.execute("INSERT OR IGNORE INTO configuracion (clave,valor,descripcion) VALUES (?,?,?)",
-                   (_k, _v, _d))
-
-
-    # ── Migrate usuarios: quitar el CHECK de rol (v147, punto 12) ─────────────
-    # Los roles ahora se administran desde Configuración (tabla roles): la columna
-    # usuarios.rol guarda el NOMBRE del rol, que ya no está limitado a 5 valores.
-    try:
-        import re as _re
-        usr_ddl = db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='usuarios'").fetchone()
-        if usr_ddl and _re.search(r"CHECK\s*\(\s*rol", usr_ddl[0]):
-            db.commit()
-            db.execute("PRAGMA foreign_keys=OFF")
-            db.execute("DROP TABLE IF EXISTS usuarios_new")
-            db.execute("""CREATE TABLE usuarios_new (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL, password TEXT NOT NULL,
-                nombre TEXT NOT NULL,
-                rol TEXT NOT NULL,
-                activo INTEGER DEFAULT 1,
-                creado TEXT DEFAULT (datetime('now','localtime')))""")
-            db.execute("INSERT OR IGNORE INTO usuarios_new SELECT id,username,password,nombre,rol,activo,creado FROM usuarios")
-            db.execute("DROP TABLE usuarios")
-            db.execute("ALTER TABLE usuarios_new RENAME TO usuarios")
-            db.commit()
-            db.execute("PRAGMA foreign_keys=ON")
-    except Exception as e:
-        print(f"[WARN] Migración usuarios falló: {e}")
-
-    # ── Roles editables (v147, punto 12) ─────────────────────────────────────
-    db.execute("""CREATE TABLE IF NOT EXISTS roles (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nombre TEXT UNIQUE NOT NULL,
-        descripcion TEXT,
-        base_rol TEXT NOT NULL,
-        permisos TEXT DEFAULT '{}',
-        es_sistema INTEGER DEFAULT 0,
-        creado TEXT DEFAULT (datetime('now','localtime')))""")
-    import json as _json
-    for _rn, _desc in (("admin","Administrador — acceso total"),
-                       ("operario","Producción — órdenes de trabajo, procesos, novedades"),
-                       ("vendedor","Comercial — clientes, presupuestos, pedidos, compras"),
-                       ("almacen","Almacén — inventario, lotes, recepción"),
-                       ("logistica","Logística — remitos y stock, sin valores monetarios")):
-        db.execute("INSERT OR IGNORE INTO roles (nombre,descripcion,base_rol,permisos,es_sistema) VALUES (?,?,?,?,1)",
-                   (_rn, _desc, _rn, _json.dumps(DEFAULT_PERMISIONES.get(_rn, {}))))
-
-    # ── Versiones de proceso de productos ───────────────────────────────────
-    db.execute("""CREATE TABLE IF NOT EXISTS producto_versiones (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        producto_id INTEGER NOT NULL REFERENCES productos(id) ON DELETE CASCADE,
-        version_num INTEGER NOT NULL DEFAULT 1,
-        motivo TEXT,
-        snapshot TEXT NOT NULL,
-        creado_por TEXT,
-        creado TEXT DEFAULT (datetime('now','localtime')))""")
     # Recalcular rendimiento de novedades existentes descontando tiempo_perdido
     try:
         novedades = db.execute(
@@ -2739,44 +2578,10 @@ def init_db():
     except Exception as e:
         print(f"[init_db] Advertencia al topear rendimiento: {e}")
 
-    db.commit()  # liberar la transacción abierta por las migraciones de arriba:
-                 # migrar_stock_sinlote_a_lote_origen() usa get_db()/query(), que abre
-                 # una conexión sqlite3 aparte — si 'db' sigue con una transacción sin
+    db.commit()  # liberar la transacción abierta por las correcciones de arriba:
+                 # las de abajo usan get_db()/query(), que abren una conexión
+                 # sqlite3 aparte; si 'db' sigue con una transacción sin
                  # confirmar, esa segunda conexión choca con "database is locked".
-
-    # ── Unificación productos + materiales (una sola vez) ────────────────────
-    # Si la base todavía tiene la tabla `productos`, se unifica con
-    # `materiales` (ver migracion_unificacion.py): backup previo, una sola
-    # transacción, verificación completa antes de confirmar e informe en
-    # database/. Si algo no cierra se hace ROLLBACK y el server NO arranca,
-    # para no operar con el código nuevo sobre el esquema viejo.
-    # Una vez migrada la base, migracion_unificacion.py ya no se usa y se puede
-    # borrar: solo se importa si `productos` todavía es una tabla (base sin
-    # migrar o instalación nueva).
-    _r = db.execute("SELECT type FROM sqlite_master WHERE name='productos'").fetchone()
-    if _r and _r[0] == "table":
-        try:
-            import migracion_unificacion as _mu
-        except ImportError:
-            db.close()
-            raise SystemExit("La base todavía no está unificada y falta el archivo "
-                             "migracion_unificacion.py junto a server.py.")
-        print("[init_db] Unificando productos y materiales en una sola tabla de artículos...")
-        _res = _mu.migrar(DB_PATH, log=print)
-        if not _res["ok"]:
-            print(_res["informe"])
-            db.close()
-            raise SystemExit("La unificación de productos y materiales no se completó. "
-                             "La base quedó SIN cambios. Ver el informe en: "
-                             + str(_res.get("ruta_informe")))
-        print(f"[init_db] Unificación completa. Backup: {_res['ruta_backup']}")
-        print(f"[init_db] Informe: {_res['ruta_informe']}")
-
-    try:
-        with app.app_context():
-            migrar_stock_sinlote_a_lote_origen()
-    except Exception as e:
-        print(f"[init_db] Advertencia en migración de 'Producto sin lote': {e}")
 
     # Reparación: OTTs intermedias cuyo lote de retorno ya está Aprobado
     # pero la orden_operacion tercerizada quedó sin marcarse Completada
@@ -2910,178 +2715,6 @@ def init_db():
     except Exception as e:
         print(f"[init_db] Advertencia separando lotes mezclados en semielaborados: {e}")
 
-    db.close()
-
-def migrar_stock_sinlote_a_lote_origen():
-    """Migración de arranque (idempotente): reincorpora todo el stock que
-    hoy vive en materiales de categoría 'Producto sin lote' (PSL) —
-    remanente de un sistema anterior donde el excedente producido por
-    encima de lo pedido en una OT se acreditaba como stock suelto, sin
-    lote— al lote de Producto Terminado de la OT que originalmente lo
-    generó.
-
-    Esta versión del sistema ya no genera stock 'Producto sin lote' (el
-    excedente ahora siempre va al lote de la propia OT), pero pueden quedar
-    materiales de esa categoría con stock arrastrado de antes. Esta función
-    los detecta y los reubica una sola vez.
-
-    Reconstrucción del origen: recorre los movimientos del material PSL en
-    orden cronológico (FIFO). Cada ingreso con referencia "Excedente OT
-    NNNN — ..." abre un lote de origen con esa cantidad; cada salida
-    (consumo al prellenar una OT nueva, o reversión) se descuenta en ese
-    mismo orden sobre los orígenes más antiguos primero. Lo que queda al
-    final de recorrer todos los movimientos es, por OT de origen, lo que
-    realmente sigue sin lote hoy.
-
-    Es segura de correr en cada arranque: si no hay materiales PSL con
-    stock, o el stock restante no es atribuible a ninguna OT reconocible,
-    no hace nada. Si el lote de la OT de origen ya no existe (borrado,
-    OT eliminada, etc.), esa porción se deja sin migrar y se informa por
-    consola en vez de arriesgar mover stock al lugar equivocado.
-    """
-    materiales_sl = query("SELECT id,stock,producto_id FROM materiales WHERE categoria='Producto sin lote'")
-    if not materiales_sl:
-        return
-
-    for msl in materiales_sl:
-        stock_actual = float(msl["stock"] or 0)
-        if stock_actual <= 0.0001 or not msl["producto_id"]:
-            continue
-        prod = query("SELECT * FROM productos WHERE id=?", (msl["producto_id"],), one=True)
-        if not prod:
-            continue
-
-        movs = query("""SELECT tipo,cantidad,referencia FROM movimientos
-            WHERE material_id=? ORDER BY id ASC""", (msl["id"],))
-
-        # Reconstrucción FIFO: cola de [ot_numero, cantidad_restante]
-        cola = []
-        for mv in movs:
-            ref = mv["referencia"] or ""
-            cant = float(mv["cantidad"] or 0)
-            if cant <= 0:
-                continue
-            if mv["tipo"] == "ingreso":
-                m = re.match(r"Excedente OT (\S+)", ref)
-                if m:
-                    cola.append([m.group(1), cant])
-                # Ingresos sin ese formato (ajustes manuales de stock, etc.)
-                # no se pueden atribuir a una OT y quedan fuera del reparto
-                # FIFO — ver el ajuste proporcional más abajo.
-            elif mv["tipo"] == "salida":
-                restante = cant
-                idx = 0
-                while restante > 0.0001 and idx < len(cola):
-                    tomar = min(cola[idx][1], restante)
-                    cola[idx][1] -= tomar
-                    restante -= tomar
-                    idx += 1
-                # Salidas que superan lo acumulado en la cola (por ingresos
-                # sin OT reconocible, anteriores a esta migración) se
-                # ignoran silenciosamente: no hay de dónde descontarlas.
-
-        cola = [c for c in cola if c[1] > 0.0001]
-        total_reconstruido = sum(c[1] for c in cola)
-        if total_reconstruido <= 0.0001:
-            continue  # nada atribuible a una OT: no se mueve nada
-
-        # Ajuste proporcional: si el stock real del material no coincide
-        # exactamente con lo reconstruido por movimientos (redondeos,
-        # ingresos/ajustes sin referencia de OT), se escala la cola para
-        # que sume exactamente el stock actual, repartiendo la diferencia
-        # proporcionalmente entre los orígenes conocidos.
-        factor = stock_actual / total_reconstruido
-        for c in cola:
-            c[1] = c[1] * factor
-
-        capacidad_cajon = 0
-        try:
-            capacidad_cajon = int(prod["capacidad_cajon"]) if prod["capacidad_cajon"] else 0
-        except Exception:
-            capacidad_cajon = 0
-
-        mat_pt = get_or_create_pt_material(prod)
-
-        movido_total = 0.0
-        for ot_numero, cantidad in cola:
-            if cantidad <= 0.0001:
-                continue
-            lote_destino = None
-            if capacidad_cajon > 0:
-                lote_destino = query("""SELECT id FROM lotes WHERE material_id=? AND numero LIKE ?
-                    ORDER BY id DESC LIMIT 1""", (mat_pt["id"], f"{ot_numero}-C%"), one=True)
-            if not lote_destino:
-                lote_destino = query("SELECT id FROM lotes WHERE material_id=? AND numero=?",
-                    (mat_pt["id"], ot_numero), one=True)
-            if not lote_destino:
-                print(f"[migracion PSL] Aviso: no se encontró lote de la OT {ot_numero} "
-                      f"para el producto {prod['codigo']} — se dejan {cantidad:g} sin migrar "
-                      f"(quedan en 'Producto sin lote')")
-                continue
-
-            execute("""UPDATE lotes SET
-                cantidad_original=cantidad_original+?,
-                cantidad_disponible=cantidad_disponible+?
-                WHERE id=?""", (cantidad, cantidad, lote_destino["id"]))
-            execute("""INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id)
-                VALUES (?,?,?,?,?,?)""",
-                (mat_pt["id"], lote_destino["id"], "ingreso", cantidad,
-                 f"Migración inicial: stock de 'Producto sin lote' reincorporado al lote de origen (OT {ot_numero})",
-                 None))
-            movido_total += cantidad
-
-        if movido_total > 0.0001:
-            execute("""UPDATE materiales SET stock=MAX(0, stock-?), actualizado=datetime('now','localtime')
-                WHERE id=?""", (movido_total, msl["id"]))
-            execute("""INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id)
-                VALUES (?,NULL,'salida',?,?,?)""",
-                (msl["id"], movido_total,
-                 "Migración inicial: stock reincorporado a los lotes de origen de cada OT",
-                 None))
-            print(f"[migracion PSL] Producto {prod['codigo']}: {movido_total:g} unidades "
-                  f"reincorporadas a sus lotes de origen.")
-
-    _borrar_materiales_sinlote_migrados()
-
-def _borrar_materiales_sinlote_migrados():
-    """Elimina definitivamente los materiales de categoría 'Producto sin
-    lote' del sistema, una vez que migrar_stock_sinlote_a_lote_origen() ya
-    reincorporó su stock a los lotes de origen.
-
-    Se ejecuta siempre al final de la migración (en cada arranque). Un
-    material PSL solo se borra si quedó en stock ~0 (ya migrado por
-    completo). Si alguno conserva stock remanente (caso borde: la OT de
-    origen o su lote fueron borrados) NO se borra — se deja como está y se
-    avisa por consola, para no perder stock real sin dejar rastro.
-
-    Al desaparecer la fila de materiales, el material deja de existir para
-    todo el sistema — incluido el frontend, que solo lista lo que devuelve
-    /api/materiales.
-    """
-    materiales_sl = query("SELECT id, codigo, stock FROM materiales WHERE categoria='Producto sin lote'")
-    if not materiales_sl:
-        return
-
-    for msl in materiales_sl:
-        stock_restante = float(msl["stock"] or 0)
-        if stock_restante > 0.0001:
-            print(f"[limpieza PSL] Material {msl['codigo']} conserva {stock_restante:g} "
-                  f"unidades sin migrar — no se borra.")
-            continue
-
-        # Limpiar cualquier referencia antes de borrar la fila (evita violar
-        # las FK; en la práctica un material PSL nunca tuvo lotes propios,
-        # así que remito_items/orden_lotes no deberían tener nada, pero se
-        # cubre por las dudas).
-        execute("DELETE FROM movimientos WHERE material_id=?", (msl["id"],))
-        execute("DELETE FROM operacion_materiales WHERE material_id=?", (msl["id"],))
-        execute("DELETE FROM orden_materiales WHERE material_id=?", (msl["id"],))
-        execute("DELETE FROM proveedor_materiales WHERE material_id=?", (msl["id"],))
-        execute("DELETE FROM remito_items WHERE material_id=?", (msl["id"],))
-        execute("DELETE FROM orden_lotes WHERE material_id=?", (msl["id"],))
-        execute("DELETE FROM materiales WHERE id=?", (msl["id"],))
-        print(f"[limpieza PSL] Material {msl['codigo']} eliminado (stock ya migrado a los lotes de origen).")
-
 def _snapshot_producto(prod_id):
     """Genera un snapshot JSON del producto y sus operaciones/materiales actuales."""
     import json
@@ -3141,35 +2774,6 @@ def login():
 
 @app.route("/logout")
 def logout(): session.clear(); return redirect("/login")
-
-@app.route("/api/me")
-def me():
-    if "user_id" not in session: return jsonify({"auth":False}), 401
-    
-    # Load user permissions
-    perms = {}
-    try:
-        rows = query("SELECT clave,valor FROM usuario_permisos WHERE usuario_id=?", (session["user_id"],))
-        perms = {r["clave"]: r["valor"] for r in rows}
-    except Exception:
-        pass
-    
-    # Si no hay permisos explícitos y no es admin, usar permisos predeterminados del rol
-    if not perms and session.get("rol") != "admin":
-        perms = _permisos_rol(session.get("rol_nombre") or session.get("rol", "operario"))
-    
-    ver_mon = puede_ver_monetario()
-    perms = {k: v for k, v in perms.items() if k != "ver_monetario"}
-    return jsonify({"auth":True,"nombre":session["nombre"],"rol":session["rol"],
-                    "rol_nombre":session.get("rol_nombre") or session["rol"],
-                    "perms":perms,"ver_monetario":ver_mon})
-# ── Serve React SPA ──────────────────────────────────────────────────────────
-import os as _os
-
-@app.route("/app")
-@app.route("/app/<path:path>")
-def react_app(path=""):
-    return send_from_directory("static/dist", "index.html")
 
 @app.route("/")
 @login_required()
@@ -3760,23 +3364,6 @@ def dashboard_economico():
                GROUP BY c.id ORDER BY valor DESC LIMIT 5""")],
     })
 
-# ── Dashboard (legacy) ───────────────────────────────────────────────────────
-@app.route("/api/dashboard")
-@login_required()
-def dashboard():
-    return jsonify({
-        "ot_activas":      query("SELECT COUNT(*) c FROM ordenes WHERE estado IN ('Pendiente','En proceso')", one=True)["c"],
-        "stock_critico":   query("SELECT COUNT(*) c FROM materiales WHERE stock<=stock_min AND stock_min>0", one=True)["c"],
-        "maquinas_fuera":  query("SELECT COUNT(*) c FROM maquinas WHERE estado!='Operativa'", one=True)["c"],
-        "tickets_abiertos":query("SELECT COUNT(*) c FROM tickets_reparacion WHERE estado='Abierto'", one=True)["c"],
-        "facturacion":     query("SELECT COALESCE(SUM(total),0) s FROM presupuestos WHERE estado='Facturado' AND strftime('%Y-%m',creado)=strftime('%Y-%m','now')", one=True)["s"],
-        "alertas_mat":     [dict(r) for r in query("SELECT codigo,descripcion,stock,stock_min,unidad FROM materiales WHERE stock<=stock_min AND stock_min>0 LIMIT 5")],
-        "alertas_ot":      [dict(r) for r in query("SELECT numero,descripcion,fecha_entrega FROM ordenes WHERE estado IN ('Pendiente','En proceso') AND fecha_entrega<=date('now','+3 days') ORDER BY fecha_entrega LIMIT 4")],
-        "alertas_tkt":     [dict(r) for r in query("SELECT m.nombre maquina,t.numero,t.descripcion,t.prioridad FROM tickets_reparacion t JOIN maquinas m ON m.id=t.maquina_id WHERE t.estado='Abierto' LIMIT 4")],
-        "mantto_proximo":  [dict(r) for r in query("SELECT m.nombre maquina,p.tarea,p.proxima_fecha,p.tipo FROM mantenimiento_plan p JOIN maquinas m ON m.id=p.maquina_id WHERE p.proxima_fecha IS NOT NULL AND p.proxima_fecha<=date('now','+7 days') ORDER BY p.proxima_fecha LIMIT 5")],
-        "ots_recientes":   [dict(r) for r in query("SELECT o.numero,c.razon cliente,pr.nombre producto,o.descripcion,o.estado,o.fecha_entrega FROM ordenes o LEFT JOIN clientes c ON c.id=o.cliente_id LEFT JOIN productos pr ON pr.id=o.producto_id ORDER BY o.id DESC LIMIT 6")],
-    })
-
 # ── Categorias ────────────────────────────────────────────────────────────────
 @app.route("/api/categorias_producto", methods=["GET"])
 @login_required()
@@ -3925,10 +3512,7 @@ def get_tickets():
 def create_ticket():
     d = request.json
     if not d.get("maquina_id") or not d.get("descripcion"): return jsonify({"error":"Máquina y descripción requeridas"}), 400
-    last = query("SELECT numero FROM tickets_reparacion ORDER BY id DESC LIMIT 1", one=True)
-    try: n = int(last["numero"].split("-")[1])+1 if last else 1
-    except: n = 1
-    numero = f"TKT-{n:03d}"
+    numero = siguiente_numero("tickets_reparacion", "TKT-", 3)
     lid = execute("INSERT INTO tickets_reparacion (numero,maquina_id,tipo,descripcion,prioridad,estado,responsable,horas_paro,creado_por) VALUES (?,?,?,?,?,?,?,?,?)",
         (numero,d["maquina_id"],d.get("tipo","Correctivo"),d["descripcion"],d.get("prioridad","Normal"),"Abierto",d.get("responsable"),0,session["user_id"]))
     execute("UPDATE maquinas SET estado='En mantenimiento' WHERE id=? AND estado='Operativa'", (d["maquina_id"],))
@@ -4049,13 +3633,7 @@ def create_material():
         (d["codigo"],d["descripcion"],d.get("categoria","Material"),d.get("categoria_producto_id"),d.get("unidad","kg"),stock_inicial,d.get("stock_min",0),d.get("stock_max",0),d.get("precio_unit",0),d.get("proveedor_id"),d.get("obs")))
     if stock_inicial > 0 and d.get("categoria","Material") == "Material":
         # Auto-create lote for initial stock
-        from datetime import datetime
-        year = datetime.now().year
-        last_l = query("SELECT numero FROM lotes WHERE numero LIKE ? ORDER BY id DESC LIMIT 1",
-            (f"LOTE-{year}-%",), one=True)
-        try: ln = int(last_l["numero"].split("-")[2]) + 1 if last_l else 1
-        except: ln = 1
-        lote_num = f"LOTE-{year}-{ln:04d}"
+        lote_num = _gen_lote_numero()
         lote_id = execute("""INSERT INTO lotes
             (numero,material_id,cantidad_original,cantidad_disponible,
              proveedor_id,referencia_proveedor,estado,obs,creado_por,stock_computado)
@@ -4193,42 +3771,6 @@ def get_movimientos():
         d_ = dict(r); d_["origen"] = _mov_origen_label(d_.get("referencia"), d_.get("tipo")); out.append(d_)
     return jsonify(out)
 
-@app.route("/api/materiales/<int:mid>/movimiento", methods=["POST"])
-@login_required(roles=["admin","almacen"])
-def movimiento(mid):
-    d = request.json
-    tipo = d.get("tipo")
-    try:
-        qty = float(d.get("cantidad", 0))
-    except (TypeError, ValueError):
-        return jsonify({"error":"La cantidad tiene que ser un número"}), 400
-    # Una cantidad negativa no es una forma de invertir el movimiento: para
-    # sacar stock está el tipo 'salida'. Aceptarla hacía que una 'entrada'
-    # con cantidad -50 descontara stock sin dejar rastro de que fue una baja.
-    # El 'ajuste' es la excepción: ahí la cantidad es el stock resultante, y
-    # su propio chequeo (más abajo) decide si se permite dejarlo en negativo.
-    if qty < 0 and tipo in ("entrada", "salida"):
-        return jsonify({"error":"La cantidad no puede ser negativa. Para descontar stock usá un movimiento de salida."}), 400
-    if tipo == "salida":
-        mat = query("SELECT stock FROM materiales WHERE id=?", (mid,), one=True)
-        if not mat or mat["stock"] < qty: return jsonify({"error":"Stock insuficiente"}), 400
-        execute("UPDATE materiales SET stock=stock-?,actualizado=datetime('now','localtime') WHERE id=?", (qty, mid))
-        auto_generar_sc_bajo_stock(mid, "movimiento de salida manual")
-    elif tipo == "entrada":
-        execute("UPDATE materiales SET stock=stock+?,actualizado=datetime('now','localtime') WHERE id=?", (qty, mid))
-    else:
-        # Ajuste: fija el stock en el valor indicado. No puede dejarlo en
-        # negativo salvo que quien lo hace lo pida explícitamente — el caso
-        # real es regularizar un conteo donde el sistema ya entregó más de lo
-        # que tenía registrado.
-        if qty < 0 and not d.get("permitir_negativo"):
-            return jsonify({"error":"El ajuste dejaría el stock en negativo. "
-                                    "Si es una regularización de conteo, confirmala explícitamente."}), 400
-        execute("UPDATE materiales SET stock=?,actualizado=datetime('now','localtime') WHERE id=?", (qty, mid))
-    execute("INSERT INTO movimientos (material_id,tipo,cantidad,referencia,usuario_id) VALUES (?,?,?,?,?)",
-        (mid, tipo, qty, d.get("referencia"), session["user_id"]))
-    return jsonify({"ok":True})
-
 # ── Proveedores ───────────────────────────────────────────────────────────────
 @app.route("/api/proveedores", methods=["GET"])
 @login_required()
@@ -4278,12 +3820,6 @@ def link_mat(pid):
     if not d.get("material_id"): return jsonify({"error":"Material requerido"}), 400
     execute("INSERT OR REPLACE INTO proveedor_materiales (proveedor_id,material_id,precio_unit,plazo_dias,es_principal) VALUES (?,?,?,?,?)",
         (pid, d["material_id"], d.get("precio_unit",0), d.get("plazo_dias",3), 1 if d.get("es_principal") else 0))
-    return jsonify({"ok":True})
-
-@app.route("/api/proveedores/<int:pid>/materiales/<int:mid>", methods=["DELETE"])
-@login_required(roles=["admin","almacen"])
-def unlink_mat(pid, mid):
-    execute("DELETE FROM proveedor_materiales WHERE proveedor_id=? AND material_id=?", (pid, mid))
     return jsonify({"ok":True})
 
 # ── Productos / Procesos ──────────────────────────────────────────────────────
@@ -4442,11 +3978,24 @@ def _codigo_en_uso(codigo, excluir_id=None):
 def _msg_codigo_en_uso(row):
     return f"El código '{row['codigo']}' ya está en uso por otro artículo ({row['categoria'] or 'Material'})"
 
+def _piezas_por_cajon(valor):
+    """"Piezas por cajón" (capacidad_cajon) es obligatorio: entero >= 1.
+    Devuelve (valor, error)."""
+    try:
+        v = float(valor)
+    except (TypeError, ValueError):
+        return None, "Piezas por cajón es obligatorio (número entero mayor a 0)"
+    if v < 1 or v != int(v):
+        return None, "Piezas por cajón tiene que ser un número entero mayor a 0"
+    return int(v), None
+
 @app.route("/api/productos", methods=["POST"])
 @login_required(roles=["admin","operario"])
 def create_producto():
     d = request.json
     if not d.get("codigo") or not d.get("nombre"): return jsonify({"error":"Código y nombre requeridos"}), 400
+    cap_cajon, err = _piezas_por_cajon(d.get("capacidad_cajon"))
+    if err: return jsonify({"error": err}), 400
     dup = _codigo_en_uso(d["codigo"])
     if dup: return jsonify({"error": _msg_codigo_en_uso(dup)}), 409
     # El producto es un artículo más de la tabla única (materiales), de tipo
@@ -4460,7 +4009,7 @@ def create_producto():
         VALUES (?,?,?,'Producto terminado',?,?,?,?,?,?,?,?,?,?,?,0,0,1)""",
         (d["codigo"],d["nombre"],d.get("descripcion"),d.get("categoria_id") or None,d.get("unidad","unid"),
          d.get("tiempo_total_hs",0),d.get("costo_mat",0),d.get("costo_mo",0),d.get("precio_venta",0),
-         d.get("peso_kg",0),d.get("cliente_id") or None,d.get("obs"),d.get("capacidad_cajon") or None,cb))
+         d.get("peso_kg",0),d.get("cliente_id") or None,d.get("obs"),cap_cajon,cb))
     return jsonify({"ok":True,"id":lid}), 201
 
 
@@ -4492,12 +4041,12 @@ def copiar_producto(pid):
     new_pid = execute(
         """INSERT INTO materiales
            (codigo,descripcion,descripcion_larga,categoria,categoria_producto_id,unidad,
-            tiempo_total_hs,costo_mat,costo_mo,precio_venta,activo,obs,stock,stock_min)
-           VALUES (?,?,?,'Producto terminado',?,?,?,?,?,?,?,?,0,0)""",
+            tiempo_total_hs,costo_mat,costo_mo,precio_venta,activo,obs,capacidad_cajon,stock,stock_min)
+           VALUES (?,?,?,'Producto terminado',?,?,?,?,?,?,?,?,?,0,0)""",
         (nuevo_codigo, nuevo_nombre_final, orig["descripcion"],
          orig["categoria_id"], orig["unidad"], orig["tiempo_total_hs"],
          orig["costo_mat"], orig["costo_mo"], orig["precio_venta"],
-         1, orig["obs"]))
+         1, orig["obs"], orig["capacidad_cajon"]))
 
     # Copy operations and their materials
     ops_copiadas = 0
@@ -4524,11 +4073,12 @@ def copiar_producto(pid):
             "SELECT * FROM operacion_materiales WHERE operacion_id=?", (op["id"],))
         for m in mats:
             execute(
-                "INSERT INTO operacion_materiales (operacion_id,material_id,producto_id,cantidad,unidad,tipo) VALUES (?,?,?,?,?,?)",
+                "INSERT INTO operacion_materiales (operacion_id,material_id,producto_id,cantidad,unidad,tipo,vida_util_herramienta) VALUES (?,?,?,?,?,?,?)",
                 (new_opid, m["material_id"] if "material_id" in m.keys() else None,
                  m["producto_id"] if "producto_id" in m.keys() else None,
                  m["cantidad"], m["unidad"],
-                 m["tipo"] if "tipo" in m.keys() else "material"))
+                 m["tipo"] if "tipo" in m.keys() else "material",
+                 m["vida_util_herramienta"]))
         ops_copiadas += 1
 
     return jsonify({
@@ -4542,6 +4092,10 @@ def copiar_producto(pid):
 def update_producto(pid):
     d = request.json
     # If only precio_venta is sent (partial update from OC), do a targeted UPDATE
+    if "capacidad_cajon" in d or "nombre" in d:
+        cap_cajon, err = _piezas_por_cajon(d.get("capacidad_cajon"))
+        if err: return jsonify({"error": err}), 400
+        d["capacidad_cajon"] = cap_cajon
     if "nombre" not in d:
         fields, vals = [], []
         for col in ["precio_venta","peso_kg","cliente_id","activo","obs","capacidad_cajon","codigo_barras"]:
@@ -4570,7 +4124,7 @@ def update_producto(pid):
         capacidad_cajon=?,actualizado=datetime('now','localtime') WHERE id=?""",
         (nuevo_codigo,d["nombre"],d.get("descripcion"),d.get("categoria_id") or None,d.get("unidad","unid"),d.get("tiempo_total_hs",0),
          d.get("costo_mat",prod_actual["costo_mat"]),d.get("costo_mo",prod_actual["costo_mo"]),d.get("precio_venta",prod_actual["precio_venta"]),
-         d.get("peso_kg",0),d.get("cliente_id") or None,d.get("obs"),1 if d.get("activo",True) else 0,d.get("capacidad_cajon") or None,pid))
+         d.get("peso_kg",0),d.get("cliente_id") or None,d.get("obs"),1 if d.get("activo",True) else 0,d["capacidad_cajon"],pid))
     if "codigo_barras" in d:
         cb = (d.get("codigo_barras") or "").strip() or None
         execute("UPDATE materiales SET codigo_barras=? WHERE id=?", (cb, pid))
@@ -4635,9 +4189,10 @@ def create_operacion():
                 if prod_ins:
                     mat_pt = get_or_create_pt_material(prod_ins)
                     mat_id = mat_pt["id"]
-            execute("INSERT INTO operacion_materiales (operacion_id,material_id,producto_id,cantidad,unidad,tipo) VALUES (?,?,?,?,?,?)",
+            execute("INSERT INTO operacion_materiales (operacion_id,material_id,producto_id,cantidad,unidad,tipo,vida_util_herramienta) VALUES (?,?,?,?,?,?,?)",
                 (lid, mat_id, mat.get("producto_id") or None,
-                 mat["cantidad"], mat.get("unidad",""), tipo_m))
+                 mat["cantidad"], mat.get("unidad",""), tipo_m,
+                 _vida_util_valida(mat_id, mat.get("vida_util_herramienta"))))
     _recalcular_tiempo_total_producto(d["producto_id"])
     return jsonify({"ok":True,"id":lid}), 201
 
@@ -4695,9 +4250,10 @@ def update_operacion(oid):
                     if prod_ins:
                         mat_pt = get_or_create_pt_material(prod_ins)
                         mat_id = mat_pt["id"]
-                execute("INSERT INTO operacion_materiales (operacion_id,material_id,producto_id,cantidad,unidad,tipo) VALUES (?,?,?,?,?,?)",
+                execute("INSERT INTO operacion_materiales (operacion_id,material_id,producto_id,cantidad,unidad,tipo,vida_util_herramienta) VALUES (?,?,?,?,?,?,?)",
                     (oid, mat_id, mat.get("producto_id") or None,
-                     mat["cantidad"], mat.get("unidad",""), tipo_m))
+                     mat["cantidad"], mat.get("unidad",""), tipo_m,
+                     _vida_util_valida(mat_id, mat.get("vida_util_herramienta"))))
     # Recalculate total time
     _recalcular_tiempo_total_producto(prod_id)
     return jsonify({"ok":True})
@@ -4807,7 +4363,7 @@ def _next_numero_req():
     return str(maxn + 1)
 
 # ── Sincronización automática OTT -> Requerimiento productivo ────────────────
-# Reemplaza la carga manual (y el auto_carga por IA/PDF, ver más abajo): cada
+# Reemplaza la carga manual (y la vieja carga por IA/PDF, ya eliminada): cada
 # vez que una orden tercerizada (ordenes_tercerizado / "OTT") cambia — se crea,
 # se emite un remito de traslado hacia el proveedor, se recibe (total o
 # parcialmente) o se completa — se refleja automáticamente en
@@ -4852,8 +4408,6 @@ def _sync_requerimiento_desde_ott(ott_id):
         cantidad_entregada = float(ott["cantidad_recibida"] or 0) if f_entrega else None
         cant_no_conforme = None
         if f_entrega:
-            enviada = float(ott["cantidad_enviada"] or 0)
-            recibida = float(ott["cantidad_recibida"] or 0)
             # Rechazado y ya devuelto al proveedor: no llegó conforme.
             cant_no_conforme = float(ott["cantidad_rechazada_devuelta"] or 0)
 
@@ -5207,235 +4761,6 @@ def delete_requerimiento_productivo(rid):
     execute("DELETE FROM requerimientos_productivos WHERE id=?", (rid,))
     return jsonify({"ok":True})
 
-# ── Auto-carga de requerimientos productivos (remitos/OC/facturas) ────────────
-# Sube un PDF o foto de remito/OC/factura, un modelo de IA extrae los datos y
-# el sistema los graba solo (alta de pedido o registro de entrega), sin
-# pantalla de confirmación intermedia.
-import base64 as _b64, json as _json, urllib.request as _urlreq, urllib.error as _urlerr
-
-REQ_AUTO_DIR = os.path.join(os.path.dirname(__file__), "documentos", "requerimientos_auto")
-
-REQ_EXTRACT_PROMPT = """Sos un asistente que extrae datos de documentos de proveedores (remitos,
-órdenes de compra, facturas) para cargarlos en el sistema de "Requerimientos productivos" de
-un ERP de manufactura. Analizá el documento adjunto y devolvé SOLO un JSON válido, sin texto
-adicional, sin markdown, sin explicaciones.
-
-Determiná el TIPO de documento y devolvé el formato correspondiente:
-
-TIPO "alta" (orden de compra / pedido nuevo a un proveedor tercerizado):
-{
-  "tipo": "alta",
-  "numero": "",
-  "cliente": "",
-  "codigo": "",
-  "material_proceso": "",
-  "provision": "",
-  "cantidad_pedida": 0,
-  "unidad": "",
-  "proveedor": "",
-  "nro_oc_remito": "",
-  "f_pedido": "YYYY-MM-DD",
-  "f_necesidad": "YYYY-MM-DD",
-  "f_estimada": "YYYY-MM-DD"
-}
-
-TIPO "entrega" (remito o factura de recepción de mercadería/proceso ya pedido):
-{
-  "tipo": "entrega",
-  "numero_requerimiento": "",
-  "nro_oc_remito": "",
-  "proveedor": "",
-  "f_entrega": "YYYY-MM-DD",
-  "cantidad_entregada": 0,
-  "remito": "",
-  "nro_factura": "",
-  "cant_no_conforme": 0,
-  "nro_icp": ""
-}
-
-Si el documento trae varios ítems distintos, devolvé una LISTA de objetos (uno por ítem).
-Si no podés determinar el tipo, devolvé {"tipo": "indeterminado", "motivo": "..."}.
-
-REGLAS:
-- No inventes datos: campo no encontrado -> "" (texto) o null (número/fecha).
-- Fechas siempre en formato YYYY-MM-DD.
-- Nunca devuelvas "estado", "cumple_fecha", "cumple_cantidad" ni "cumple_calidad" (se calculan solos).
-"""
-
-def _req_auto_match_id(nombre, tabla):
-    """Busca un cliente/proveedor existente por coincidencia de razón social
-    (case-insensitive, substring en cualquier sentido). Devuelve el id o None."""
-    if not nombre:
-        return None
-    nombre_n = nombre.strip().lower()
-    rows = query(f"SELECT id, razon FROM {tabla}")
-    for r in rows:
-        razon_n = (r["razon"] or "").strip().lower()
-        if razon_n and (razon_n == nombre_n or razon_n in nombre_n or nombre_n in razon_n):
-            return r["id"]
-    return None
-
-def _req_auto_llamar_ia(file_bytes, mime):
-    """Llama a la API de Anthropic con el documento adjunto y devuelve el JSON
-    (dict o list) ya parseado. Lanza RuntimeError con un mensaje claro si algo falla."""
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise RuntimeError("Falta configurar la variable de entorno ANTHROPIC_API_KEY en el servidor")
-
-    b64 = _b64.b64encode(file_bytes).decode()
-    if mime == "application/pdf":
-        content_block = {"type": "document", "source": {"type": "base64", "media_type": mime, "data": b64}}
-    else:
-        content_block = {"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}}
-
-    body = _json.dumps({
-        "model": "claude-sonnet-4-6",
-        "max_tokens": 2000,
-        "system": REQ_EXTRACT_PROMPT,
-        "messages": [{"role": "user", "content": [content_block, {"type": "text", "text": "Extraé los datos de este documento."}]}],
-    }).encode()
-
-    req = _urlreq.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=body,
-        headers={
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with _urlreq.urlopen(req, timeout=60) as resp:
-            data = _json.loads(resp.read().decode())
-    except _urlerr.HTTPError as e:
-        detalle = e.read().decode(errors="replace")[:300]
-        raise RuntimeError(f"Error de la API de IA ({e.code}): {detalle}")
-    except _urlerr.URLError as e:
-        raise RuntimeError(f"No se pudo conectar a la API de IA: {e.reason}")
-
-    texto = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text").strip()
-    texto = texto.strip("`")
-    if texto.lower().startswith("json"):
-        texto = texto[4:].strip()
-    try:
-        return _json.loads(texto)
-    except ValueError as e:
-        raise RuntimeError(f"La IA no devolvió JSON válido: {e} — respuesta: {texto[:300]}")
-
-def _req_auto_procesar_item(item):
-    """Aplica un ítem extraído (alta o entrega) directamente sobre la base,
-    reutilizando la misma lógica de cálculo que los endpoints manuales.
-    Devuelve un dict describiendo qué se hizo."""
-    tipo = (item.get("tipo") or "").strip().lower()
-
-    if tipo == "alta":
-        numero = (item.get("numero") or "").strip()
-        cantidad_pedida = item.get("cantidad_pedida")
-        if not numero or not cantidad_pedida:
-            return {"ok": False, "motivo": "Alta sin número o cantidad_pedida", "item": item}
-        existente = query("SELECT id FROM requerimientos_productivos WHERE numero=?", (numero,), one=True)
-        if existente:
-            return {"ok": False, "motivo": f"Ya existe un requerimiento con número {numero}", "item": item}
-        cliente_id = _req_auto_match_id(item.get("cliente"), "clientes")
-        proveedor_id = _req_auto_match_id(item.get("proveedor"), "proveedores")
-        estado = _calc_estado_req(item.get("f_estimada"), None, None)
-        rid = execute("""INSERT INTO requerimientos_productivos
-            (numero,cliente_id,codigo,material_proceso,provision,cantidad_pedida,unidad,
-             proveedor_id,nro_oc_remito,f_pedido,f_necesidad,f_estimada,estado)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (numero, cliente_id, item.get("codigo"), item.get("material_proceso"),
-             item.get("provision"), cantidad_pedida, item.get("unidad"),
-             proveedor_id, item.get("nro_oc_remito"), item.get("f_pedido"),
-             item.get("f_necesidad"), item.get("f_estimada"), estado))
-        return {"ok": True, "accion": "alta", "id": rid, "numero": numero}
-
-    if tipo == "entrega":
-        numero = (item.get("numero_requerimiento") or "").strip()
-        nro_oc = (item.get("nro_oc_remito") or "").strip()
-        r = None
-        if numero:
-            r = query("SELECT * FROM requerimientos_productivos WHERE numero=?", (numero,), one=True)
-        if not r and nro_oc:
-            r = query("SELECT * FROM requerimientos_productivos WHERE nro_oc_remito=? AND f_entrega IS NULL", (nro_oc,), one=True)
-        if not r:
-            return {"ok": False, "motivo": f"No se encontró el requerimiento (número={numero!r}, OC={nro_oc!r})", "item": item}
-        if not item.get("f_entrega"):
-            return {"ok": False, "motivo": "Entrega sin f_entrega", "item": item}
-        cantidad_entregada = item.get("cantidad_entregada")
-        cant_no_conforme = item.get("cant_no_conforme")
-        estado = _calc_estado_req(r["f_estimada"], item.get("f_entrega"))
-        cumple_fecha, cumple_cantidad, cumple_calidad = _calc_cumplimientos_req(
-            r["f_estimada"], item.get("f_entrega"), r["cantidad_pedida"], cantidad_entregada, cant_no_conforme)
-        execute("""UPDATE requerimientos_productivos SET
-            f_entrega=?,cantidad_entregada=?,remito=?,nro_factura=?,cant_no_conforme=?,
-            nro_icp=?,estado=?,cumple_fecha=?,cumple_cantidad=?,cumple_calidad=? WHERE id=?""",
-            (item.get("f_entrega"), cantidad_entregada, item.get("remito"), item.get("nro_factura"),
-             cant_no_conforme, item.get("nro_icp"), estado, cumple_fecha, cumple_cantidad,
-             cumple_calidad, r["id"]))
-        return {"ok": True, "accion": "entrega", "id": r["id"], "numero": r["numero"]}
-
-    return {"ok": False, "motivo": item.get("motivo") or f"Tipo de documento no reconocido: {tipo!r}", "item": item}
-
-@app.route("/api/requerimientos_productivos/auto_carga", methods=["POST"])
-@login_required(roles=["admin","almacen","vendedor"])
-def auto_carga_requerimiento():
-    """DEPRECADO: la carga por PDF/foto + IA ya no es necesaria. Los
-    requerimientos productivos ahora se generan y actualizan solos a partir
-    de las órdenes tercerizadas (OTT) — ver _sync_requerimiento_desde_ott.
-    Se deja el endpoint respondiendo 410 (en vez de borrarlo) para no romper
-    en caliente algún cliente viejo que todavía lo llame, y con toda la
-    lógica original comentada más abajo por si hiciera falta un caso
-    puntual que no pase por OTT."""
-    return jsonify({
-        "error": "La carga automática por PDF fue reemplazada: los requerimientos productivos "
-                 "se generan solos desde las órdenes tercerizadas (OTT) del sistema. "
-                 "Si este caso no tiene una OTT asociada, cargalo manualmente desde la pantalla "
-                 "de Requerimientos productivos."
-    }), 410
-
-def _auto_carga_requerimiento_legacy():
-    """Implementación original (fuera de ruta, solo de referencia). No se
-    llama desde ningún lado."""
-    if "file" not in request.files:
-        return jsonify({"error": "Sin archivo"}), 400
-    f = request.files["file"]
-    if not f.filename:
-        return jsonify({"error": "Nombre vacío"}), 400
-
-    mime = f.mimetype or ""
-    if mime not in ("application/pdf", "image/png", "image/jpeg", "image/webp"):
-        return jsonify({"error": f"Formato no soportado ({mime}). Usá PDF, PNG, JPG o WEBP."}), 400
-
-    file_bytes = f.read()
-    if len(file_bytes) > 15 * 1024 * 1024:
-        return jsonify({"error": "Archivo demasiado grande (máx. 15MB)"}), 400
-
-    # Guardar copia del documento original para trazabilidad
-    os.makedirs(REQ_AUTO_DIR, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    ext = {"application/pdf": ".pdf", "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}[mime]
-    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", f.filename)
-    dest_name = f"{ts}__{safe}{'' if safe.lower().endswith(ext) else ext}"
-    with open(os.path.join(REQ_AUTO_DIR, dest_name), "wb") as fh:
-        fh.write(file_bytes)
-
-    try:
-        extraido = _req_auto_llamar_ia(file_bytes, mime)
-    except RuntimeError as e:
-        return jsonify({"error": str(e), "archivo_guardado": dest_name}), 502
-
-    items = extraido if isinstance(extraido, list) else [extraido]
-    resultados = [_req_auto_procesar_item(item) for item in items]
-    ok_count = sum(1 for r in resultados if r["ok"])
-    return jsonify({
-        "ok": ok_count > 0,
-        "procesados": len(resultados),
-        "exitosos": ok_count,
-        "resultados": resultados,
-        "archivo_guardado": dest_name,
-    }), (201 if ok_count else 422)
-
 APP_VERSION = "149"
 
 @app.route("/api/version")
@@ -5523,6 +4848,49 @@ def _sch_corto(v):
     return f"{v[8:10]}/{v[5:7]} {v[11:16]}"
 
 
+# Los bloques de OTs u operaciones cerradas quedan como historial en el Gantt,
+# pero ya no ocupan la máquina ni al operario.
+_SCH_ACTIVO = " AND o.estado NOT IN ('Completada','Cancelada') AND oo.estado NOT IN ('Completada','Cancelada')"
+
+
+def _sch_ahora():
+    return _dt.now().strftime(_SCH_FMT)
+
+
+def _sch_qty_futura(oo_id):
+    """Cantidad planificada en bloques que todavía no terminaron. Los bloques
+    ya pasados no cuentan: lo que se hizo en ellos ya está en qty_producida."""
+    r = query("SELECT COALESCE(SUM(cantidad_plan),0) q FROM planificacion WHERE orden_operacion_id=? AND fin>?",
+              (oo_id, _sch_ahora()), one=True)
+    return float(r["q"] or 0)
+
+
+def _sch_disponible(oo_id, requerida, falta, excluir_bid=None):
+    """Cuánto queda por planificar de una operación: lo que falta producir
+    menos lo ya planificado a futuro en otros bloques. None si la operación
+    no tiene cantidad requerida (no hay tope que controlar)."""
+    if float(requerida or 0) <= 0:
+        return None
+    r = query("""SELECT COALESCE(SUM(cantidad_plan),0) q FROM planificacion
+                 WHERE orden_operacion_id=? AND fin>? AND id<>?""",
+              (oo_id, _sch_ahora(), excluir_bid or 0), one=True)
+    return round(falta - float(r["q"] or 0), 6)
+
+
+def _sch_tope_error(v, disponible):
+    """Una operación planificada por completo no admite más planificación
+    (sí la misma operación de otra OT, que es otra orden_operacion)."""
+    if disponible is None:
+        return None
+    if disponible <= 0.0001:
+        return (f"La operación {v['op_desc']} ya está planificada por completo. "
+                "Para cambiarla, editá o eliminá sus bloques.")
+    if v["qty"] > disponible + 0.0001:
+        return (f"La operación {v['op_desc']} solo tiene {disponible:g} u sin planificar "
+                f"(pediste {v['qty']:g} u).")
+    return None
+
+
 def _sch_bloque_sql():
     return """SELECT pl.id, pl.orden_operacion_id, pl.maquina_id, pl.empleado_id, pl.inicio, pl.fin,
         pl.jornada_horas, pl.cantidad_plan, pl.obs,
@@ -5569,7 +4937,7 @@ def sch_pendientes():
         oo.maquina_id, COALESCE(oo.tiempo_setup_min,0) setup_min, COALESCE(oo.tiempo_ciclo_seg,0) ciclo_seg,
         o.numero ot_numero, o.prioridad, o.fecha_entrega, o.estado ot_estado,
         p.codigo producto_codigo, p.nombre producto_nombre, c.razon cliente_nombre,
-        (SELECT COALESCE(SUM(pl.cantidad_plan),0) FROM planificacion pl WHERE pl.orden_operacion_id=oo.id) qty_planificada,
+        (SELECT COALESCE(SUM(pl.cantidad_plan),0) FROM planificacion pl WHERE pl.orden_operacion_id=oo.id AND pl.fin>?) qty_planificada,
         (SELECT COUNT(*) FROM planificacion pl WHERE pl.orden_operacion_id=oo.id) bloques
         FROM orden_operaciones oo
         JOIN ordenes o ON o.id=oo.orden_id
@@ -5580,11 +4948,11 @@ def sch_pendientes():
           AND COALESCE(oo.es_tercerizada,0)=0
           AND oo.estado NOT IN ('Completada','Cancelada')
           AND (oo.estado IN ('Pendiente','En proceso') OR oo.qty_producida<oo.qty_requerida)
-        ORDER BY COALESCE(o.fecha_entrega,'9999'), o.id, CAST(oo.orden AS INTEGER)""")
+        ORDER BY COALESCE(o.fecha_entrega,'9999'), o.id, CAST(oo.orden AS INTEGER)""", (_sch_ahora(),))
     return jsonify([dict(r) for r in rows])
 
 
-def _sch_validar(d, bid=None):
+def _sch_validar(d, bid=None, emp_actual=None):
     """Valida un bloque. Devuelve (datos, error, avisos). Choques de máquina u
     operario son error (409): una máquina o una persona no pueden estar en dos
     trabajos a la vez."""
@@ -5622,7 +4990,11 @@ def _sch_validar(d, bid=None):
         if not emp:
             return None, ("Operario no encontrado", 404), avisos
         if not emp["activo"]:
-            return None, ("El operario está dado de baja", 400), avisos
+            # Un bloque que ya lo tenía asignado se puede seguir editando
+            # (p.ej. cambiar la observación) sin perder el operario.
+            if emp_actual is None or int(emp_actual) != emp["id"]:
+                return None, ("El operario está dado de baja", 400), avisos
+            avisos.append("El operario está dado de baja")
     try:
         qty = float(d.get("cantidad_plan") or 0)
     except (TypeError, ValueError):
@@ -5632,14 +5004,14 @@ def _sch_validar(d, bid=None):
     a, b = ini.strftime(_SCH_FMT), fin.strftime(_SCH_FMT)
     ex = bid or 0
     # Choque de máquina
-    c = query(_sch_bloque_sql() + " WHERE pl.maquina_id=? AND pl.id<>? AND pl.inicio<? AND pl.fin>? LIMIT 1",
+    c = query(_sch_bloque_sql() + " WHERE pl.maquina_id=? AND pl.id<>? AND pl.inicio<? AND pl.fin>?" + _SCH_ACTIVO + " LIMIT 1",
               (maq_id, ex, b, a), one=True)
     if c:
         return None, (f"La máquina {maq['nombre']} ya está ocupada de {_sch_corto(c['inicio'])} a {_sch_corto(c['fin'])} "
                       f"({c['ot_numero']} · {c['operacion']})", 409), avisos
     # Choque de operario
     if emp:
-        c = query(_sch_bloque_sql() + " WHERE pl.empleado_id=? AND pl.id<>? AND pl.inicio<? AND pl.fin>? LIMIT 1",
+        c = query(_sch_bloque_sql() + " WHERE pl.empleado_id=? AND pl.id<>? AND pl.inicio<? AND pl.fin>?" + _SCH_ACTIVO + " LIMIT 1",
                   (emp["id"], ex, b, a), one=True)
         if c:
             mq = query("SELECT nombre FROM maquinas WHERE id=?", (c["maquina_id"],), one=True)
@@ -5659,16 +5031,42 @@ def _sch_validar(d, bid=None):
     if op["fecha_entrega"] and fin.strftime("%Y-%m-%d") > str(op["fecha_entrega"])[:10]:
         avisos.append(f"Termina después de la fecha de entrega de la OT ({str(op['fecha_entrega'])[:10]})")
     return {"oo": oo_id, "maq": maq_id, "emp": emp["id"] if emp else None, "ini": a, "fin": b,
-            "jor": jor, "qty": qty, "obs": (d.get("obs") or "").strip() or None}, None, avisos
+            "jor": jor, "qty": qty, "obs": (d.get("obs") or "").strip() or None,
+            "requerida": float(op["qty_requerida"] or 0),
+            "op_desc": f"{op['ot_numero']} · {op['nombre']}",
+            "falta": max(0.0, float(op["qty_requerida"] or 0) - float(op["qty_producida"] or 0))}, None, avisos
 
 
 @app.route("/api/scheduling", methods=["POST"])
 @login_required(roles=["admin", "operario"])
 def sch_crear():
     d = request.get_json(silent=True) or {}
+    # BEGIN IMMEDIATE toma el lock de escritura antes de validar los choques:
+    # sin esto, dos altas simultáneas en la misma máquina y horario pasaban
+    # las dos la validación y quedaban superpuestas.
+    db = get_db()
+    if db.in_transaction:
+        db.commit()
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        res = _sch_crear(d, db)
+        if db.in_transaction:
+            db.commit()
+        return res
+    except:
+        db.rollback()
+        raise
+
+
+def _sch_crear(d, db):
     v, err, avisos = _sch_validar(d)
     if err:
+        db.rollback()
         return jsonify({"error": err[0]}), err[1]
+    tope = _sch_tope_error(v, _sch_disponible(v["oo"], v["requerida"], v["falta"]))
+    if tope:
+        db.rollback()
+        return jsonify({"error": tope}), 400
     # Repetir en los N días siguientes (como el Excel: mismo trabajo, mismo
     # operario, todos los días). Se valida TODO antes de grabar nada.
     try:
@@ -5676,47 +5074,83 @@ def sch_crear():
     except (TypeError, ValueError):
         rep = 0
     habiles = bool(d.get("solo_habiles", True))
+    # Con cantidad por jornada, las repeticiones se reparten lo que falta
+    # producir (descontado lo ya planificado a futuro) en vez de copiar la
+    # misma cantidad todos los días: faltaban 40 u, repetir 5 días daba 200 u.
+    resta = None
+    if rep and v["qty"] > 0:
+        resta = v["falta"] - _sch_qty_futura(v["oo"])
+        if resta <= 0:
+            avisos.append("La operación ya tiene planificado todo lo que falta: no se repitió el bloque")
+            rep = 0
+            resta = None
+        else:
+            v["qty"] = min(v["qty"], resta)
+            resta -= v["qty"]
     plan = [v]
-    base = _sch_parse(v["ini"])
-    cur = base
-    while len(plan) < rep + 1:
+    cur = _sch_parse(v["ini"])
+    while len(plan) < rep + 1 and (resta is None or resta > 0):
         cur = cur + _td(days=1)
         if habiles and cur.weekday() >= 5:
             continue
         dd = dict(d); dd["inicio"] = cur.strftime(_SCH_FMT)
         vv, err, av = _sch_validar(dd)
         if err:
+            db.rollback()
             return jsonify({"error": f"Día {cur.strftime('%d/%m')}: {err[0]}"}), err[1]
         for x in av:
             if x not in avisos:
                 avisos.append(x)
+        if resta is not None:
+            vv["qty"] = min(vv["qty"], resta)
+            resta -= vv["qty"]
         plan.append(vv)
+    if len(plan) < rep + 1:
+        avisos.append(f"Con {len(plan)} jornada(s) alcanza para lo que falta producir: no se crearon las otras {rep + 1 - len(plan)}")
     ids = []
     for x in plan:
-        ids.append(execute("""INSERT INTO planificacion (orden_operacion_id,maquina_id,empleado_id,inicio,fin,jornada_horas,cantidad_plan,obs)
-                              VALUES (?,?,?,?,?,?,?,?)""",
-                           (x["oo"], x["maq"], x["emp"], x["ini"], x["fin"], x["jor"], x["qty"], x["obs"])))
+        ids.append(db.execute("""INSERT INTO planificacion (orden_operacion_id,maquina_id,empleado_id,inicio,fin,jornada_horas,cantidad_plan,obs)
+                                 VALUES (?,?,?,?,?,?,?,?)""",
+                              (x["oo"], x["maq"], x["emp"], x["ini"], x["fin"], x["jor"], x["qty"], x["obs"])).lastrowid)
     return jsonify({"ok": True, "id": ids[0], "ids": ids, "avisos": avisos}), 201
 
 
 @app.route("/api/scheduling/<int:bid>", methods=["PUT"])
 @login_required(roles=["admin", "operario"])
 def sch_editar(bid):
-    cur = query("SELECT * FROM planificacion WHERE id=?", (bid,), one=True)
-    if not cur:
-        return jsonify({"error": "Bloque no encontrado"}), 404
     d = request.get_json(silent=True) or {}
-    # lo que no se manda queda como estaba (permite mover solo máquina/hora arrastrando)
-    base = {"orden_operacion_id": cur["orden_operacion_id"], "maquina_id": cur["maquina_id"],
-            "empleado_id": cur["empleado_id"], "inicio": cur["inicio"], "jornada_horas": cur["jornada_horas"],
-            "cantidad_plan": cur["cantidad_plan"], "obs": cur["obs"]}
-    base.update({k: d[k] for k in base if k in d})
-    v, err, avisos = _sch_validar(base, bid)
-    if err:
-        return jsonify({"error": err[0]}), err[1]
-    execute("""UPDATE planificacion SET orden_operacion_id=?,maquina_id=?,empleado_id=?,inicio=?,fin=?,
-               jornada_horas=?,cantidad_plan=?,obs=? WHERE id=?""",
-            (v["oo"], v["maq"], v["emp"], v["ini"], v["fin"], v["jor"], v["qty"], v["obs"], bid))
+    db = get_db()
+    if db.in_transaction:
+        db.commit()
+    db.execute("BEGIN IMMEDIATE")  # ver sch_crear
+    try:
+        cur = query("SELECT * FROM planificacion WHERE id=?", (bid,), one=True)
+        if not cur:
+            db.rollback()
+            return jsonify({"error": "Bloque no encontrado"}), 404
+        # lo que no se manda queda como estaba (permite mover solo máquina/hora arrastrando)
+        base = {"orden_operacion_id": cur["orden_operacion_id"], "maquina_id": cur["maquina_id"],
+                "empleado_id": cur["empleado_id"], "inicio": cur["inicio"], "jornada_horas": cur["jornada_horas"],
+                "cantidad_plan": cur["cantidad_plan"], "obs": cur["obs"]}
+        base.update({k: d[k] for k in base if k in d})
+        v, err, avisos = _sch_validar(base, bid, emp_actual=cur["empleado_id"])
+        if err:
+            db.rollback()
+            return jsonify({"error": err[0]}), err[1]
+        # Mover el bloque (máquina, hora, operario) siempre se puede; pasarlo a
+        # otra operación o subirle la cantidad no puede exceder lo que queda.
+        if v["oo"] != cur["orden_operacion_id"] or v["qty"] > float(cur["cantidad_plan"] or 0) + 0.0001:
+            tope = _sch_tope_error(v, _sch_disponible(v["oo"], v["requerida"], v["falta"], excluir_bid=bid))
+            if tope:
+                db.rollback()
+                return jsonify({"error": tope}), 400
+        db.execute("""UPDATE planificacion SET orden_operacion_id=?,maquina_id=?,empleado_id=?,inicio=?,fin=?,
+                      jornada_horas=?,cantidad_plan=?,obs=? WHERE id=?""",
+                   (v["oo"], v["maq"], v["emp"], v["ini"], v["fin"], v["jor"], v["qty"], v["obs"], bid))
+        db.commit()
+    except:
+        db.rollback()
+        raise
     return jsonify({"ok": True, "avisos": avisos})
 
 
@@ -5726,14 +5160,6 @@ def sch_borrar(bid):
     if not query("SELECT id FROM planificacion WHERE id=?", (bid,), one=True):
         return jsonify({"error": "Bloque no encontrado"}), 404
     execute("DELETE FROM planificacion WHERE id=?", (bid,))
-    return jsonify({"ok": True})
-
-
-@app.route("/api/scheduling/operacion/<int:ooid>", methods=["DELETE"])
-@login_required(roles=["admin", "operario"])
-def sch_borrar_operacion(ooid):
-    """Quita toda la planificación de una operación (vuelve a 'sin planificar')."""
-    execute("DELETE FROM planificacion WHERE orden_operacion_id=?", (ooid,))
     return jsonify({"ok": True})
 
 
@@ -5781,10 +5207,7 @@ def create_orden():
     prod = query("SELECT codigo,nombre FROM productos WHERE id=?", (d["producto_id"],), one=True)
     if not prod: return jsonify({"error":"Producto no encontrado"}), 404
     descripcion = d.get("descripcion") or f"{prod['codigo']} — {prod['nombre']}"
-    last = query("SELECT numero FROM ordenes ORDER BY id DESC LIMIT 1", one=True)
-    try: n = int(last["numero"].split("-")[1])+1 if last else 1
-    except: n = 1
-    numero = f"OT-{n:03d}"
+    numero = siguiente_numero("ordenes", "OT-", 3)
     # El estado de una OT nueva siempre arranca en "Pendiente" — no se acepta
     # un estado inicial distinto desde el body, aunque el cliente lo mande
     # (el campo se sacó del formulario de creación en el frontend, pero se
@@ -5794,32 +5217,6 @@ def create_orden():
     if "requiere_material" in d and str(d.get("requiere_material")) in ("0","False","false"):
         execute("UPDATE ordenes SET requiere_material=0 WHERE id=?", (lid,))
     return jsonify({"ok":True,"id":lid,"numero":numero}), 201
-
-@auditoria_proceso("SC automática por tercerizado")
-def _generar_sc_tercerizado(ot_id, ot_numero):
-    """Genera solicitudes de compra para operaciones tercerizadas de una OT.
-    NOTA: actualmente sin uso — al crear una OT con operación tercerizada ya
-    no se genera SC automáticamente, solo la OTT correspondiente.
-
-    Desactivado por defecto: ver _sc_automaticas_activas()."""
-    if not _sc_automaticas_activas():
-        return
-    ops = query("""SELECT oo.*,p.razon proveedor_nombre
-        FROM orden_operaciones oo
-        LEFT JOIN proveedores p ON p.id=oo.proveedor_id
-        WHERE oo.orden_id=? AND oo.es_tercerizada=1""", (ot_id,))
-    for op in ops:
-        numero_sc = next_numero_sc()
-        ot_row = query("SELECT cantidad FROM ordenes WHERE id=?", (ot_id,), one=True)
-        qty = float(ot_row["cantidad"] or 1) if ot_row else 1
-        desc = f"Operación tercerizada: {op['nombre']} — {op['proveedor_nombre'] or 'Proveedor no asignado'}"
-        execute("""INSERT INTO solicitudes_compra
-            (numero,tipo,descripcion,cantidad,unidad,urgencia,estado,
-             ot_origen_id,obs)
-            VALUES (?,?,?,?,?,?,?,?,?)""",
-            (numero_sc, "Productiva", desc, qty, "servicio",
-             "Normal", "Pendiente", ot_id,
-             f"Generada automáticamente al crear {ot_numero}"))
 
 def _generar_ott_para_ot(ot_id, ot_numero):
     """Genera la OTT (Orden de Trabajo de Terceros) correspondiente a cada
@@ -5840,10 +5237,7 @@ def _generar_ott_para_ot(ot_id, ot_numero):
         ya_existe = query("SELECT id FROM ordenes_tercerizado WHERE operacion_id=?", (op["id"],), one=True)
         if ya_existe:
             continue
-        last_ott = query("SELECT numero FROM ordenes_tercerizado ORDER BY id DESC LIMIT 1", one=True)
-        try: no = int(last_ott["numero"].split("-")[1])+1 if last_ott else 1
-        except: no = 1
-        num_ott = f"OTT-{no:04d}"
+        num_ott = siguiente_numero("ordenes_tercerizado", "OTT-", 4)
         try:
             es_ult = 1 if (max_orden is not None and int(op["orden"]) == int(max_orden)) else 0
         except Exception:
@@ -5903,7 +5297,7 @@ def _completar_ot_automatico(oid):
             execute("UPDATE ordenes SET stock_descontado=1 WHERE id=?", (oid,))
             insumos = query("""
                 SELECT om.material_id, m.codigo, m.descripcion,
-                       SUM(om.cantidad * oo.qty_producida) consumo
+                       SUM(cant_material(om.cantidad, oo.qty_producida, om.vida_util_herramienta)) consumo
                 FROM orden_operaciones oo
                 JOIN orden_operacion_materiales om ON om.orden_operacion_id=oo.id
                 JOIN materiales m ON m.id=om.material_id
@@ -5925,6 +5319,7 @@ def _completar_ot_automatico(oid):
                      f"Consumo OT {numero_ot} — Insumo {ins['codigo']} (sin lote)",
                      session["user_id"]))
         generar_pt_faltante_si_corresponde(oid)
+        _consumir_pse_sobrante_ot(oid)
         execute("UPDATE lotes SET estado='Ingresado' WHERE estado='Abierto' AND numero LIKE ?",
             (numero_ot + "-C%",))
     except Exception as e:
@@ -5991,6 +5386,384 @@ def _reducir_lotes_pt(mat_pt_id, lotes, sobrante, ot_lote_num):
     return sobrante
 
 
+# ── Cajones ───────────────────────────────────────────────────────────────────
+# Un cajón agrupa piezas físicas de una OT desde la 1ª operación hasta que
+# Calidad las libera. Lo que hizo cada paso en cada cajón sale de
+# novedad_cajones (operaciones internas) y ott_cajones (tercerizadas). El paso
+# es el número de "orden" de la operación (las rutas alternativas comparten
+# paso), así un cajón transferido desde otra OT del mismo producto sigue desde
+# el paso donde quedó. Estados: En proceso, En espera (su OT se canceló y
+# espera pasar a otra), Liberado / Rechazado (Calidad clasificó todo lo que
+# terminó la última operación) y Baja.
+
+def _pasos_ot(oid):
+    return [r["p"] for r in query("""SELECT DISTINCT CAST(orden AS INTEGER) p
+        FROM orden_operaciones WHERE orden_id=? ORDER BY 1""", (oid,))]
+
+
+def _ot_tiene_cajones(oid):
+    return bool(query("SELECT 1 FROM cajones WHERE orden_id=? LIMIT 1", (oid,), one=True))
+
+
+def _ot_usa_cajones(oid):
+    """La OT trabaja con cajones si ya tiene alguno, o si su producto tiene
+    "piezas por cajón" y su primer paso todavía no produjo nada. Las OTs que
+    ya habían empezado siguen sin cajones, como antes."""
+    if _ot_tiene_cajones(oid):
+        return True
+    o = query("""SELECT p.capacidad_cajon FROM ordenes o JOIN productos p ON p.id=o.producto_id
+        WHERE o.id=?""", (oid,), one=True)
+    if not o or not o["capacidad_cajon"] or int(o["capacidad_cajon"]) <= 0:
+        return False
+    pasos = _pasos_ot(oid)
+    if not pasos:
+        return False
+    hecho = query("""SELECT COALESCE(SUM(qty_producida),0) s FROM orden_operaciones
+        WHERE orden_id=? AND CAST(orden AS INTEGER)=?""", (oid, pasos[0]), one=True)["s"]
+    return float(hecho or 0) <= 0.0001
+
+
+def _cajon_por_paso(cajon_id, sin_novedad=None, sin_op=None):
+    """{paso: piezas} que registró cada paso en el cajón (sin contar la
+    novedad `sin_novedad` ni la operación tercerizada `sin_op`)."""
+    out = {}
+    for r in query("""SELECT CAST(oo.orden AS INTEGER) p, SUM(nc.cantidad) c
+            FROM novedad_cajones nc
+            JOIN novedades_produccion n ON n.id=nc.novedad_id
+            JOIN orden_operaciones oo ON oo.id=n.orden_operacion_id
+            WHERE nc.cajon_id=? AND nc.novedad_id<>? GROUP BY 1""", (cajon_id, sin_novedad or 0)):
+        out[r["p"]] = out.get(r["p"], 0.0) + float(r["c"] or 0)
+    for r in query("""SELECT CAST(oo.orden AS INTEGER) p, SUM(oc.cantidad) c
+            FROM ott_cajones oc JOIN orden_operaciones oo ON oo.id=oc.orden_operacion_id
+            WHERE oc.cajon_id=? AND oc.orden_operacion_id<>? GROUP BY 1""", (cajon_id, sin_op or 0)):
+        out[r["p"]] = out.get(r["p"], 0.0) + float(r["c"] or 0)
+    return out
+
+
+def _cajon_pasos(cajon, por_paso):
+    return sorted(set(_pasos_ot(cajon["orden_id"])) | set(por_paso))
+
+
+def _cajon_terminadas(cajon, por_paso=None):
+    """Piezas del cajón que ya hizo la última operación de su OT."""
+    pasos = _pasos_ot(cajon["orden_id"])
+    if not pasos:
+        return 0.0
+    if por_paso is None:
+        por_paso = _cajon_por_paso(cajon["id"])
+    return por_paso.get(pasos[-1], 0.0)
+
+
+def _cajon_disponible(cajon, paso, por_paso):
+    """Piezas del cajón que el paso anterior ya hizo y este paso todavía no."""
+    previos = [p for p in _cajon_pasos(cajon, por_paso) if p < paso]
+    if not previos:
+        return 0.0
+    return max(0.0, por_paso.get(previos[-1], 0.0) - por_paso.get(paso, 0.0))
+
+
+def _cajon_error(cajon, por_paso):
+    """Valida un cajón con las cantidades por paso que quedarían: ningún paso
+    puede tener más piezas que el anterior, y la última operación no puede
+    quedar por debajo de lo que Calidad ya clasificó."""
+    if cajon["estado"] == "Baja":
+        return f"El cajón {cajon['numero']} está dado de baja"
+    pasos = _cajon_pasos(cajon, por_paso)
+    for a, b in zip(pasos, pasos[1:]):
+        if por_paso.get(b, 0.0) > por_paso.get(a, 0.0) + 0.0001:
+            return (f"El cajón {cajon['numero']} quedaría con {por_paso.get(b, 0.0):g} piezas en el paso {b} "
+                    f"y solo {por_paso.get(a, 0.0):g} en el paso {a}")
+    clasif = float(cajon["cantidad_liberada"] or 0) + float(cajon["cantidad_rechazada"] or 0)
+    if clasif > 0 and _cajon_terminadas(cajon, por_paso) < clasif - 0.0001:
+        return (f"El cajón {cajon['numero']} ya tiene {clasif:g} piezas clasificadas por Calidad: "
+                f"no puede quedar con menos piezas terminadas")
+    return None
+
+
+def _cajon_nuevo(oid, capacidad):
+    o = query("""SELECT o.producto_id, m.codigo FROM ordenes o
+        JOIN materiales m ON m.id=o.producto_id WHERE o.id=?""", (oid,), one=True)
+    numero = siguiente_numero("cajones", f"cajon-{o['codigo']}-", 3, reservar=True)
+    return execute("""INSERT INTO cajones (numero,orden_id,orden_origen_id,producto_id,capacidad)
+        VALUES (?,?,?,?,?)""", (numero, oid, oid, o["producto_id"], capacidad))
+
+
+def _llenar_cajones(oid, qty):
+    """Primer paso: las piezas OK llenan el cajón abierto de la OT y abren los
+    que hagan falta (250 con 100 por cajón -> 100, 100, 50). Devuelve
+    [(cajon_id, cantidad)]."""
+    prod = query("""SELECT p.capacidad_cajon FROM ordenes o JOIN productos p ON p.id=o.producto_id
+        WHERE o.id=?""", (oid,), one=True)
+    plan = []
+    restante = float(qty)
+    while restante > 0.0001:
+        caj = query("""SELECT * FROM cajones WHERE orden_id=? AND orden_origen_id=orden_id
+            AND estado='En proceso' AND cantidad < capacidad - 0.0001
+            AND cantidad_liberada + cantidad_rechazada = 0
+            ORDER BY id LIMIT 1""", (oid,), one=True)
+        if not caj:
+            cap = int(prod["capacidad_cajon"] or 0) if prod else 0
+            if cap <= 0:
+                # Se borró "piezas por cajón" con la OT en curso: sigue con
+                # la capacidad de sus cajones.
+                ult = query("SELECT capacidad FROM cajones WHERE orden_id=? ORDER BY id DESC LIMIT 1",
+                    (oid,), one=True)
+                cap = int(ult["capacidad"]) if ult else 0
+            if cap <= 0:
+                break
+            caj = query("SELECT * FROM cajones WHERE id=?", (_cajon_nuevo(oid, cap),), one=True)
+        poner = min(restante, float(caj["capacidad"]) - float(caj["cantidad"]))
+        execute("UPDATE cajones SET cantidad=cantidad+? WHERE id=?", (poner, caj["id"]))
+        plan.append((caj["id"], poner))
+        restante -= poner
+    return plan
+
+
+def _plan_cajones_paso(oid, paso, qty, pedido=None, sin_novedad=None, sin_op=None, parcial=False):
+    """Paso que no es el primero: valida en qué cajones se trabajó (`pedido`
+    = [{cajon_id, cantidad}]) o, si no vino, los toma en orden (FIFO). Cada
+    cajón admite como máximo lo que el paso anterior hizo en él menos lo que
+    este paso ya cargó. Devuelve (plan, error)."""
+    cajones = query("""SELECT * FROM cajones WHERE orden_id=? AND estado NOT IN ('Baja','En espera')
+        ORDER BY id""", (oid,))
+    disp = {c["id"]: _cajon_disponible(c, paso, _cajon_por_paso(c["id"], sin_novedad, sin_op))
+            for c in cajones}
+    por_id = {c["id"]: c for c in cajones}
+    if pedido:
+        plan, vistos = [], set()
+        for it in pedido:
+            try:
+                cid = int(it.get("cajon_id"))
+                cant = float(it.get("cantidad") or 0)
+            except (TypeError, ValueError, AttributeError):
+                return None, "Cajón o cantidad inválidos"
+            if cant <= 0:
+                continue
+            if cid not in por_id:
+                return None, "Uno de los cajones indicados no es de esta OT o no está disponible"
+            if cid in vistos:
+                return None, f"El cajón {por_id[cid]['numero']} está repetido"
+            vistos.add(cid)
+            if cant > disp[cid] + 0.0001:
+                return None, (f"El cajón {por_id[cid]['numero']} tiene {disp[cid]:g} piezas disponibles "
+                              f"para esta operación y se cargan {cant:g}")
+            plan.append((cid, cant))
+        total = sum(c for _, c in plan)
+        if abs(total - qty) > 0.0001:
+            return None, f"La suma por cajón ({total:g}) tiene que ser igual a las piezas OK ({qty:g})"
+        return plan, None
+    plan, restante = [], float(qty)
+    for c in cajones:
+        tomar = min(restante, disp[c["id"]])
+        if tomar > 0.0001:
+            plan.append((c["id"], tomar))
+            restante -= tomar
+    if restante > 0.0001 and not parcial:
+        return None, (f"Los cajones de la OT tienen {qty - restante:g} piezas disponibles para esta "
+                      f"operación y se cargan {qty:g}")
+    return plan, None
+
+
+def _quitar_lifo(filas, quitar):
+    """Saca `quitar` piezas de [(cajon_id, cantidad)] empezando por el último."""
+    filas = [list(f) for f in filas]
+    for f in reversed(filas):
+        if quitar <= 0.0001:
+            break
+        t = min(f[1], quitar)
+        f[1] -= t
+        quitar -= t
+    return [(c, q) for c, q in filas if q > 0.0001]
+
+
+def _replan_novedad_cajones(nov_id, oid, oo_id, qty_new, pedido=None):
+    """Plan de cajones para una novedad que se edita (o se borra: qty_new=0).
+    Devuelve (plan, extra_primer_paso, error): `plan` son las filas que le
+    quedan a la novedad y `extra_primer_paso` las piezas a sumar llenando
+    cajones (solo en el primer paso). Valida cada cajón afectado antes de
+    tocar nada."""
+    paso = query("SELECT CAST(orden AS INTEGER) p FROM orden_operaciones WHERE id=?", (oo_id,), one=True)["p"]
+    pasos = _pasos_ot(oid)
+    primero = bool(pasos) and paso == pasos[0]
+    actuales = [(r["cajon_id"], float(r["cantidad"])) for r in query(
+        "SELECT cajon_id, cantidad FROM novedad_cajones WHERE novedad_id=? ORDER BY cajon_id", (nov_id,))]
+    total = sum(q for _, q in actuales)
+    extra = 0.0
+    if pedido and not primero and qty_new > 0:
+        plan, err = _plan_cajones_paso(oid, paso, qty_new, pedido, sin_novedad=nov_id)
+        if err:
+            return None, 0.0, err
+    elif qty_new < total - 0.0001:
+        plan = _quitar_lifo(actuales, total - qty_new)
+    elif qty_new > total + 0.0001:
+        plan = actuales
+        if primero:
+            extra = qty_new - total
+        else:
+            mas, err = _plan_cajones_paso(oid, paso, qty_new - total)
+            if err:
+                return None, 0.0, err
+            d = dict(plan)
+            for cid, q in mas:
+                d[cid] = d.get(cid, 0.0) + q
+            plan = sorted(d.items())
+    else:
+        plan = actuales
+    nuevo = dict(plan)
+    for cid in set(nuevo) | {c for c, _ in actuales}:
+        cajon = query("SELECT * FROM cajones WHERE id=?", (cid,), one=True)
+        por_paso = _cajon_por_paso(cid, sin_novedad=nov_id)
+        if nuevo.get(cid, 0.0) > 0:
+            por_paso[paso] = por_paso.get(paso, 0.0) + nuevo[cid]
+        if dict(actuales).get(cid, 0.0) == nuevo.get(cid, 0.0) and cajon["estado"] != "Baja":
+            continue
+        err = _cajon_error(cajon, por_paso)
+        if err:
+            return None, 0.0, err
+    return plan, extra, None
+
+
+def _cajon_recalcular(cid):
+    """Recalcula las piezas de entrada y el estado de un cajón."""
+    c = query("SELECT * FROM cajones WHERE id=?", (cid,), one=True)
+    if not c:
+        return
+    por_paso = _cajon_por_paso(cid)
+    cantidad = por_paso[min(por_paso)] if por_paso else 0.0
+    estado = c["estado"]
+    if estado not in ("Baja", "En espera"):
+        term = _cajon_terminadas(c, por_paso)
+        clasif = float(c["cantidad_liberada"] or 0) + float(c["cantidad_rechazada"] or 0)
+        if cantidad <= 0.0001:
+            estado = "Baja"
+        elif term > 0.0001 and clasif >= term - 0.0001:
+            estado = "Liberado" if float(c["cantidad_liberada"] or 0) > 0 else "Rechazado"
+        else:
+            estado = "En proceso"
+    execute("UPDATE cajones SET cantidad=?, estado=? WHERE id=?", (cantidad, estado, cid))
+
+
+def _guardar_novedad_cajones(nov_id, oid, plan, extra=0.0):
+    """Deja a la novedad con las filas `plan` (+ `extra` piezas llenando
+    cajones del primer paso) y recalcula los cajones tocados."""
+    tocados = {r["cajon_id"] for r in query("SELECT cajon_id FROM novedad_cajones WHERE novedad_id=?", (nov_id,))}
+    execute("DELETE FROM novedad_cajones WHERE novedad_id=?", (nov_id,))
+    filas = dict()
+    for cid, q in plan:
+        filas[cid] = filas.get(cid, 0.0) + q
+    if extra > 0.0001:
+        # _llenar_cajones ya suma a cajones.cantidad; el recálculo de abajo
+        # lo vuelve a derivar de las filas, así que no queda doble.
+        for cid, q in _llenar_cajones(oid, extra):
+            filas[cid] = filas.get(cid, 0.0) + q
+    for cid, q in filas.items():
+        if q > 0.0001:
+            execute("INSERT INTO novedad_cajones (novedad_id,cajon_id,cantidad) VALUES (?,?,?)", (nov_id, cid, q))
+    for cid in tocados | set(filas):
+        _cajon_recalcular(cid)
+
+
+def _lote_pt_ot(oid):
+    """Lote de PT de la OT (ver generar_pt_faltante_si_corresponde)."""
+    o = query("SELECT numero, producto_id FROM ordenes WHERE id=?", (oid,), one=True)
+    if not o or not o["producto_id"]:
+        return None
+    r = query("""SELECT id FROM lotes WHERE material_id=? AND numero IN (?,?)
+        ORDER BY numero=? DESC LIMIT 1""",
+        (o["producto_id"], o["numero"], o["numero"] + "-PT", o["numero"]), one=True)
+    return r["id"] if r else None
+
+
+def _cajones_vincular_lote(oid):
+    lote_id = _lote_pt_ot(oid)
+    if lote_id:
+        execute("UPDATE cajones SET lote_id=? WHERE orden_id=? AND lote_id IS NULL", (lote_id, oid))
+
+
+def _sync_cajones_op_tercerizada(oo_id, usa):
+    """Una operación tercerizada no carga novedades: lo que registra como hecho
+    (qty_producida) se imputa a cajones. En el primer paso crea/llena
+    cajones; en los demás los toma en orden (FIFO) hasta lo disponible. Si
+    bajó, se descuenta de los últimos cajones mientras los pasos siguientes
+    lo permitan."""
+    if not usa:
+        return
+    oo = query("""SELECT id, orden_id, CAST(orden AS INTEGER) p, qty_producida
+        FROM orden_operaciones WHERE id=?""", (oo_id,), one=True)
+    if not oo:
+        return
+    oid = oo["orden_id"]
+    pasos = _pasos_ot(oid)
+    actuales = [(r["cajon_id"], float(r["cantidad"])) for r in query(
+        "SELECT cajon_id, cantidad FROM ott_cajones WHERE orden_operacion_id=? ORDER BY cajon_id", (oo_id,))]
+    delta = float(oo["qty_producida"] or 0) - sum(q for _, q in actuales)
+    filas = dict(actuales)
+    if delta > 0.0001:
+        if pasos and oo["p"] == pasos[0]:
+            nuevos = _llenar_cajones(oid, delta)
+        else:
+            nuevos, _ = _plan_cajones_paso(oid, oo["p"], delta, parcial=True)
+        for cid, q in nuevos:
+            filas[cid] = filas.get(cid, 0.0) + q
+    elif delta < -0.0001:
+        quitar = -delta
+        for cid, q in reversed(actuales):
+            if quitar <= 0.0001:
+                break
+            cajon = query("SELECT * FROM cajones WHERE id=?", (cid,), one=True)
+            t = min(q, quitar)
+            por_paso = _cajon_por_paso(cid, sin_op=oo_id)
+            por_paso[oo["p"]] = por_paso.get(oo["p"], 0.0) + q - t
+            if _cajon_error(cajon, por_paso):
+                continue
+            filas[cid] = q - t
+            quitar -= t
+        if quitar > 0.0001:
+            print(f"[WARN] Operación {oo_id}: {quitar:g} piezas tercerizadas menos que no se "
+                  f"pudieron sacar de sus cajones (ya avanzaron en pasos siguientes).")
+    else:
+        return
+    execute("DELETE FROM ott_cajones WHERE orden_operacion_id=?", (oo_id,))
+    for cid, q in filas.items():
+        if q > 0.0001:
+            execute("INSERT INTO ott_cajones (orden_operacion_id,cajon_id,cantidad) VALUES (?,?,?)",
+                (oo_id, cid, q))
+    for cid in filas:
+        _cajon_recalcular(cid)
+
+
+def _lote_estado_por_cajones(lote_id):
+    """Estado del lote derivado de lo que Calidad clasificó en sus cajones."""
+    l = query("SELECT * FROM lotes WHERE id=?", (lote_id,), one=True)
+    if not l:
+        return
+    disp = float(l["cantidad_disponible"] or 0)
+    act = float(l["cantidad_activa"] or 0)
+    rech = float(l["cantidad_rechazada"] or 0)
+    if disp <= 0.0001:
+        estado = "Agotado"
+    elif disp - act - rech > 0.001:
+        estado = "Ingresado"
+    else:
+        estado = "Aprobado" if act > 0.0001 else "Rechazado"
+    execute("UPDATE lotes SET estado=? WHERE id=?", (estado, lote_id))
+
+
+def _remitir_de_cajones(remito_item_id, lote_id, qty):
+    """Un remito de un lote con cajones sale de sus cajones liberados, del más
+    viejo al más nuevo, y queda anotado de qué cajón salió cada pieza."""
+    restante = float(qty)
+    for c in query("""SELECT id, cantidad_liberada - cantidad_remitida libre FROM cajones
+            WHERE lote_id=? AND cantidad_liberada - cantidad_remitida > 0.0001 ORDER BY id""", (lote_id,)):
+        if restante <= 0.0001:
+            break
+        tomar = min(restante, float(c["libre"]))
+        execute("INSERT INTO remito_item_cajones (remito_item_id,cajon_id,cantidad) VALUES (?,?,?)",
+            (remito_item_id, c["id"], tomar))
+        execute("UPDATE cajones SET cantidad_remitida=cantidad_remitida+? WHERE id=?", (tomar, c["id"]))
+        restante -= tomar
+
+
 @auditoria_proceso("generación automática de PT")
 def generar_pt_faltante_si_corresponde(oid):
     """Red de seguridad: si la OT se marca 'Completada' pero el flujo de
@@ -6044,152 +5817,60 @@ def generar_pt_faltante_si_corresponde(oid):
         JOIN lotes l ON l.id=ol.lote_id WHERE ol.orden_id=?""", (oid,))
     lotes_ref = ", ".join(l["numero"] for l in lotes_usados) if lotes_usados else "—"
 
-    capacidad_cajon = 0
-    try:
-        capacidad_cajon = int(prod["capacidad_cajon"]) if prod["capacidad_cajon"] else 0
-    except Exception:
-        capacidad_cajon = 0
-
-    # ── Sin capacidad de cajón configurada: comportamiento legado, un único
-    # lote de PT por OT (todo junto, pendiente de Calidad). ────────────────
-    if capacidad_cajon <= 0:
-        lote_pt_row = query("""SELECT id, numero, cantidad_original, cantidad_disponible,
-            COALESCE(cantidad_activa,0) cantidad_activa,
-            COALESCE(cantidad_rechazada,0) cantidad_rechazada
-            FROM lotes WHERE numero=? AND material_id=?""",
-            (ot_lote_num, mat_pt["id"]), one=True)
-        ya_generado = float(lote_pt_row["cantidad_original"]) if lote_pt_row else 0.0
-        faltante = lote_target - ya_generado
-        if faltante < -0.0001 and lote_pt_row:
-            # Se corrigio una novedad HACIA ABAJO: el lote tiene mas piezas de
-            # las que la planta termino declarando. Se devuelve la diferencia
-            # en vez de dejar el lote inflado.
-            _reducir_lotes_pt(mat_pt["id"], [lote_pt_row], -faltante, ot_lote_num)
-            return
-        if faltante <= 0:
-            return  # Las Novedades ya cubrieron toda la cantidad (del lote de esta OT)
-
-        # lotes.numero es UNIQUE a nivel global (no por material). Si no hay
-        # lote de PT para esta OT pero el número ya está tomado por un lote
-        # de OTRO material, se le agrega un sufijo para no chocar.
-        if not lote_pt_row:
-            choque = query("SELECT id FROM lotes WHERE numero=?", (ot_lote_num,), one=True)
-            if choque:
-                ot_lote_num = f"{ot_lote_num}-PT"
-
-        if lote_pt_row:
-            execute("""UPDATE lotes SET
-                cantidad_disponible=cantidad_disponible+?,
-                cantidad_original=cantidad_original+?,
-                estado='Ingresado', stock_computado=1
-                WHERE id=?""",
-                (faltante, faltante, lote_pt_row["id"]))
-            lote_pt_id = lote_pt_row["id"]
-        else:
-            lote_pt_id = execute("""INSERT INTO lotes
-                (numero,material_id,cantidad_original,cantidad_disponible,
-                 cantidad_activa,referencia_proveedor,estado,obs,creado_por,stock_computado)
-                VALUES (?,?,?,?,?,?,?,?,?,1)""",
-                (ot_lote_num, mat_pt["id"], faltante, faltante, 0,
-                 f"OT {ot_lote_num}", "Ingresado",
-                 f"Lotes MP: {lotes_ref}", session.get("user_id")))
-
-        # Las piezas entraron al depósito: entran a inventario ahora, sin
-        # esperar a Calidad. Clasificarlas después no vuelve a moverlas.
-        execute("""UPDATE materiales SET stock=stock+?,
-            actualizado=datetime('now','localtime') WHERE id=?""",
-            (faltante, mat_pt["id"]))
-        execute(
-            "INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id) VALUES (?,?,?,?,?,?)",
-            (mat_pt["id"], lote_pt_id, "ingreso", faltante,
-             f"Generación automática al completar OT {ot_lote_num} — ingreso a inventario, pendiente de clasificación de Calidad | Lotes MP: {lotes_ref}",
-             session.get("user_id")))
+    # Un único lote de PT por OT (pendiente de Calidad). Si la OT trabaja con
+    # cajones, sus cajones apuntan a este lote y Calidad clasifica por cajón.
+    lote_pt_row = query("""SELECT id, numero, cantidad_original, cantidad_disponible,
+        COALESCE(cantidad_activa,0) cantidad_activa,
+        COALESCE(cantidad_rechazada,0) cantidad_rechazada
+        FROM lotes WHERE numero=? AND material_id=?""",
+        (ot_lote_num, mat_pt["id"]), one=True)
+    ya_generado = float(lote_pt_row["cantidad_original"]) if lote_pt_row else 0.0
+    faltante = lote_target - ya_generado
+    if faltante < -0.0001 and lote_pt_row:
+        # Se corrigio una novedad HACIA ABAJO: el lote tiene mas piezas de
+        # las que la planta termino declarando. Se devuelve la diferencia
+        # en vez de dejar el lote inflado.
+        _reducir_lotes_pt(mat_pt["id"], [lote_pt_row], -faltante, ot_lote_num)
         return
+    if faltante <= 0:
+        return  # Las Novedades ya cubrieron toda la cantidad (del lote de esta OT)
 
-    # ── Con capacidad de cajón configurada: el PT se reparte en lotes tipo
-    # "cajón" (numero = OT-C1, OT-C2, ...), cada uno con tope = capacidad
-    # del producto. El cajón que todavía no se llenó queda en estado
-    # 'Abierto' (sigue sumando piezas de próximas novedades); al llegar a la
-    # capacidad pasa a 'Ingresado' (listo para que Calidad lo clasifique,
-    # igual que el resto de los lotes). Esto reemplaza el lote único por OT:
-    # así cada cajón físico que el operario lleva a Calidad es su propio
-    # lote, y Calidad puede aprobar/rechazar cajón por cajón en vez de la
-    # OT completa de una sola vez. ──────────────────────────────────────────
-    prefijo_cajon = f"{ot_lote_num}-C"
-    ya_generado = query("""SELECT COALESCE(SUM(cantidad_original),0) s FROM lotes
-        WHERE material_id=? AND numero LIKE ?""",
-        (mat_pt["id"], prefijo_cajon + "%"), one=True)["s"] or 0.0
+    # lotes.numero es UNIQUE a nivel global (no por material). Si no hay
+    # lote de PT para esta OT pero el número ya está tomado por un lote
+    # de OTRO material, se le agrega un sufijo para no chocar.
+    if not lote_pt_row:
+        choque = query("SELECT id FROM lotes WHERE numero=?", (ot_lote_num,), one=True)
+        if choque:
+            ot_lote_num = f"{ot_lote_num}-PT"
 
-    restante = lote_target - float(ya_generado)
-    if restante < -0.0001:
-        # Correccion hacia abajo: se descuenta del cajon mas nuevo hacia atras,
-        # que es el que todavia no llego a Calidad.
-        cajones = query("""SELECT id, numero, cantidad_original, cantidad_disponible,
-            COALESCE(cantidad_activa,0) cantidad_activa,
-            COALESCE(cantidad_rechazada,0) cantidad_rechazada
-            FROM lotes WHERE material_id=? AND numero LIKE ?
-            ORDER BY id DESC""", (mat_pt["id"], prefijo_cajon + "%"))
-        _reducir_lotes_pt(mat_pt["id"], cajones, -restante, ot_lote_num)
-        return
-    if restante <= 0.0001:
-        return  # Las Novedades ya cubrieron toda la cantidad (en los cajones de esta OT)
+    if lote_pt_row:
+        execute("""UPDATE lotes SET
+            cantidad_disponible=cantidad_disponible+?,
+            cantidad_original=cantidad_original+?,
+            estado='Ingresado', stock_computado=1
+            WHERE id=?""",
+            (faltante, faltante, lote_pt_row["id"]))
+        lote_pt_id = lote_pt_row["id"]
+    else:
+        lote_pt_id = execute("""INSERT INTO lotes
+            (numero,material_id,cantidad_original,cantidad_disponible,
+             cantidad_activa,referencia_proveedor,estado,obs,creado_por,stock_computado)
+            VALUES (?,?,?,?,?,?,?,?,?,1)""",
+            (ot_lote_num, mat_pt["id"], faltante, faltante, 0,
+             f"OT {ot_lote_num}", "Ingresado",
+             f"Lotes MP: {lotes_ref}", session.get("user_id")))
 
-    while restante > 0.0001:
-        cajon = query("""SELECT * FROM lotes WHERE material_id=? AND numero LIKE ?
-            AND estado='Abierto' ORDER BY id DESC LIMIT 1""",
-            (mat_pt["id"], prefijo_cajon + "%"), one=True)
-        if cajon:
-            espacio = max(0.0, capacidad_cajon - float(cajon["cantidad_original"]))
-            aporte = min(espacio, restante)
-            if aporte <= 0:
-                # Cajón "Abierto" ya está lleno por alguna inconsistencia
-                # previa: se cierra igual para no quedar en loop infinito.
-                execute("UPDATE lotes SET estado='Ingresado' WHERE id=?", (cajon["id"],))
-                continue
-            nuevo_total = float(cajon["cantidad_original"]) + aporte
-            se_llena = nuevo_total >= capacidad_cajon - 0.0001
-            execute("""UPDATE lotes SET
-                cantidad_original=cantidad_original+?,
-                cantidad_disponible=cantidad_disponible+?,
-                estado=?, stock_computado=1
-                WHERE id=?""",
-                (aporte, aporte, ("Ingresado" if se_llena else "Abierto"), cajon["id"]))
-            execute("""UPDATE materiales SET stock=stock+?,
-                actualizado=datetime('now','localtime') WHERE id=?""",
-                (aporte, mat_pt["id"]))
-            execute(
-                "INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id) VALUES (?,?,?,?,?,?)",
-                (mat_pt["id"], cajon["id"], "ingreso", aporte,
-                 f"Producción OT {ot_lote_num}, cajón {cajon['numero']}"
-                 + (" — cajón completo, pendiente de clasificación de Calidad" if se_llena else " — cajón en curso")
-                 + f" — ingreso a inventario | Lotes MP: {lotes_ref}",
-                 session.get("user_id")))
-            restante -= aporte
-        else:
-            n_existentes = query("SELECT COUNT(*) c FROM lotes WHERE material_id=? AND numero LIKE ?",
-                (mat_pt["id"], prefijo_cajon + "%"), one=True)["c"]
-            numero_cajon = f"{prefijo_cajon}{n_existentes+1}"
-            aporte = min(capacidad_cajon, restante)
-            se_llena = aporte >= capacidad_cajon - 0.0001
-            cid = execute("""INSERT INTO lotes
-                (numero,material_id,cantidad_original,cantidad_disponible,
-                 cantidad_activa,referencia_proveedor,estado,obs,creado_por,stock_computado)
-                VALUES (?,?,?,?,?,?,?,?,?,1)""",
-                (numero_cajon, mat_pt["id"], aporte, aporte, 0,
-                 f"OT {ot_lote_num}", ("Ingresado" if se_llena else "Abierto"),
-                 f"Lotes MP: {lotes_ref}", session.get("user_id")))
-            execute("""UPDATE materiales SET stock=stock+?,
-                actualizado=datetime('now','localtime') WHERE id=?""",
-                (aporte, mat_pt["id"]))
-            execute(
-                "INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id) VALUES (?,?,?,?,?,?)",
-                (mat_pt["id"], cid, "ingreso", aporte,
-                 f"Producción OT {ot_lote_num}, cajón {numero_cajon}"
-                 + (" — cajón completo, pendiente de clasificación de Calidad" if se_llena else " — cajón en curso")
-                 + " — ingreso a inventario"
-                 + f" (no computa a stock) | Lotes MP: {lotes_ref}",
-                 session.get("user_id")))
-            restante -= aporte
+    # Las piezas entraron al depósito: entran a inventario ahora, sin
+    # esperar a Calidad. Clasificarlas después no vuelve a moverlas.
+    execute("""UPDATE materiales SET stock=stock+?,
+        actualizado=datetime('now','localtime') WHERE id=?""",
+        (faltante, mat_pt["id"]))
+    execute(
+        "INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id) VALUES (?,?,?,?,?,?)",
+        (mat_pt["id"], lote_pt_id, "ingreso", faltante,
+         f"Generación automática al completar OT {ot_lote_num} — ingreso a inventario, pendiente de clasificación de Calidad | Lotes MP: {lotes_ref}",
+         session.get("user_id")))
+    return
 
 
 @app.route("/api/ordenes/<int:oid>", methods=["PUT"])
@@ -6243,6 +5924,9 @@ def update_orden(oid):
             WHERE orden_id=? AND qty_producida>0""", (oid,), one=True)["c"]
         if novedades_previas > 0 or lotes_vinculados > 0 or produccion_declarada > 0:
             return jsonify({"error": "No se puede cambiar el producto de la OT: ya tiene novedades, lotes vinculados o producción declarada. Cancelá o revertí esa actividad antes de cambiar el producto."}), 400
+        n_pl = _n_bloques_planificados(oid)
+        if n_pl:
+            return jsonify({"error": f"No se puede cambiar el producto de la OT: tiene {n_pl} bloque/s en el Scheduling de producción. Quitalos de la planificación antes de cambiar el producto."}), 400
 
     # ── Completar la OT: no confirmar el estado hasta que todo salga bien ─────
     # Antes, el UPDATE de abajo grababa estado='Completada' de entrada, y el
@@ -6289,7 +5973,6 @@ def update_orden(oid):
     # como Completada de entrada (ej. datos migrados/de prueba) sin pasar
     # nunca por este descuento, stock_descontado sigue en 0 y hay que
     # generarlo igual la próxima vez que se guarde la OT.
-    ya_estaba_completada = orden_actual and orden_actual["estado"] == "Completada"
     ya_descontado = orden_actual and int(orden_actual["stock_descontado"] or 0) == 1
 
     # Todo lo que sigue (descuento de stock + generación del lote de PT) se
@@ -6318,7 +6001,7 @@ def update_orden(oid):
             # en operacion_materiales, y se descuenta de una sola vez al completar.
             insumos = query("""
                 SELECT om.material_id, m.codigo, m.descripcion,
-                       SUM(om.cantidad * oo.qty_producida) consumo
+                       SUM(cant_material(om.cantidad, oo.qty_producida, om.vida_util_herramienta)) consumo
                 FROM orden_operaciones oo
                 JOIN orden_operacion_materiales om ON om.orden_operacion_id=oo.id
                 JOIN materiales m ON m.id=om.material_id
@@ -6348,6 +6031,8 @@ def update_orden(oid):
         # total de la OT, así que no duplica nada.
         if nuevo_estado == "Completada":
             generar_pt_faltante_si_corresponde(oid)
+            if completando_ahora:
+                _consumir_pse_sobrante_ot(oid)
             # Si quedó un cajón "Abierto" (parcialmente lleno) para esta OT,
             # se cierra igual: al completarse la OT no van a llegar más
             # piezas para terminar de llenarlo, así que pasa a "Ingresado"
@@ -6390,7 +6075,7 @@ def update_orden(oid):
         # ── Reversión de insumos (sin lote) ───────────────────────────────────
         insumos_rev = query("""
             SELECT om.material_id, m.codigo,
-                   SUM(om.cantidad * oo.qty_producida) consumo
+                   SUM(cant_material(om.cantidad, oo.qty_producida, om.vida_util_herramienta)) consumo
             FROM orden_operaciones oo
             JOIN orden_operacion_materiales om ON om.orden_operacion_id=oo.id
             JOIN materiales m ON m.id=om.material_id
@@ -6427,6 +6112,24 @@ def update_orden(oid):
                 (float(v["cantidad_usada"] or 0), v["lote_id"]))
         execute("DELETE FROM orden_lotes WHERE orden_id=?", (oid,))
         execute("UPDATE orden_materiales SET cantidad_asignada=0 WHERE orden_id=?", (oid,))
+        # Los cajones que todavía no terminaron ninguna pieza quedan En espera
+        # para pasarlos a otra OT abierta del mismo producto (o darlos de baja).
+        for c in query("SELECT * FROM cajones WHERE orden_id=? AND estado='En proceso'", (oid,)):
+            if _cajon_terminadas(c) <= 0.0001:
+                execute("UPDATE cajones SET estado='En espera' WHERE id=?", (c["id"],))
+        # Las OTT que todavía no salieron al proveedor (sin envíos) se
+        # cancelan junto con la OT; las que ya tienen piezas afuera quedan
+        # como están para poder recibirlas de vuelta.
+        execute("""UPDATE ordenes_tercerizado SET estado='Cancelado'
+            WHERE ot_origen_id=? AND estado='Pendiente' AND COALESCE(cantidad_enviada,0)=0""", (oid,))
+    elif ya_estaba_cancelada and nuevo_estado != "Cancelada":
+        # Se reactiva la OT: sus OTT canceladas sin envíos vuelven a Pendiente.
+        execute("""UPDATE ordenes_tercerizado SET estado='Pendiente'
+            WHERE ot_origen_id=? AND estado='Cancelado' AND COALESCE(cantidad_enviada,0)=0""", (oid,))
+        # y sus cajones en espera (los que no se pasaron a otra OT) vuelven.
+        for c in query("SELECT id FROM cajones WHERE orden_id=? AND estado='En espera'", (oid,)):
+            execute("UPDATE cajones SET estado='En proceso' WHERE id=?", (c["id"],))
+            _cajon_recalcular(c["id"])
 
     return jsonify({"ok":True})
 
@@ -6442,10 +6145,7 @@ def create_presupuesto():
     d = request.json
     if not d.get("cliente_id"): return jsonify({"error":"Cliente requerido"}), 400
     d["descripcion"] = d.get("descripcion") or f"Presupuesto para cliente {d['cliente_id']}"
-    last = query("SELECT numero FROM presupuestos ORDER BY id DESC LIMIT 1", one=True)
-    try: n = int(last["numero"].split("-")[1])+1 if last else 1
-    except: n = 1
-    numero = f"PRES-{n:03d}"
+    numero = siguiente_numero("presupuestos", "PRES-", 3)
     sub = float(d.get("subtotal", 0))
     iva = float(d.get("iva_pct", 21))
     total = float(d.get("total")) if d.get("total") else sub * (1 + iva/100)
@@ -6453,6 +6153,88 @@ def create_presupuesto():
     lid = execute("INSERT INTO presupuestos (numero,cliente_id,descripcion,items,subtotal,iva_pct,total,validez_dias,estado,obs) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (numero,d.get("cliente_id"),d["descripcion"],d.get("items"),sub,iva,total,d.get("validez_dias",30),d.get("estado","Borrador"),d.get("obs")))
     return jsonify({"ok":True,"id":lid,"numero":numero,"total":total}), 201
+
+# ── Pedidos de cotización (pestaña de Presupuestos) ──────────────────────────
+def _validar_pedido_cotizacion(d, actual=None):
+    """Devuelve (valores, None) o (None, mensaje de error). En una edición,
+    lo que no viene en el payload conserva el valor actual (un usuario sin
+    ver_monetario no manda precio_total: se descarta en before_request)."""
+    v = dict(actual) if actual else {}
+    for k in ("fecha", "cliente_id", "producto_id", "cantidad", "precio_total"):
+        if k in d:
+            v[k] = d[k]
+    if not v.get("cliente_id") or not query("SELECT 1 FROM clientes WHERE id=?", (v["cliente_id"],), one=True):
+        return None, "Cliente requerido"
+    if not v.get("producto_id"):
+        return None, "Producto requerido"
+    prod = query("SELECT categoria FROM materiales WHERE id=?", (v["producto_id"],), one=True)
+    if not prod or prod["categoria"] != "Producto terminado":
+        return None, ("Solo se pueden cotizar productos terminados — materiales, insumos, "
+                      "herramientas y semielaborados no se cotizan a clientes")
+    try:
+        v["cantidad"] = float(v.get("cantidad") or 0)
+    except (TypeError, ValueError):
+        v["cantidad"] = 0
+    if v["cantidad"] <= 0:
+        return None, "La cantidad de piezas debe ser mayor a 0"
+    if v.get("precio_total") in ("", None):
+        v["precio_total"] = None
+    else:
+        try:
+            v["precio_total"] = float(v["precio_total"])
+        except (TypeError, ValueError):
+            return None, "Precio total inválido"
+        if v["precio_total"] < 0:
+            return None, "El precio total no puede ser negativo"
+    v["fecha"] = (v.get("fecha") or date.today().isoformat())[:10]
+    return v, None
+
+
+@app.route("/api/pedidos_cotizacion", methods=["GET"])
+@login_required()
+def get_pedidos_cotizacion():
+    return jsonify([dict(r) for r in query("""SELECT pc.*, c.razon cliente_nombre,
+            m.codigo producto_codigo, m.descripcion producto_nombre, m.unidad producto_unidad
+        FROM pedidos_cotizacion pc
+        LEFT JOIN clientes c ON c.id=pc.cliente_id
+        LEFT JOIN materiales m ON m.id=pc.producto_id
+        ORDER BY pc.id DESC""")])
+
+
+@app.route("/api/pedidos_cotizacion", methods=["POST"])
+@login_required(roles=["admin","vendedor"])
+def create_pedido_cotizacion():
+    v, err = _validar_pedido_cotizacion(request.json or {})
+    if err: return jsonify({"error": err}), 400
+    numero = siguiente_numero("pedidos_cotizacion", "PCOT-", 4, reservar=True)
+    lid = execute("""INSERT INTO pedidos_cotizacion
+        (numero,fecha,cliente_id,producto_id,cantidad,precio_total,creado_por)
+        VALUES (?,?,?,?,?,?,?)""",
+        (numero, v["fecha"], v["cliente_id"], v["producto_id"], v["cantidad"],
+         v["precio_total"], session.get("user_id")))
+    return jsonify({"ok": True, "id": lid, "numero": numero}), 201
+
+
+@app.route("/api/pedidos_cotizacion/<int:pid>", methods=["PUT"])
+@login_required(roles=["admin","vendedor"])
+def update_pedido_cotizacion(pid):
+    actual = query("SELECT * FROM pedidos_cotizacion WHERE id=?", (pid,), one=True)
+    if not actual: return jsonify({"error": "Pedido de cotización no encontrado"}), 404
+    v, err = _validar_pedido_cotizacion(request.json or {}, actual)
+    if err: return jsonify({"error": err}), 400
+    execute("""UPDATE pedidos_cotizacion SET fecha=?,cliente_id=?,producto_id=?,
+        cantidad=?,precio_total=? WHERE id=?""",
+        (v["fecha"], v["cliente_id"], v["producto_id"], v["cantidad"], v["precio_total"], pid))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/pedidos_cotizacion/<int:pid>", methods=["DELETE"])
+@login_required(roles=["admin","vendedor"])
+def delete_pedido_cotizacion(pid):
+    if not query("SELECT 1 FROM pedidos_cotizacion WHERE id=?", (pid,), one=True):
+        return jsonify({"error": "Pedido de cotización no encontrado"}), 404
+    execute("DELETE FROM pedidos_cotizacion WHERE id=?", (pid,))
+    return jsonify({"ok": True})
 
 # ── Pronósticos de venta ───────────────────────────────────────────────────────
 @app.route("/api/pronosticos_venta", methods=["GET"])
@@ -6725,34 +6507,6 @@ def delete_usuario(uid):
     return jsonify({"ok":True})
 
 
-# ── Producto-Clientes (vinculación) ───────────────────────────────────────────
-@app.route("/api/productos/<int:pid>/clientes", methods=["GET"])
-@login_required()
-def get_producto_clientes(pid):
-    rows = query("SELECT c.* FROM producto_clientes pc JOIN clientes c ON c.id=pc.cliente_id WHERE pc.producto_id=?", (pid,))
-    return jsonify([dict(r) for r in rows])
-
-@app.route("/api/productos/<int:pid>/clientes", methods=["POST"])
-@login_required(roles=["admin","vendedor"])
-def link_producto_cliente(pid):
-    d = request.json
-    cid = d.get("cliente_id")
-    if not cid: return jsonify({"error":"cliente_id requerido"}), 400
-    execute("INSERT OR IGNORE INTO producto_clientes (producto_id,cliente_id) VALUES (?,?)", (pid, cid))
-    return jsonify({"ok":True}), 201
-
-@app.route("/api/productos/<int:pid>/clientes/<int:cid>", methods=["DELETE"])
-@login_required(roles=["admin","vendedor"])
-def unlink_producto_cliente(pid, cid):
-    execute("DELETE FROM producto_clientes WHERE producto_id=? AND cliente_id=?", (pid, cid))
-    return jsonify({"ok":True})
-
-@app.route("/api/productos_by_cliente/<int:cid>", methods=["GET"])
-@login_required()
-def get_productos_by_cliente(cid):
-    rows = query("SELECT p.*,COALESCE(p.peso_kg,0) peso_kg,c.nombre categoria_nombre FROM productos p LEFT JOIN categorias_producto c ON c.id=p.categoria_id WHERE p.id IN (SELECT producto_id FROM producto_clientes WHERE cliente_id=?) AND p.activo=1 ORDER BY p.codigo", (cid,))
-    return jsonify([dict(r) for r in rows])
-
 # ── Operaciones de OT (desglose en renglones) ─────────────────────────────────
 @app.route("/api/ordenes/<int:oid>/operaciones", methods=["GET"])
 @login_required()
@@ -6814,7 +6568,23 @@ def _motivo_no_repoblar(oid):
     if en_curso:
         return ("La OT tiene una orden de tercerizado en curso (%s, %s): no se pueden "
                 "regenerar sus operaciones." % (en_curso["numero"], en_curso["estado"]))
+    # La planificación cuelga de orden_operaciones con ON DELETE CASCADE:
+    # regenerar borraría en silencio todos los bloques del Scheduling.
+    n_pl = _n_bloques_planificados(oid)
+    if n_pl:
+        return ("La OT tiene %d bloque/s en el Scheduling de producción: quitalos de la "
+                "planificación antes de regenerar sus operaciones." % n_pl)
     return None
+
+
+def _n_bloques_planificados(oid, opid=None):
+    sql = """SELECT COUNT(*) c FROM planificacion pl
+        JOIN orden_operaciones oo ON oo.id=pl.orden_operacion_id WHERE oo.orden_id=?"""
+    args = [oid]
+    if opid is not None:
+        sql += " AND oo.id=?"
+        args.append(opid)
+    return query(sql, tuple(args), one=True)["c"]
 
 
 def _populate_orden_operaciones(oid):
@@ -6877,14 +6647,20 @@ def _populate_orden_materiales(oid):
     orden = query("SELECT producto_id,cantidad,requiere_material FROM ordenes WHERE id=?", (oid,), one=True)
     if not orden or not orden["producto_id"]: return None
     execute("DELETE FROM orden_materiales WHERE orden_id=?", (oid,))
-    mats = query("""SELECT om.material_id,SUM(om.cantidad)*? AS total,m.unidad
+    # Herramientas con vida útil: ceil(piezas que procesa esa operación /
+    # vida útil); el resto, cantidad por pieza x cantidad de la OT (como antes).
+    mats = query("""SELECT om.material_id,
+        SUM(CASE WHEN COALESCE(om.vida_util_herramienta,0)>0
+            THEN cant_material(om.cantidad, oo.qty_requerida, om.vida_util_herramienta)
+            ELSE om.cantidad*? END) AS total, m.unidad
         FROM orden_operaciones oo
         JOIN orden_operacion_materiales om ON om.orden_operacion_id=oo.id
         JOIN materiales m ON m.id=om.material_id
         WHERE oo.orden_id=? AND om.material_id IS NOT NULL GROUP BY om.material_id""",
         (orden["cantidad"], oid))
     if not mats:
-        mats = query("""SELECT om.material_id,SUM(om.cantidad)*? AS total,m.unidad
+        mats = query("""SELECT om.material_id,
+            SUM(cant_material(om.cantidad, ?, om.vida_util_herramienta)) AS total, m.unidad
             FROM proceso_operaciones po
             JOIN operacion_materiales om ON om.operacion_id=po.id
             JOIN materiales m ON m.id=om.material_id
@@ -6915,38 +6691,15 @@ def _tiene_terc_previa(orden_id, orden_num):
     una tercerización previa quedan bloqueadas una vez completadas; el resto
     de las operaciones se puede revertir libremente."""
     try:
-        orden_num_int = int(orden_num)
+        orden_num_int = float(orden_num)
     except Exception:
         return False
     row = query("""SELECT 1 FROM orden_operaciones
         WHERE orden_id=? AND es_tercerizada=1
-          AND CAST(orden AS INTEGER) < ?
+          AND CAST(orden AS REAL) < ?
         LIMIT 1""", (orden_id, orden_num_int), one=True)
     return row is not None
 
-
-@app.route("/api/orden_operaciones/<int:ooid>", methods=["PUT"])
-@login_required(roles=["admin","operario"])
-def update_orden_operacion(ooid):
-    d = request.json
-    nuevo_estado = d.get("estado","Pendiente")
-    oo = query("SELECT orden_id, orden, estado, es_tercerizada FROM orden_operaciones WHERE id=?", (ooid,), one=True)
-    if not oo: return jsonify({"error":"Operación no encontrada"}), 404
-    if oo["estado"] == "Completada" and nuevo_estado != "Completada" and _tiene_terc_previa(oo["orden_id"], oo["orden"]):
-        return jsonify({"error": "Esta operación depende de una tercerización previa y ya está "
-            "Completada: no se puede revertir a un estado anterior."}), 400
-    if nuevo_estado != "Pendiente":
-        if nuevo_estado in ("En proceso","Completada"):
-            if oo["es_tercerizada"]:
-                return jsonify({"error": "Esta operación es tercerizada: se completa sola cuando vuelve "
-                    "el lote del proveedor (OTT) y queda Aprobado en Lotes, no se marca a mano."}), 400
-            bloqueo = _bloqueo_terc_previo(oo["orden_id"], oo["orden"])
-            if bloqueo:
-                return jsonify({"error": f"OT pausada: la operación tercerizada \"{bloqueo['nombre']}\" "
-                    f"(orden {bloqueo['orden']}) todavía no fue recibida/aprobada."}), 400
-    execute("UPDATE orden_operaciones SET estado=?,qty_producida=? WHERE id=?",
-        (nuevo_estado, d.get("qty_producida",0), ooid))
-    return jsonify({"ok":True})
 
 # ── CRUD completo para operaciones de OT ─────────────────────────────────────
 def _recalcular_material_requerido_ot(oid, material_id):
@@ -6955,7 +6708,7 @@ def _recalcular_material_requerido_ot(oid, material_id):
     (orden_operacion_materiales: copia propia de la OT, v148). Si el material
     ya no lo usa ninguna operación y no tiene nada asignado, se quita de la OT;
     si lo usa y no estaba, se agrega. No toca lo ya asignado/reservado."""
-    row = query("""SELECT SUM(oo.qty_requerida * om.cantidad) AS total, m.unidad
+    row = query("""SELECT SUM(cant_material(om.cantidad, oo.qty_requerida, om.vida_util_herramienta)) AS total, m.unidad
         FROM orden_operaciones oo
         JOIN orden_operacion_materiales om ON om.orden_operacion_id=oo.id AND om.material_id=?
         JOIN materiales m ON m.id=om.material_id
@@ -7036,7 +6789,7 @@ def update_ot_operacion(oid, opid):
 @app.route("/api/orden_operaciones/<int:ooid>/materiales", methods=["GET"])
 @login_required()
 def get_ot_op_materiales(ooid):
-    rows = query("""SELECT om.id,om.material_id,om.cantidad,om.unidad,om.tipo,m.codigo,m.descripcion,m.categoria,m.stock
+    rows = query("""SELECT om.id,om.material_id,om.cantidad,om.unidad,om.tipo,om.vida_util_herramienta,m.codigo,m.descripcion,m.categoria,m.stock
         FROM orden_operacion_materiales om LEFT JOIN materiales m ON m.id=om.material_id
         WHERE om.orden_operacion_id=? ORDER BY om.id""", (ooid,))
     return jsonify([dict(r) for r in rows])
@@ -7059,13 +6812,14 @@ def set_ot_op_materiales(ooid):
         if cant <= 0: return jsonify({"error": "La cantidad de cada material debe ser mayor a 0"}), 400
         mat = query("SELECT id,unidad FROM materiales WHERE id=?", (mid,), one=True)
         if not mat: return jsonify({"error": f"Material {mid} no existe"}), 404
-        limpia.append((mid, cant, m.get("unidad") or mat["unidad"], m.get("tipo") or "material"))
-    if oo["es_tercerizada"] and not any(t == "material" for _, _, _, t in limpia):
+        limpia.append((mid, cant, m.get("unidad") or mat["unidad"], m.get("tipo") or "material",
+                       _vida_util_valida(mid, m.get("vida_util_herramienta"))))
+    if oo["es_tercerizada"] and not any(t == "material" for _, _, _, t, _ in limpia):
         return jsonify({"error": "Una operación tercerizada necesita un insumo (el material que vuelve del tercero)."}), 400
     previos = [r["material_id"] for r in query("SELECT DISTINCT material_id FROM orden_operacion_materiales WHERE orden_operacion_id=?", (ooid,)) if r["material_id"]]
     execute("DELETE FROM orden_operacion_materiales WHERE orden_operacion_id=?", (ooid,))
-    for mid, cant, un, tipo in limpia:
-        execute("INSERT INTO orden_operacion_materiales (orden_operacion_id,material_id,cantidad,unidad,tipo) VALUES (?,?,?,?,?)", (ooid, mid, cant, un, tipo))
+    for mid, cant, un, tipo, vida in limpia:
+        execute("INSERT INTO orden_operacion_materiales (orden_operacion_id,material_id,cantidad,unidad,tipo,vida_util_herramienta) VALUES (?,?,?,?,?,?)", (ooid, mid, cant, un, tipo, vida))
     for mid in set(previos) | {x[0] for x in limpia}:
         _recalcular_material_requerido_ot(oo["orden_id"], mid)
     # OTT de esta operación que todavía no inició: actualizar el material de retorno
@@ -7078,6 +6832,9 @@ def set_ot_op_materiales(ooid):
 @app.route("/api/ordenes/<int:oid>/operaciones/<int:opid>", methods=["DELETE"])
 @login_required(roles=["admin","operario"])
 def delete_ot_operacion(oid, opid):
+    n_pl = _n_bloques_planificados(oid, opid)
+    if n_pl:
+        return jsonify({"error": f"La operación tiene {n_pl} bloque/s en el Scheduling de producción: quitalos de la planificación antes de borrarla."}), 409
     mat_ids_prev = query("SELECT DISTINCT material_id FROM orden_operacion_materiales WHERE orden_operacion_id=?", (opid,))
     execute("DELETE FROM orden_operacion_materiales WHERE orden_operacion_id=?", (opid,))
     execute("DELETE FROM orden_operaciones WHERE id=? AND orden_id=?", (opid, oid))
@@ -7106,8 +6863,9 @@ def add_ot_operacion(oid):
     for m in (d.get("materiales") or []):
         try:
             if float(m.get("cantidad") or 0) > 0 and m.get("material_id"):
-                execute("INSERT INTO orden_operacion_materiales (orden_operacion_id,material_id,cantidad,unidad,tipo) VALUES (?,?,?,?,?)",
-                        (new_id, int(m["material_id"]), float(m["cantidad"]), m.get("unidad"), m.get("tipo") or "material"))
+                execute("INSERT INTO orden_operacion_materiales (orden_operacion_id,material_id,cantidad,unidad,tipo,vida_util_herramienta) VALUES (?,?,?,?,?,?)",
+                        (new_id, int(m["material_id"]), float(m["cantidad"]), m.get("unidad"), m.get("tipo") or "material",
+                         _vida_util_valida(int(m["material_id"]), m.get("vida_util_herramienta"))))
                 _recalcular_material_requerido_ot(oid, int(m["material_id"]))
         except (TypeError, ValueError):
             pass
@@ -7163,19 +6921,6 @@ def populate_orden_materiales(oid):
     # también al crear/editar una OT manualmente desde Órdenes de trabajo.
     solicitudes_creadas, ots_auxiliares = _gap_analysis_materiales_multipass()
     return jsonify({"ok":True,"mats":n,"ots_auxiliares":ots_auxiliares,"solicitudes_compra":solicitudes_creadas})
-
-@app.route("/api/ordenes/<int:oid>/materiales/<int:mid>/asignar", methods=["POST"])
-@login_required(roles=["admin","almacen"])
-def asignar_material_ot(oid, mid):
-    d = request.json
-    qty = float(d.get("cantidad",0))
-    mat = query("SELECT id FROM materiales WHERE id=?", (mid,), one=True)
-    if not mat: return jsonify({"error":"Material no encontrado"}), 404
-    # Solo registra la cantidad asignada a la OT.
-    # El descuento real del stock ocurre cuando la OT pasa a "Completada" (ver update_orden).
-    execute("UPDATE orden_materiales SET cantidad_asignada=cantidad_asignada+? WHERE orden_id=? AND material_id=?", (qty,oid,mid))
-    return jsonify({"ok":True})
-
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -7260,13 +7005,13 @@ def get_ott(oid):
     op_anterior = None
     if r.get("oo_orden_id") is not None and r.get("oo_orden") is not None:
         try:
-            orden_num_int = int(r["oo_orden"])
+            orden_num_int = float(r["oo_orden"])
         except Exception:
             orden_num_int = None
         if orden_num_int is not None:
             op_anterior = query("""SELECT qty_producida FROM orden_operaciones
-                WHERE orden_id=? AND CAST(orden AS INTEGER) < ?
-                ORDER BY CAST(orden AS INTEGER) DESC LIMIT 1""",
+                WHERE orden_id=? AND CAST(orden AS REAL) < ?
+                ORDER BY CAST(orden AS REAL) DESC LIMIT 1""",
                 (r["oo_orden_id"], orden_num_int), one=True)
     if op_anterior is not None:
         producido_anterior = float(op_anterior["qty_producida"] or 0)
@@ -7342,10 +7087,7 @@ def create_ott():
         except (TypeError, ValueError): cantidad_plan = 0
         if cantidad_plan <= 0:
             return jsonify({"error":"Indicá la cantidad a enviar a terceros"}), 400
-    last = query("SELECT numero FROM ordenes_tercerizado ORDER BY id DESC LIMIT 1", one=True)
-    try: n = int(last["numero"].split("-")[1])+1 if last else 1
-    except: n = 1
-    numero = f"OTT-{n:04d}"
+    numero = siguiente_numero("ordenes_tercerizado", "OTT-", 4)
     lid = execute("""INSERT INTO ordenes_tercerizado
         (numero,ot_origen_id,operacion_id,proceso_op_id,proveedor_id,
          precio_acordado,estado,es_ultimo_nivel,fecha_retorno_est,obs,creado_por,material_se_id,cantidad_plan)
@@ -7432,10 +7174,7 @@ def _generar_ot_aux_insumo_ott(producto_id, faltante, motivo):
         populate_mats_internal(ot_exist["id"], producto_id, nueva_cant)
         return {"numero": ot_exist["numero"], "producto": prod["nombre"],
                 "cantidad": round(faltante, 3), "actualizada": True}
-    last = query("SELECT numero FROM ordenes ORDER BY id DESC LIMIT 1", one=True)
-    try: n = int(last["numero"].split("-")[1]) + 1 if last else 1
-    except Exception: n = 1
-    numero_aux = f"OT-{n:03d}"
+    numero_aux = siguiente_numero("ordenes", "OT-", 3)
     ops_proc_aux = query(
         "SELECT * FROM proceso_operaciones WHERE producto_id=? ORDER BY CAST(orden AS INTEGER), orden",
         (producto_id,))
@@ -7521,6 +7260,12 @@ def ott_emitir_remito(oid):
     if not ott: return jsonify({"error":"OTT no encontrada"}), 404
     if ott["estado"] not in ("Pendiente","Remito emitido","En proceso","Recibido"):
         return jsonify({"error":"No se puede emitir remito en el estado actual de la OTT"}), 400
+    if not ott["proveedor_id"]:
+        return jsonify({"error":"La OTT no tiene proveedor asignado: editala y elegí el proveedor antes de emitir el remito"}), 400
+    if ott["ot_origen_id"]:
+        _ot_est = query("SELECT estado FROM ordenes WHERE id=?", (ott["ot_origen_id"],), one=True)
+        if _ot_est and _ot_est["estado"] in ("Cancelada", "Completada"):
+            return jsonify({"error": f"No se puede emitir remito: la OT de origen está {_ot_est['estado']}"}), 400
 
     d = request.json or {}
     cantidad = float(d.get("cantidad") or 0)
@@ -7547,13 +7292,13 @@ def ott_emitir_remito(oid):
     op_anterior = None
     if oo and oo["orden_id"] is not None and oo["orden"] is not None:
         try:
-            orden_num_int = int(oo["orden"])
+            orden_num_int = float(oo["orden"])
         except Exception:
             orden_num_int = None
         if orden_num_int is not None:
             op_anterior = query("""SELECT id, qty_producida, es_tercerizada FROM orden_operaciones
-                WHERE orden_id=? AND CAST(orden AS INTEGER) < ?
-                ORDER BY CAST(orden AS INTEGER) DESC LIMIT 1""",
+                WHERE orden_id=? AND CAST(orden AS REAL) < ?
+                ORDER BY CAST(orden AS REAL) DESC LIMIT 1""",
                 (oo["orden_id"], orden_num_int), one=True)
 
     # Total ya enviado para este paso, sumando TODAS las OTTs de esa
@@ -7566,12 +7311,13 @@ def ott_emitir_remito(oid):
             FROM ordenes_tercerizado WHERE operacion_id=?""",
             (ott["operacion_id"],), one=True)["tot"]
 
+    # Antes acá se buscaba "el material del producto" (materiales.producto_id),
+    # pero desde la unificación de artículos eso devuelve el propio Producto
+    # Terminado: enviar a terceros el PRIMER paso de la ruta validaba y
+    # descontaba stock del PT, cuando lo que sale son piezas en bruto. Lo
+    # único físico que se descuenta al enviar es el semielaborado de una
+    # tercerizada anterior (abajo) y los insumos de la operación.
     mat = None
-    if ott["producto_id"]:
-        # Primero el propio artículo PT (id=producto_id), después semielaborados.
-        mat = query("""SELECT id,stock,codigo FROM materiales WHERE producto_id=? AND activo=1
-                    ORDER BY (id=producto_id) DESC, id LIMIT 1""",
-                    (ott["producto_id"],), one=True)
 
     # Si el paso anterior fue tercerizado, lo que se reenvía al segundo
     # proveedor es SU semielaborado, no un material cualquiera del producto.
@@ -7664,16 +7410,13 @@ def ott_emitir_remito(oid):
                                   f"{limite_insumo_cod} (disponible: {limite_insumo}, solicitado: {cantidad})"}), 400
 
     # Create remito de traslado
-    last_rem = query("SELECT numero FROM remitos ORDER BY id DESC LIMIT 1", one=True)
-    try: nr = int(last_rem["numero"].split("-")[1])+1 if last_rem else 1
-    except: nr = 1
-    num_rem = f"REM-{nr:04d}"
+    num_rem = siguiente_numero("remitos", "REM-", 4)
 
-    rid = execute("""INSERT INTO remitos (numero,cliente_id,fecha,estado,obs,creado_por,tipo,ott_id)
-        VALUES (?,NULL,date('now','localtime'),'Emitido',?,?,?,?)""",
+    rid = execute("""INSERT INTO remitos (numero,cliente_id,fecha,estado,obs,creado_por,tipo,ott_id,ott_cantidad)
+        VALUES (?,NULL,date('now','localtime'),'Emitido',?,?,?,?,?)""",
         (num_rem, d.get("obs", f"Traslado a proveedor externo (envío parcial: {cantidad})"
                                if cantidad_enviada_previa > 0 else "Traslado a proveedor externo"),
-         session["user_id"], "traslado_ott", oid))
+         session["user_id"], "traslado_ott", oid, cantidad))
 
     # El descuento de materiales.stock/lote solo corresponde cuando esa
     # cantidad efectivamente había entrado a inventario. Hay DOS casos:
@@ -7872,13 +7615,16 @@ def ott_registrar_retorno(oid):
                 nueva_qty_prod = float(op_row["qty_producida"] or 0) + cantidad
                 qty_req = float(op_row["qty_requerida"] or 0)
                 op_completa = qty_req > 0 and nueva_qty_prod >= qty_req - 0.0001
+                usa_cajones = _ot_usa_cajones(op_row["orden_id"])
                 execute("UPDATE orden_operaciones SET qty_producida=?,estado=? WHERE id=?",
                     (nueva_qty_prod, "Completada" if op_completa else "En proceso", op_row["id"]))
+                _sync_cajones_op_tercerizada(op_row["id"], usa_cajones)
                 execute("UPDATE ordenes SET estado='En proceso' WHERE id=? AND estado='Pendiente'",
                     (op_row["orden_id"],))
                 if op_completa:
                     execute("UPDATE ordenes_tercerizado SET estado='Completado' WHERE id=?", (oid,))
                     _completar_ot_automatico(op_row["orden_id"])
+                    _cajones_vincular_lote(op_row["orden_id"])
                     ot_completada_chk = query("SELECT estado FROM ordenes WHERE id=?", (op_row["orden_id"],), one=True)
                     ot_recien_completada = bool(ot_completada_chk and ot_completada_chk["estado"] == "Completada")
 
@@ -7999,20 +7745,7 @@ def ott_registrar_retorno(oid):
                 WHERE id=?""",
                 (cantidad, cantidad, lote_id))
     else:
-        last_l = query("""SELECT numero FROM lotes WHERE numero LIKE 'Lote-OTT-%'
-            ORDER BY id DESC LIMIT 1""", one=True)
-        nl = 1
-        if last_l and last_l["numero"]:
-            try:
-                nl = int(last_l["numero"].rsplit("-", 1)[1]) + 1
-            except (ValueError, IndexError):
-                nl = 1
-        num_lote = f"Lote-OTT-{nl:03d}"
-        # Aseguramos unicidad por si igual hay colisión (numeración con
-        # formato distinto ya cargada a mano, carrera entre dos requests, etc.)
-        while query("SELECT id FROM lotes WHERE numero=?", (num_lote,), one=True):
-            nl += 1
-            num_lote = f"Lote-OTT-{nl:03d}"
+        num_lote = siguiente_numero("lotes", "Lote-OTT-", 3)
 
         # cantidad_original arranca en cantidad_enviada (el total acordado
         # del envío), no en lo recibido en esta primera entrega — ver
@@ -8167,6 +7900,21 @@ def ott_devolver_rechazo(oid):
             cantidad_disponible=MAX(0, cantidad_disponible-?),
             cantidad_rechazada=MAX(0, cantidad_rechazada-?)
         WHERE id=?""", (cantidad, cantidad, lote["id"]))
+    # Las piezas entraron a inventario al recibirse el retorno
+    # (stock_computado=1): al volver al proveedor, salen. Igual que en
+    # oc_devolver_rechazo.
+    if _lote_stock_computado(lote["id"]):
+        execute("""UPDATE materiales SET stock=MAX(0, stock-?),
+            actualizado=datetime('now','localtime') WHERE id=?""",
+            (cantidad, lote["material_id"]))
+    # La reserva del lote ya se liberó al clasificarlas como Rechazadas (ver
+    # update_lote); acá se baja también lo asignado a la OT, porque el
+    # reemplazo, al reingresar, lo vuelve a sumar (ver ott_registrar_retorno).
+    if ott["ot_origen_id"]:
+        execute("""UPDATE orden_lotes SET cantidad_usada=MAX(0, cantidad_usada-?)
+            WHERE orden_id=? AND lote_id=?""", (cantidad, ott["ot_origen_id"], lote["id"]))
+        execute("""UPDATE orden_materiales SET cantidad_asignada=MAX(0, cantidad_asignada-?)
+            WHERE orden_id=? AND material_id=?""", (cantidad, ott["ot_origen_id"], lote["material_id"]))
     execute("""INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id)
         VALUES (?,?,'salida',?,?,?)""",
         (lote["material_id"], lote["id"], cantidad,
@@ -8183,15 +7931,12 @@ def ott_devolver_rechazo(oid):
             "Remito emitido" if cantidad_enviada > 0 else ott["estado"])
 
     # 3) Remito de devolución al proveedor
-    last_rem = query("SELECT numero FROM remitos ORDER BY id DESC LIMIT 1", one=True)
-    try: nr = int(last_rem["numero"].split("-")[1])+1 if last_rem else 1
-    except: nr = 1
-    num_rem = f"REM-{nr:04d}"
-    rid = execute("""INSERT INTO remitos (numero,cliente_id,fecha,estado,obs,creado_por,tipo,ott_id)
-        VALUES (?,NULL,date('now','localtime'),'Emitido',?,?,?,?)""",
+    num_rem = siguiente_numero("remitos", "REM-", 4)
+    rid = execute("""INSERT INTO remitos (numero,cliente_id,fecha,estado,obs,creado_por,tipo,ott_id,ott_cantidad)
+        VALUES (?,NULL,date('now','localtime'),'Emitido',?,?,?,?,?)""",
         (num_rem, d.get("obs", f"Devolución a proveedor — piezas rechazadas OTT {ott['numero']} "
                                f"(Lote {lote['numero']})"),
-         session["user_id"], "devolucion_ott", oid))
+         session["user_id"], "devolucion_ott", oid, cantidad))
 
     execute("""UPDATE ordenes_tercerizado SET
             estado=?, cantidad_recibida=?, cantidad_rechazada_devuelta=?,
@@ -8224,11 +7969,21 @@ def ott_completar(oid):
     if ott["estado"] == "Completado":
         return jsonify({"ok": True})  # ya estaba completada, idempotente
 
+    # Lo aprobado ACUMULADO del lote de retorno: lo que sigue en el lote más
+    # lo que ya se consumió para esta OT (novedades de la operación siguiente
+    # o reenvío a otro tercero). Mirar solo cantidad_activa pisaba
+    # qty_producida con lo que quedaba en el lote y se perdían piezas (mismo
+    # criterio que _sync_ott_retorno_a_operacion).
     aprobado = None
     if ott["lote_retorno_id"]:
         lote = query("SELECT cantidad_activa FROM lotes WHERE id=?", (ott["lote_retorno_id"],), one=True)
         if lote:
             aprobado = float(lote["cantidad_activa"] or 0)
+            if ott["ot_origen_id"]:
+                row = query("""SELECT COALESCE(cantidad_consumida,0) c FROM orden_lotes
+                    WHERE orden_id=? AND lote_id=?""",
+                    (ott["ot_origen_id"], ott["lote_retorno_id"]), one=True)
+                aprobado += float(row["c"] or 0) if row else 0.0
 
     execute("UPDATE ordenes_tercerizado SET estado='Completado' WHERE id=?", (oid,))
     if ott["oo_id"] and ott["oo_estado"] != "Completada":
@@ -8237,13 +7992,11 @@ def ott_completar(oid):
                 (aprobado, ott["oo_id"]))
         else:
             execute("UPDATE orden_operaciones SET estado='Completada' WHERE id=?", (ott["oo_id"],))
-    # Con la OTT cerrada, el semielaborado ya cumplió su función: se gasta acá
-    # para que no quede stock que nadie consume. Va después de leer "aprobado"
-    # porque el consumo pone cantidad_activa en cero.
-    try:
-        _consumir_pse_al_cerrar_ott(oid)
-    except Exception as e:
-        print(f"[WARN] No se pudo consumir el semielaborado al cerrar la OTT {oid}: {e}")
+    # El semielaborado NO se consume acá: lo consume la operación siguiente al
+    # declarar sus novedades (ver _materiales_ott_pendientes_por_operacion) o
+    # el reenvío a otro tercero. Consumirlo al cerrar la OTT dejaba a la
+    # operación siguiente sin material y la OT trabada. Lo que sobre se da de
+    # baja al completar la OT (ver _consumir_pse_sobrante_ot).
     _sync_requerimiento_desde_ott(oid)
     return jsonify({"ok": True})
 
@@ -8704,29 +8457,17 @@ def create_orden_cliente():
     d = request.json
     if not d.get("cliente_id"):
         return jsonify({"error":"Cliente requerido"}), 400
-    # Generar número automático solo a partir de los que ya tienen el
-    # formato OC-CLI-####, ignorando números manuales con otro formato
-    # (p.ej. "oc-2026", "OC-2026-0005") que rompían el cálculo por-1 y
-    # podían generar un número ya usado (UNIQUE constraint failed).
-    ultimos = query("SELECT numero FROM ordenes_cliente WHERE numero LIKE 'OC-CLI-%' ORDER BY id DESC")
-    n = 1
-    for r in ultimos:
-        try:
-            n = int(r["numero"].split("-")[-1]) + 1
-            break
-        except (ValueError, IndexError):
-            continue
-    numero = d.get("numero_oc") or f"OC-CLI-{n:04d}"
-    # Check duplicate numero (también cubre el autogenerado: si por algún
-    # motivo ya existe, se sigue incrementando hasta encontrar uno libre)
-    if not d.get("numero_oc"):
-        while query("SELECT id FROM ordenes_cliente WHERE numero=?", (numero,), one=True):
-            n += 1
-            numero = f"OC-CLI-{n:04d}"
+    # Número cargado a mano, o el siguiente OC-CLI-#### (los números
+    # manuales con otro formato, p.ej. "oc-2026", no cuentan para la serie).
+    numero = d.get("numero_oc")
+    if not numero:
+        numero = siguiente_numero("ordenes_cliente", "OC-CLI-", 4)
     elif query("SELECT id FROM ordenes_cliente WHERE numero=?", (numero,), one=True):
         return jsonify({"error": f"El número {numero} ya existe"}), 409
-    lid = execute("INSERT INTO ordenes_cliente (numero,cliente_id,fecha_entrega,estado,obs) VALUES (?,?,?,?,?)",
-        (numero, d["cliente_id"], d.get("fecha_entrega"), d.get("estado","Recibida"), d.get("obs")))
+    # "fecha" = fecha de emisión que se carga en el formulario; antes se
+    # ignoraba y quedaba siempre la fecha de alta.
+    lid = execute("INSERT INTO ordenes_cliente (numero,cliente_id,fecha,fecha_entrega,estado,obs) VALUES (?,?,COALESCE(?,datetime('now','localtime')),?,?,?)",
+        (numero, d["cliente_id"], d.get("fecha") or None, d.get("fecha_entrega"), d.get("estado","Recibida"), d.get("obs")))
     for item in d["items"]:
         if item.get("producto_id") and item.get("cantidad"):
             item_id = execute("""INSERT INTO ordenes_cliente_items
@@ -8833,216 +8574,6 @@ def calcular_costo_producto(prod_id, qty=1.0, _visitados=None):
     return costo_total
 
 
-def explotar_multinivel(prod_id, qty, cliente_id, fecha_entrega_padre, oc_numero,
-                        nivel=0, _ots=None, _visitados=None):
-    """Genera OT para prod_id y, recursivamente, OTs hijas para cada sub-producto
-    que sea Producto terminado con proceso propio.
-    Retorna (ot_id_padre, lista_de_ots_creadas)."""
-    from datetime import datetime, timedelta
-    import math
-    if _ots is None: _ots = []
-    if _visitados is None: _visitados = set()
-    if prod_id in _visitados:
-        return None, _ots
-    _visitados.add(prod_id)
-
-    prod = query("SELECT * FROM productos WHERE id=?", (prod_id,), one=True)
-    if not prod:
-        return None, _ots
-
-    # Costo y tiempo
-    costo_mat = calcular_costo_producto(prod_id, qty)
-    ops_proc = query("SELECT * FROM proceso_operaciones WHERE producto_id=? ORDER BY CAST(orden AS INTEGER), orden",
-                     (prod_id,))
-    tiempo_std = tiempo_std_min(ops_proc, qty)
-    dias_necesarios = max(1, math.ceil(tiempo_std / 480))
-    if nivel == 0:
-        fecha_ot = fecha_entrega_padre
-    else:
-        # Sub-OT necesita terminar antes que la padre
-        try:
-            fecha_padre_dt = datetime.strptime(fecha_entrega_padre, "%Y-%m-%d")
-            fecha_ot = (fecha_padre_dt - timedelta(days=dias_necesarios + 1)).strftime("%Y-%m-%d")
-        except Exception:
-            fecha_ot = fecha_entrega_padre
-
-    # Número OT
-    last_ot = query("SELECT numero FROM ordenes ORDER BY id DESC LIMIT 1", one=True)
-    try: n = int(last_ot["numero"].split("-")[1]) + 1 if last_ot else 1
-    except: n = 1
-    numero_ot = f"OT-{n:03d}"
-
-    prefijo = "  " * nivel
-    obs = f"{prefijo}Generada desde OC {oc_numero}" + (f" | Sub-producto niv.{nivel}" if nivel > 0 else "")
-
-    ot_id = execute("""INSERT INTO ordenes
-        (numero,cliente_id,producto_id,descripcion,cantidad,prioridad,estado,
-         fecha_entrega,costo_mat,costo_mo,precio_venta,obs)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (numero_ot, cliente_id, prod_id,
-         f"{prod['codigo']} — {prod['nombre']}",
-         qty, "Normal", "Pendiente",
-         fecha_ot, round(costo_mat, 2), round(tiempo_std, 0),
-         float(prod["precio_venta"] or 0), obs))
-
-    # Operaciones
-    for op in ops_proc:
-        _oo_nuevo = execute("""INSERT INTO orden_operaciones
-            (orden_id,proceso_op_id,orden,nombre,categoria_maquina_id,maquina_id,
-             tiempo_setup_min,tiempo_ciclo_seg,estado,qty_requerida,
-             es_tercerizada,proveedor_id,precio_tercerizado,tiempo_minimo_dias)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (ot_id, op["id"], op["orden"], op["nombre"],
-             op["categoria_maquina_id"], op["maquina_id"],
-             op["tiempo_setup_min"], op["tiempo_ciclo_seg"],
-             "Pendiente", qty,
-             op["es_tercerizada"] if "es_tercerizada" in op.keys() else 0,
-             op["proveedor_id"] if "proveedor_id" in op.keys() else None,
-             op["precio_tercerizado"] if "precio_tercerizado" in op.keys() else 0,
-             op["tiempo_minimo_dias"] if "tiempo_minimo_dias" in op.keys() else 0))
-        _copiar_materiales_a_ot_op(_oo_nuevo, op["id"])
-
-    # Materiales — separar simples de sub-productos
-    mats = query("""SELECT om.material_id, SUM(om.cantidad)*? AS total_cant,
-        m.unidad, m.precio_unit, m.categoria, m.codigo
-        FROM proceso_operaciones po
-        JOIN operacion_materiales om ON om.operacion_id=po.id
-        JOIN materiales m ON m.id=om.material_id
-        WHERE po.producto_id=?
-        GROUP BY om.material_id""", (qty, prod_id))
-
-    for mat in mats:
-        cant = float(mat["total_cant"] or 0)
-        # Registrar el material en la OT (siempre, independientemente de si es sub-prod)
-        execute("""INSERT INTO orden_materiales
-            (orden_id,material_id,cantidad_requerida,cantidad_asignada,unidad)
-            VALUES (?,?,?,0,?)""",
-            (ot_id, mat["material_id"], cant, mat["unidad"]))
-
-        # Si es PT con proceso propio → generar OT hija recursivamente
-        if mat["categoria"] == "Producto terminado":
-            # Tabla única: el material ES el producto (mismo id).
-            sub_prod = query(
-                """SELECT p.id FROM materiales p
-                   JOIN proceso_operaciones po ON po.producto_id=p.id
-                   WHERE p.id=? AND p.activo=1
-                   LIMIT 1""",
-                (mat["material_id"],), one=True)
-            if sub_prod:
-                sub_ot_id, _ots = explotar_multinivel(
-                    sub_prod["id"], cant, cliente_id, fecha_ot,
-                    oc_numero, nivel + 1, _ots, _visitados)
-            else:
-                # PT sin proceso propio definido: no se puede fabricar (no
-                # hay ruta que ejecutar) y tampoco se puede comprar en
-                # Compras (regla del sistema: "Producto terminado" nunca es
-                # comprable). Esto es un problema de configuración del
-                # producto (le falta el proceso) — no se genera SC ni OT acá;
-                # queda como faltante visible en la OT para resolverlo a mano
-                # (definir el proceso del producto, o asignar/vincular un
-                # lote existente desde "Lotes asignados").
-                pass
-        else:
-            # Material real (no sub-producto de categoría "Producto
-            # terminado"): puede tratarse igual de un producto fabricado en
-            # planta que fue cargado como Insumo/Herramienta/Material en el
-            # proceso (ej. un producto con proceso propio agregado como
-            # insumo de otro). Si existe un producto activo con proceso
-            # propio para este código Y el stock actual no alcanza para
-            # cubrir lo que esta OT va a consumir, se genera una OT hija por
-            # el FALTANTE (no por la cantidad total: lo que ya hay en stock
-            # cubre esa parte y no hace falta fabricarlo de nuevo).
-            # Tabla única: el material ES el producto (mismo id).
-            sub_prod = query(
-                """SELECT p.id FROM materiales p
-                   JOIN proceso_operaciones po ON po.producto_id=p.id
-                   WHERE p.id=? AND p.activo=1
-                   LIMIT 1""",
-                (mat["material_id"],), one=True)
-            if sub_prod:
-                mat_stock = query("SELECT stock FROM materiales WHERE id=?",
-                    (mat["material_id"],), one=True)
-                stock_disp = float(mat_stock["stock"] or 0) if mat_stock else 0
-                faltante = round(cant - stock_disp, 3)
-                if faltante > 0:
-                    sub_ot_id, _ots = explotar_multinivel(
-                        sub_prod["id"], faltante, cliente_id, fecha_ot,
-                        oc_numero, nivel + 1, _ots, _visitados)
-                # Si el stock actual ya cubre lo requerido, no se genera OT.
-            else:
-                # Material real (no sub-producto): si su stock queda por debajo
-                # del mínimo una vez descontado lo que esta OT va a consumir,
-                # se dispara (o actualiza) automáticamente la SC correspondiente.
-                # Esto es lo que cierra el flujo OC → SC → OT aux → OT final:
-                # la OC dispara la explosión, que crea las OT (aux para el
-                # sub-producto, final para la pieza pedida) y, en el mismo paso,
-                # la SC para el material que falte comprar.
-                auto_generar_sc_bajo_stock(
-                    mat["material_id"],
-                    f"explosión OC {oc_numero} → OT {numero_ot}")
-
-    _generar_ott_para_ot(ot_id, numero_ot)
-
-    _ots.append({
-        "item": prod["nombre"],
-        "cantidad": qty,
-        "ot_numero": numero_ot,
-        "ot_id": ot_id,
-        "fecha_entrega": fecha_ot,
-        "nivel": nivel,
-        "costo_mat": round(costo_mat, 2),
-    })
-    return ot_id, _ots
-
-@app.route("/api/ordenes_cliente/<int:ocid>/explotar", methods=["POST"])
-@login_required(roles=["admin","vendedor","operario"])
-def explotar_orden_cliente(ocid):
-    """Genera OTs para cada ítem de la OC con explosión multinivel:
-    si un material es un Producto terminado con proceso propio, genera OTs hijas."""
-    from datetime import datetime, timedelta
-    import math
-
-    oc = query("SELECT * FROM ordenes_cliente WHERE id=?", (ocid,), one=True)
-    if not oc: return jsonify({"error":"OC no encontrada"}), 404
-    if oc["estado"] == "En proceso":
-        return jsonify({"error":"Esta OC ya fue explotada"}), 409
-
-    items = query("""SELECT i.*,p.nombre prod_nombre,p.codigo prod_codigo,
-        p.tiempo_total_hs,p.costo_mat,p.precio_venta
-        FROM ordenes_cliente_items i
-        JOIN productos p ON p.id=i.producto_id
-        WHERE i.orden_cliente_id=?""", (ocid,))
-
-    if not items: return jsonify({"error":"La OC no tiene ítems"}), 400
-
-    hoy = datetime.now()
-    ots_todas = []
-
-    for item in items:
-        if item["ot_id"]:
-            continue
-
-        # Fecha entrega del nivel 0
-        tiempo_hs = float(item["tiempo_total_hs"] or 1)
-        dias_necesarios = math.ceil(tiempo_hs * float(item["cantidad"]) / 8)
-        fecha_entrega = item["fecha_deseada"] or             (hoy + timedelta(days=max(dias_necesarios, 1))).strftime("%Y-%m-%d")
-
-        # Explosión multinivel recursiva
-        ot_id, ots_item = explotar_multinivel(
-            item["producto_id"], float(item["cantidad"]),
-            oc["cliente_id"], fecha_entrega, oc["numero"])
-
-        if ot_id:
-            execute("UPDATE ordenes_cliente_items SET ot_id=? WHERE id=?",
-                    (ot_id, item["id"]))
-            execute("INSERT OR IGNORE INTO orden_cliente_item_ots (item_id,ot_id) VALUES (?,?)",
-                    (item["id"], ot_id))
-
-        ots_todas.extend(ots_item)
-
-    execute("UPDATE ordenes_cliente SET estado='En proceso' WHERE id=?", (ocid,))
-    return jsonify({"ok": True, "ots": ots_todas})
-
 def _ots_vinculadas_item(item_id):
     """Todas las OTs vinculadas a un ítem de OC de cliente (puede haber más
     de una, repartiendo la cantidad pedida entre varias OTs del mismo
@@ -9053,6 +8584,72 @@ def _ots_vinculadas_item(item_id):
     ots = [dict(r) for r in rows]
     cubierto = sum(float(r["ot_cantidad"] or 0) for r in ots)
     return ots, cubierto
+
+def _forzar_completar_ots_oc(ocid):
+    """Al pasar una OC de cliente a "Completada" (a mano o por el cierre
+    automático del remito), completa también todas sus OTs vinculadas aunque
+    no hayan terminado todas sus operaciones.
+
+    Cada OT se cierra con el mismo cierre que _completar_ot_automatico
+    (insumos sin lote, lote de PT por lo que realmente hizo la última
+    operación, baja del semielaborado sobrante de OTT, cajones abiertos a
+    "Ingresado"). Además, como la OT no va a seguir produciendo:
+      - se libera la reserva de lotes asignados que no se llegó a consumir;
+      - las OTT pendientes sin envíos se cancelan (las que tienen piezas en
+        el proveedor quedan abiertas para poder recibirlas);
+      - se borran del Scheduling los bloques futuros de operaciones sin
+        terminar (los pasados quedan como historial).
+    Las operaciones quedan con el avance real que tenían.
+
+    Devuelve (completadas, fallidas): listas de números de OT."""
+    ots = query("""SELECT o.id, o.numero FROM ordenes o
+        WHERE o.id IN (
+            SELECT ocio.ot_id FROM orden_cliente_item_ots ocio
+              JOIN ordenes_cliente_items i ON i.id=ocio.item_id
+             WHERE i.orden_cliente_id=?
+            UNION
+            SELECT i.ot_id FROM ordenes_cliente_items i
+             WHERE i.orden_cliente_id=? AND i.ot_id IS NOT NULL)
+          AND o.estado NOT IN ('Completada','Cancelada')
+        ORDER BY o.id""", (ocid, ocid))
+    if not ots:
+        return [], []
+    oc = query("SELECT numero FROM ordenes_cliente WHERE id=?", (ocid,), one=True)
+    oc_num = oc["numero"] if oc else str(ocid)
+    completadas, fallidas = [], []
+    for ot in ots:
+        oid = ot["id"]
+        _completar_ot_automatico(oid)
+        fin = query("SELECT estado FROM ordenes WHERE id=?", (oid,), one=True)
+        if not fin or fin["estado"] != "Completada":
+            fallidas.append(ot["numero"])
+            continue
+        # Reserva de lotes asignados y no consumidos: vuelve a quedar libre.
+        for v in query("""SELECT id, lote_id, material_id, cantidad_usada,
+                COALESCE(cantidad_consumida,0) consumida
+                FROM orden_lotes WHERE orden_id=?""", (oid,)):
+            pendiente = float(v["cantidad_usada"] or 0) - float(v["consumida"] or 0)
+            if pendiente <= 0.0001:
+                continue
+            execute("UPDATE lotes SET cantidad_reservada=MAX(0, COALESCE(cantidad_reservada,0)-?) WHERE id=?",
+                (pendiente, v["lote_id"]))
+            execute("""UPDATE orden_materiales SET cantidad_asignada=MAX(0, COALESCE(cantidad_asignada,0)-?)
+                WHERE orden_id=? AND material_id=?""", (pendiente, oid, v["material_id"]))
+            if float(v["consumida"] or 0) <= 0.0001:
+                execute("DELETE FROM orden_lotes WHERE id=?", (v["id"],))
+            else:
+                execute("UPDATE orden_lotes SET cantidad_usada=? WHERE id=?", (v["consumida"], v["id"]))
+        execute("""UPDATE ordenes_tercerizado SET estado='Cancelado'
+            WHERE ot_origen_id=? AND estado='Pendiente' AND COALESCE(cantidad_enviada,0)=0""", (oid,))
+        execute("""DELETE FROM planificacion WHERE inicio > strftime('%Y-%m-%d %H:%M','now','localtime')
+            AND orden_operacion_id IN (SELECT id FROM orden_operaciones
+                WHERE orden_id=? AND estado NOT IN ('Completada','Cancelada'))""", (oid,))
+        nota = f"Completada al completar la OC {oc_num}."
+        execute("""UPDATE ordenes SET obs=CASE WHEN COALESCE(TRIM(obs),'')='' THEN ?
+                ELSE obs || char(10) || ? END,
+            actualizado=datetime('now','localtime') WHERE id=?""", (nota, nota, oid))
+        completadas.append(ot["numero"])
+    return completadas, fallidas
 
 def _pct_entrega_oc(ocid):
     """Avance real de entrega de una OC (lo remitido sobre lo pedido),
@@ -9093,12 +8690,6 @@ def get_ordenes_vinculables():
     sql += " ORDER BY o.id DESC"
     rows = query(sql, tuple(params))
     return jsonify([dict(r) for r in rows])
-
-@app.route("/api/ordenes_cliente_items/<int:item_id>/ots_vinculadas", methods=["GET"])
-@login_required()
-def get_ots_vinculadas_item(item_id):
-    ots, cubierto = _ots_vinculadas_item(item_id)
-    return jsonify({"ots": ots, "cubierto": cubierto})
 
 @app.route("/api/ordenes_cliente_items/<int:item_id>/vincular_ot", methods=["POST"])
 @login_required(roles=["admin","vendedor","operario"])
@@ -9147,11 +8738,29 @@ def desvincular_ot_item(item_id, ot_id):
 @app.route("/api/ordenes_cliente/<int:ocid>", methods=["PUT"])
 @login_required(roles=["admin","vendedor"])
 def update_orden_cliente(ocid):
-    d = request.json
-    execute("UPDATE ordenes_cliente SET estado=?,fecha_entrega=?,obs=? WHERE id=?",
-        (d.get("estado"), d.get("fecha_entrega"), d.get("obs"), ocid))
+    d = request.json or {}
+    actual = query("SELECT * FROM ordenes_cliente WHERE id=?", (ocid,), one=True)
+    if not actual: return jsonify({"error":"OC no encontrada"}), 404
+    # Solo se pisan los campos que vienen en el body: el formulario no manda
+    # fecha_entrega y antes la ponía en NULL en cada edición.
+    nuevo_numero = actual["numero"]
+    if d.get("numero_oc") and d["numero_oc"] != actual["numero"]:
+        if query("SELECT id FROM ordenes_cliente WHERE numero=? AND id!=?", (d["numero_oc"], ocid), one=True):
+            return jsonify({"error": f"El número {d['numero_oc']} ya existe"}), 409
+        nuevo_numero = d["numero_oc"]
+    execute("UPDATE ordenes_cliente SET numero=?,estado=?,fecha=?,fecha_entrega=?,obs=? WHERE id=?",
+        (nuevo_numero,
+         d["estado"] if "estado" in d else actual["estado"],
+         (d.get("fecha") or actual["fecha"]) if "fecha" in d else actual["fecha"],
+         d["fecha_entrega"] if "fecha_entrega" in d else actual["fecha_entrega"],
+         d["obs"] if "obs" in d else actual["obs"], ocid))
     # Update items if provided (only items without OTs assigned)
     if "items" in d:
+        # Los requerimientos productivos espejo de los ítems que se van a
+        # recrear (OC-CLI-ITEM-<id>) quedaban huérfanos y duplicados.
+        for _old in query("SELECT id FROM ordenes_cliente_items WHERE orden_cliente_id=? AND (ot_id IS NULL OR ot_id=0)", (ocid,)):
+            if not query("SELECT 1 FROM remito_items WHERE orden_cliente_item_id=? LIMIT 1", (_old["id"],), one=True):
+                execute("DELETE FROM requerimientos_productivos WHERE numero=?", (f"OC-CLI-ITEM-{_old['id']}",))
         execute("DELETE FROM ordenes_cliente_items WHERE orden_cliente_id=? AND (ot_id IS NULL OR ot_id=0)", (ocid,))
         for item in (d["items"] or []):
             if item.get("producto_id") and item.get("cantidad"):
@@ -9162,6 +8771,10 @@ def update_orden_cliente(ocid):
                      item.get("precio_unit",0), item.get("fecha_deseada"), item.get("obs")))
                 _sync_requerimiento_desde_pedido(item_id)
                 _sync_precio_venta_producto(item["producto_id"], item.get("precio_unit"))
+    # Completar la OC completa también sus OTs, aunque no estén terminadas.
+    if d.get("estado") == "Completada" and actual["estado"] != "Completada":
+        completadas, fallidas = _forzar_completar_ots_oc(ocid)
+        return jsonify({"ok":True, "ots_completadas":completadas, "ots_fallidas":fallidas})
     return jsonify({"ok":True})
 
 # ── MRP ampliado: consolidar OC-cliente → generar OTs ────────────────────────
@@ -9259,7 +8872,8 @@ def mrp_consolidar():
     placeholders = ",".join("?" * len(oc_ids))
     items = query(f"""SELECT i.producto_id,SUM(i.cantidad) AS total_qty,
         p.nombre producto_nombre,p.codigo,p.costo_mat,p.costo_mo,p.precio_venta,
-        MAX(oc.cliente_id) cliente_id,
+        MAX(oc.cliente_id) cliente_id, COUNT(DISTINCT oc.cliente_id) n_clientes,
+        p.tiempo_total_hs,
         COALESCE(i.fecha_deseada, MAX(oc.fecha_entrega)) fecha_entrega,
         GROUP_CONCAT(i.id) AS item_ids
         FROM ordenes_cliente_items i
@@ -9269,30 +8883,41 @@ def mrp_consolidar():
         GROUP BY i.producto_id, i.fecha_deseada""", oc_ids)
     ots_creadas = []
     for item in items:
-        last = query("SELECT numero FROM ordenes ORDER BY id DESC LIMIT 1", one=True)
-        try: n = int(last["numero"].split("-")[1])+1 if last else 1
-        except: n = 1
-        numero = f"OT-{n:03d}"
+        numero = siguiente_numero("ordenes", "OT-", 3)
 
         # Calcular tiempo estándar (min) en base a las operaciones del proceso,
-        # igual que en explotar_multinivel, en vez de copiar costo_mo del producto.
+        # en vez de copiar costo_mo del producto.
         ops_proc_item = query(
             "SELECT * FROM proceso_operaciones WHERE producto_id=? ORDER BY CAST(orden AS INTEGER), orden",
             (item["producto_id"],))
         tiempo_std = tiempo_std_min(ops_proc_item, item["total_qty"])
 
         # Costo de materiales: se calcula dinámicamente en base a la receta
-        # actual del producto (igual que en explotar_multinivel / calcular_costo_producto),
+        # actual del producto (igual que en calcular_costo_producto),
         # en vez de usar productos.costo_mat, que es un valor estático que puede
         # estar desactualizado o en 0 si nunca se recalculó a mano.
         costo_mat_item = calcular_costo_producto(item["producto_id"], item["total_qty"])
 
+        # Sin fecha deseada ni fecha de entrega del pedido, la OT quedaba sin
+        # fecha (y sin poder ordenarse en Scheduling). Se estima igual que en
+        # "Explotar": hoy + días de trabajo necesarios.
+        fecha_ot = item["fecha_entrega"]
+        if not fecha_ot:
+            import math as _m
+            from datetime import datetime as _dt, timedelta as _td
+            _dias = _m.ceil(float(item["tiempo_total_hs"] or 1) * float(item["total_qty"] or 0) / 8)
+            fecha_ot = (_dt.now() + _td(days=max(_dias, 1))).strftime("%Y-%m-%d")
+        # Si se consolidan pedidos de varios clientes en una misma OT, la OT
+        # no es de un cliente puntual (los vínculos ítem→OT siguen indicando
+        # a qué pedido corresponde cada parte).
+        cliente_ot = item["cliente_id"] if int(item["n_clientes"] or 0) <= 1 else None
+
         oid = execute("""INSERT INTO ordenes
             (numero,cliente_id,producto_id,descripcion,cantidad,prioridad,estado,fecha_entrega,costo_mat,costo_mo,precio_venta)
             VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-            (numero,item["cliente_id"],item["producto_id"],
+            (numero,cliente_ot,item["producto_id"],
              f"Fabricación {item['producto_nombre']} — generado por MRP",
-             item["total_qty"],"Normal","Pendiente",item["fecha_entrega"],
+             item["total_qty"],"Normal","Pendiente",fecha_ot,
              round(costo_mat_item, 2),round(tiempo_std, 0),item["precio_venta"]))
         populate_ops_internal(oid, item["producto_id"], item["total_qty"])
         populate_mats_internal(oid, item["producto_id"], item["total_qty"])
@@ -9438,10 +9063,7 @@ def _gap_analysis_materiales():
                                             "cantidad": cantidad_ot, "actualizada": True})
                 continue
 
-            last = query("SELECT numero FROM ordenes ORDER BY id DESC LIMIT 1", one=True)
-            try: n = int(last["numero"].split("-")[1])+1 if last else 1
-            except: n = 1
-            numero_aux = f"OT-{n:03d}"
+            numero_aux = siguiente_numero("ordenes", "OT-", 3)
 
             ops_proc_aux = query(
                 "SELECT * FROM proceso_operaciones WHERE producto_id=? ORDER BY CAST(orden AS INTEGER), orden",
@@ -9485,8 +9107,18 @@ def _gap_analysis_materiales():
         # NO se tocan, solo deja de pedirse la compra sola.
         if not _sc_automaticas_activas():
             continue
+        # Lo que ya está comprado y todavía no llegó (OC abiertas) cubre parte
+        # del faltante: sin descontarlo, cada corrida del MRP volvía a pedir
+        # el mismo material que ya estaba en camino.
+        en_camino = float(query("""SELECT COALESCE(SUM(MAX(0, i.cantidad - COALESCE(i.cantidad_recibida,0))),0) c
+            FROM ordenes_compra_items i JOIN ordenes_compra oc ON oc.id=i.oc_id
+            WHERE i.material_id=? AND oc.estado IN ('Borrador','Pendiente aprobacion','Aprobada','Enviada','Recibida parcial')""",
+            (mat["material_id"],), one=True)["c"] or 0)
+        faltante = round(faltante - en_camino, 3)
+        if faltante <= 0:
+            continue
         sc_exist = query("""SELECT id,cantidad FROM solicitudes_compra
-            WHERE material_id=? AND estado IN ('Pendiente','En evaluación')
+            WHERE material_id=? AND estado IN ('Pendiente','Cotizada','En evaluación')
             ORDER BY id DESC LIMIT 1""", (mat["material_id"],), one=True)
         if sc_exist:
             if float(sc_exist["cantidad"] or 0) < faltante:
@@ -9497,10 +9129,7 @@ def _gap_analysis_materiales():
                      sc_exist["id"]))
                 solicitudes_creadas.append({"numero":None,"material":mat["descripcion"],"cantidad":round(faltante,3),"actualizada":True})
         else:
-            last_sc = query("SELECT numero FROM solicitudes_compra WHERE numero LIKE 'SC-PROD-%' ORDER BY id DESC LIMIT 1", one=True)
-            try: sc_n = int(last_sc["numero"].split("-")[2])+1 if last_sc else 1
-            except: sc_n = 1
-            sc_num = f"SC-PROD-{sc_n:04d}"
+            sc_num = siguiente_numero("solicitudes_compra", "SC-PROD-", 4)
             execute("""INSERT INTO solicitudes_compra
                 (numero,tipo,descripcion,material_id,cantidad,unidad,urgencia,estado,obs)
                 VALUES (?,?,?,?,?,?,?,?,?)""",
@@ -9571,10 +9200,7 @@ def mrp_consolidar_pronostico():
 
     ots_creadas = []
     for item in items:
-        last = query("SELECT numero FROM ordenes ORDER BY id DESC LIMIT 1", one=True)
-        try: n = int(last["numero"].split("-")[1])+1 if last else 1
-        except: n = 1
-        numero = f"OT-{n:03d}"
+        numero = siguiente_numero("ordenes", "OT-", 3)
 
         ops_proc_item = query(
             "SELECT * FROM proceso_operaciones WHERE producto_id=? ORDER BY CAST(orden AS INTEGER), orden",
@@ -9622,10 +9248,18 @@ def populate_ops_internal(oid, prod_id, qty):
         _copiar_materiales_a_ot_op(_oo_nuevo, op["id"])
 
 def populate_mats_internal(oid, prod_id, qty):
-    mats = query("""SELECT om.material_id,SUM(om.cantidad)*? AS total,m.unidad
+    # Las herramientas con vida útil se calculan con las piezas que procesa
+    # cada operación en esta OT (orden_operaciones.qty_requerida, ya creada
+    # por populate_ops_internal); si la operación todavía no está en la OT,
+    # con la cantidad de la OT.
+    mats = query("""SELECT om.material_id,
+        SUM(cant_material(om.cantidad,
+            COALESCE((SELECT MAX(oo.qty_requerida) FROM orden_operaciones oo
+                      WHERE oo.orden_id=? AND oo.proceso_op_id=po.id), ?),
+            om.vida_util_herramienta)) AS total, m.unidad
         FROM proceso_operaciones po JOIN operacion_materiales om ON om.operacion_id=po.id
         JOIN materiales m ON m.id=om.material_id
-        WHERE po.producto_id=? GROUP BY om.material_id""", (qty, prod_id))
+        WHERE po.producto_id=? GROUP BY om.material_id""", (oid, qty, prod_id))
     for mat in mats:
         execute("INSERT INTO orden_materiales (orden_id,material_id,cantidad_requerida,cantidad_asignada,unidad) VALUES (?,?,?,0,?)",
             (oid, mat["material_id"], mat["total"], mat["unidad"]))
@@ -9729,7 +9363,10 @@ def get_novedades():
         oo.nombre operacion_nombre, oo.orden op_orden,
         o.numero ot_numero, o.producto_id, o.cliente_id, o.estado ot_estado,
         p.nombre producto_nombre, p.codigo producto_codigo,
-        c.razon cliente_nombre
+        c.razon cliente_nombre,
+        (SELECT GROUP_CONCAT(cj.numero || ' (' || printf('%g', nc.cantidad) || ')', ', ')
+            FROM novedad_cajones nc JOIN cajones cj ON cj.id=nc.cajon_id
+            WHERE nc.novedad_id=n.id) cajones_txt
         FROM novedades_produccion n
         LEFT JOIN empleados e ON e.id=n.empleado_id
         LEFT JOIN maquinas m ON m.id=n.maquina_id
@@ -9761,13 +9398,13 @@ def _bloqueo_terc_previo(orden_id, orden_num):
     quede Aprobado (ver ott_registrar_retorno / update_lote).
     Devuelve la fila bloqueante o None si no hay bloqueo."""
     try:
-        orden_num_int = int(orden_num)
+        orden_num_int = float(orden_num)
     except Exception:
         return None
     return query("""SELECT nombre, orden FROM orden_operaciones
         WHERE orden_id=? AND es_tercerizada=1 AND estado!='Completada'
-          AND CAST(orden AS INTEGER) < ?
-        ORDER BY CAST(orden AS INTEGER) LIMIT 1""",
+          AND CAST(orden AS REAL) < ?
+        ORDER BY CAST(orden AS REAL) LIMIT 1""",
         (orden_id, orden_num_int), one=True)
 
 def _tope_terc_previa(orden_id, orden_num):
@@ -9793,13 +9430,13 @@ def _tope_terc_previa(orden_id, orden_num):
     ese era el bug: quedaba limitado únicamente por el estado de la
     operación tercerizada en vez de por la cantidad real ya aprobada."""
     try:
-        orden_num_int = int(orden_num)
+        orden_num_int = float(orden_num)
     except Exception:
         return None
     return query("""SELECT id, nombre, orden, qty_producida FROM orden_operaciones
         WHERE orden_id=? AND es_tercerizada=1
-          AND CAST(orden AS INTEGER) < ?
-        ORDER BY CAST(orden AS INTEGER) DESC LIMIT 1""",
+          AND CAST(orden AS REAL) < ?
+        ORDER BY CAST(orden AS REAL) DESC LIMIT 1""",
         (orden_id, orden_num_int), one=True)
 
 @app.route("/api/novedades", methods=["POST"])
@@ -9824,6 +9461,11 @@ def create_novedad():
         LEFT JOIN proceso_operaciones po ON po.id=oo.proceso_op_id
         WHERE oo.id=?""", (d["orden_operacion_id"],), one=True)
     if not op: return jsonify({"error":"Operación no encontrada"}), 404
+    if int(op["orden_id"]) != int(d["orden_id"]):
+        return jsonify({"error":"La operación no pertenece a esa OT"}), 400
+    _ot_nov = query("SELECT estado FROM ordenes WHERE id=?", (d["orden_id"],), one=True)
+    if _ot_nov and _ot_nov["estado"] == "Cancelada":
+        return jsonify({"error":"La OT está cancelada: no se pueden cargar novedades"}), 400
 
     # ── Operación tercerizada: no se carga por Novedades. Se completa sola
     # cuando vuelve el lote del proveedor (OTT → Lotes → Aprobado). ────────
@@ -9905,15 +9547,17 @@ def create_novedad():
     if insumos_op:
         errores_ins = []
         for ins in insumos_op:
-            consumo_incremental = ins["cantidad"] * qty
-            comprometido = query("""SELECT COALESCE(SUM(om.cantidad * oo.qty_producida),0) c
+            # Consumo de toda la OT contando esta novedad (herramientas con
+            # vida útil: ceil por operación, ver cant_material).
+            total_necesario = float(query("""SELECT COALESCE(SUM(cant_material(om.cantidad,
+                    oo.qty_producida + CASE WHEN oo.id=? THEN ? ELSE 0 END,
+                    om.vida_util_herramienta)),0) c
                 FROM orden_operaciones oo
                 JOIN orden_operacion_materiales om ON om.orden_operacion_id=oo.id
                 WHERE oo.orden_id=? AND om.material_id=?""",
-                (d["orden_id"], ins["material_id"]), one=True)["c"] or 0
+                (op["id"], qty, d["orden_id"], ins["material_id"]), one=True)["c"] or 0)
             mat_stock = query("SELECT stock FROM materiales WHERE id=?", (ins["material_id"],), one=True)
             stock_disp = float(mat_stock["stock"] or 0) if mat_stock else 0
-            total_necesario = float(comprometido) + consumo_incremental
             if total_necesario > stock_disp:
                 faltante = round(total_necesario - stock_disp, 3)
                 errores_ins.append(f"Stock insuficiente de insumo \"{ins['descripcion']}\" (stock {stock_disp}, requerido {round(total_necesario,3)}, faltan {faltante})")
@@ -9966,11 +9610,22 @@ def create_novedad():
         if errores:
             return jsonify({"error": "No se puede confirmar la novedad: " + " | ".join(errores)}), 400
 
+    # ── Cajones: en el primer paso las piezas OK llenan cajones solas; en los
+    # siguientes se indica en qué cajón(es) se trabajó, con tope por cajón
+    # (ver _plan_cajones_paso). Las piezas NO OK no se imputan a cajones. ──
+    usa_cajones = qty > 0 and _ot_usa_cajones(d["orden_id"])
+    plan_cajones = None
+    if usa_cajones:
+        pasos_ot = _pasos_ot(d["orden_id"])
+        paso_op = query("SELECT CAST(orden AS INTEGER) p FROM orden_operaciones WHERE id=?",
+            (op["id"],), one=True)["p"]
+        if paso_op != pasos_ot[0]:
+            plan_cajones, err = _plan_cajones_paso(d["orden_id"], paso_op, qty, d.get("cajones"))
+            if err:
+                return jsonify({"error": "No se puede confirmar la novedad: " + err}), 400
+
     # ── Todas las validaciones pasaron: recién ahora se inserta la novedad ──
-    last = query("SELECT numero FROM novedades_produccion ORDER BY id DESC LIMIT 1", one=True)
-    try: n = int(last["numero"].split("-")[1])+1 if last else 1
-    except: n = 1
-    numero = f"NOV-{n:05d}"
+    numero = siguiente_numero("novedades_produccion", "NOV-", 5)
 
     fecha_nov = d.get("fecha") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -9984,6 +9639,11 @@ def create_novedad():
 
     execute("UPDATE orden_operaciones SET qty_producida=qty_producida+? WHERE id=?",
         (qty, d["orden_operacion_id"]))
+    if usa_cajones:
+        if plan_cajones is None:
+            _guardar_novedad_cajones(lid, d["orden_id"], [], extra=qty)
+        else:
+            _guardar_novedad_cajones(lid, d["orden_id"], plan_cajones)
 
     # En cuanto se declara la primera novedad de producción, la OT pasa de
     # "Pendiente" a "En proceso" (si ya estaba en otro estado —En proceso,
@@ -10085,8 +9745,13 @@ def create_novedad():
             generar_pt_faltante_si_corresponde(d["orden_id"])
     except Exception as e:
         print(f"[WARN] No se pudo generar PT/cajón al declarar novedad {numero} (OT {d['orden_id']}): {e}")
+    if usa_cajones:
+        _cajones_vincular_lote(d["orden_id"])
+    cajones_nov = [r["numero"] for r in query("""SELECT cj.numero FROM novedad_cajones nc
+        JOIN cajones cj ON cj.id=nc.cajon_id WHERE nc.novedad_id=? ORDER BY cj.id""", (lid,))]
 
-    return jsonify({"ok":True,"id":lid,"numero":numero,"rendimiento_pct":rendimiento,"desvio":desvio}), 201
+    return jsonify({"ok":True,"id":lid,"numero":numero,"rendimiento_pct":rendimiento,"desvio":desvio,
+                    "cajones":cajones_nov}), 201
 
 
 
@@ -10108,7 +9773,11 @@ def get_novedad(nid):
         JOIN ordenes o ON o.id=n.orden_id
         WHERE n.id=?""", (nid,), one=True)
     if not row: return jsonify({"error":"Novedad no encontrada"}), 404
-    return jsonify(dict(row))
+    out = dict(row)
+    out["cajones"] = [dict(r) for r in query("""SELECT nc.cajon_id, nc.cantidad, cj.numero
+        FROM novedad_cajones nc JOIN cajones cj ON cj.id=nc.cajon_id
+        WHERE nc.novedad_id=? ORDER BY cj.id""", (nid,))]
+    return jsonify(out)
 
 @app.route("/api/novedades/<int:nid>", methods=["PUT"])
 @login_required(roles=["admin","operario"])
@@ -10129,6 +9798,15 @@ def update_novedad(nid):
     t_new   = float(d.get("tiempo_real_min", t_old))
     diff    = qty_new - qty_old  # positive = more produced, negative = less
 
+    # --- Cajones: se valida antes de tocar nada (tope por cajón, pasos
+    # siguientes y lo ya clasificado por Calidad) ---
+    plan_cajones, extra_cajones = None, 0.0
+    if _ot_tiene_cajones(nov["orden_id"]) and (diff != 0 or d.get("cajones")):
+        plan_cajones, extra_cajones, err = _replan_novedad_cajones(
+            nid, nov["orden_id"], nov["orden_operacion_id"], qty_new, d.get("cajones"))
+        if err:
+            return jsonify({"error": "No se puede editar la novedad: " + err}), 400
+
     # --- Validar stock de insumos si se está aumentando la cantidad ---
     if diff > 0:
         insumos_op = query("""SELECT om.*, m.descripcion descripcion
@@ -10137,15 +9815,15 @@ def update_novedad(nid):
         if insumos_op:
             errores_ins = []
             for ins in insumos_op:
-                consumo_incremental = ins["cantidad"] * diff
-                comprometido = query("""SELECT COALESCE(SUM(om.cantidad * oo.qty_producida),0) c
+                total_necesario = float(query("""SELECT COALESCE(SUM(cant_material(om.cantidad,
+                        oo.qty_producida + CASE WHEN oo.id=? THEN ? ELSE 0 END,
+                        om.vida_util_herramienta)),0) c
                     FROM orden_operaciones oo
                     JOIN orden_operacion_materiales om ON om.orden_operacion_id=oo.id
                     WHERE oo.orden_id=? AND om.material_id=?""",
-                    (nov["orden_id"], ins["material_id"]), one=True)["c"] or 0
+                    (nov["orden_operacion_id"], diff, nov["orden_id"], ins["material_id"]), one=True)["c"] or 0)
                 mat_stock = query("SELECT stock FROM materiales WHERE id=?", (ins["material_id"],), one=True)
                 stock_disp = float(mat_stock["stock"] or 0) if mat_stock else 0
-                total_necesario = float(comprometido) + consumo_incremental
                 if total_necesario > stock_disp:
                     faltante = round(total_necesario - stock_disp, 3)
                     errores_ins.append(f"Stock insuficiente de insumo \"{ins['descripcion']}\" (stock {stock_disp}, requerido {round(total_necesario,3)}, faltan {faltante})")
@@ -10233,6 +9911,8 @@ def update_novedad(nid):
     # --- Ajustar qty_producida en orden_operacion ---
     execute("UPDATE orden_operaciones SET qty_producida=MAX(0,qty_producida+?) WHERE id=?",
             (diff, nov["orden_operacion_id"]))
+    if plan_cajones is not None:
+        _guardar_novedad_cajones(nid, nov["orden_id"], plan_cajones, extra_cajones)
 
     # --- Sincronizar estado con el 100%: si al editar la novedad la
     # operación pasa a tener 100% o más, se marca "Completada"; si al
@@ -10262,8 +9942,10 @@ def update_novedad(nid):
             print(f"[WARN] No se pudo resincronizar el PT de la OT {nov['orden_id']} "
                   f"al editar la novedad {nov['numero']}: {e}")
 
+    if plan_cajones is not None:
+        _cajones_vincular_lote(nov["orden_id"])
+
     # --- Recalcular rendimiento ---
-    std = float(nov["tiempo_ciclo_seg"] if hasattr(nov,"tiempo_ciclo_seg") else 60) or 60
     op_std = query("SELECT tiempo_ciclo_seg FROM orden_operaciones WHERE id=?",
                    (nov["orden_operacion_id"],), one=True)
     # ciclo en minutos (la columna esta en segundos) para comparar contra
@@ -10319,6 +10001,17 @@ def delete_novedad(nid):
     detalle = {"lotes_mp": [], "pt": None, "remitos": []}
     lote_ids_afectados = set()
     pt_lote_ids = set()  # lotes de PT de esta OT — si tienen remitos, se eliminan (no solo se informan)
+
+    # --- Cajones: no se puede sacar piezas que ya avanzaron a pasos
+    # siguientes ni que Calidad ya clasificó ---
+    filas_cajones = [dict(r) for r in query("""SELECT nc.cajon_id, nc.cantidad, cj.numero
+        FROM novedad_cajones nc JOIN cajones cj ON cj.id=nc.cajon_id
+        WHERE nc.novedad_id=? ORDER BY cj.id""", (nid,))]
+    if filas_cajones:
+        _, _, err = _replan_novedad_cajones(nid, nov["orden_id"], nov["orden_operacion_id"], 0.0)
+        if err:
+            return jsonify({"error": "No se puede eliminar la novedad: " + err}), 400
+        detalle["cajones"] = filas_cajones
 
     # --- Devolver el CONSUMO REAL de materias primas al stock/lote ---
     # Desde que el material se descuenta al declarar la novedad (ver
@@ -10445,6 +10138,11 @@ def delete_novedad(nid):
                     FROM lotes WHERE material_id=? AND (numero=? OR numero LIKE ?)
                     ORDER BY numero""", (mat_pt["id"], nov["ot_numero"], nov["ot_numero"]+"-C%"))
                 for l in lotes_ot:
+                    # Un lote con cajones remite solo de cajones liberados, y
+                    # esta novedad no puede tocar piezas liberadas (ver
+                    # arriba): sus remitos no se tocan.
+                    if query("SELECT 1 FROM cajones WHERE lote_id=? LIMIT 1", (l["id"],), one=True):
+                        continue
                     lote_ids_afectados.add(l["id"])
                     pt_lote_ids.add(l["id"])
                 detalle["pt"] = {
@@ -10523,6 +10221,8 @@ def delete_novedad(nid):
          json.dumps(detalle, ensure_ascii=False), session["user_id"],
          quien_elimina["nombre"] if quien_elimina else None))
 
+    if filas_cajones:
+        _guardar_novedad_cajones(nid, nov["orden_id"], [])
     execute("DELETE FROM novedades_produccion WHERE id=?", (nid,))
     return jsonify({"ok": True})
 
@@ -10597,7 +10297,7 @@ def restaurar_novedad_eliminada(eid):
     qty = float(reg["cantidad_producida"] or 0)
 
     # --- Volver a crear la novedad con sus datos originales ---
-    execute("""INSERT INTO novedades_produccion
+    nid_rest = execute("""INSERT INTO novedades_produccion
         (numero,orden_id,orden_operacion_id,empleado_id,maquina_id,cantidad_producida,tiempo_real_min,
          piezas_observadas,tiempo_perdido,turno,fecha,rendimiento_pct,desvio,obs,creado_por)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
@@ -10610,6 +10310,23 @@ def restaurar_novedad_eliminada(eid):
     qty_req_op = float(oo["qty_requerida"] or 0)
     qty_prod_antes = float(oo["qty_producida"] or 0)
     execute("UPDATE orden_operaciones SET qty_producida=qty_producida+? WHERE id=?", (qty, reg["orden_operacion_id"]))
+
+    # --- Volver a imputar a cajones, con las mismas reglas que una novedad nueva ---
+    if qty > 0 and _ot_tiene_cajones(reg["orden_id"]):
+        pasos_ot = _pasos_ot(reg["orden_id"])
+        paso_op = query("SELECT CAST(orden AS INTEGER) p FROM orden_operaciones WHERE id=?",
+            (reg["orden_operacion_id"],), one=True)["p"]
+        if paso_op == pasos_ot[0]:
+            _guardar_novedad_cajones(nid_rest, reg["orden_id"], [], extra=qty)
+        else:
+            plan_c, err = _plan_cajones_paso(reg["orden_id"], paso_op, qty, detalle.get("cajones"),
+                sin_novedad=nid_rest)
+            if err:
+                plan_c, _ = _plan_cajones_paso(reg["orden_id"], paso_op, qty, sin_novedad=nid_rest, parcial=True)
+                warnings.append("No se pudieron usar los mismos cajones que tenía (" + err
+                                + "): se imputó en orden a los cajones con piezas disponibles")
+            _guardar_novedad_cajones(nid_rest, reg["orden_id"], plan_c)
+        _cajones_vincular_lote(reg["orden_id"])
     execute("UPDATE ordenes SET estado='En proceso' WHERE id=? AND estado='Pendiente'", (reg["orden_id"],))
     ya_estaba_al_100 = qty_req_op > 0 and qty_prod_antes >= qty_req_op - 0.0001
     if oo["estado"] != "Completada" and not ya_estaba_al_100:
@@ -10729,10 +10446,7 @@ def create_trabajo_no_productivo():
     if not desc: return jsonify({"error":"Descripción requerida"}), 400
     if tmin <= 0: return jsonify({"error":"El tiempo debe ser mayor a 0"}), 400
 
-    last = query("SELECT numero FROM trabajo_no_productivo ORDER BY id DESC LIMIT 1", one=True)
-    try: n = int(last["numero"].split("-")[1])+1 if last else 1
-    except: n = 1
-    numero = f"TNP-{n:05d}"
+    numero = siguiente_numero("trabajo_no_productivo", "TNP-", 5)
 
     if fecha:
         lid = execute("""INSERT INTO trabajo_no_productivo
@@ -10777,17 +10491,7 @@ def delete_trabajo_no_productivo(tid):
 # ── Lotes ─────────────────────────────────────────────────────────────────────
 def _gen_lote_numero():
     """Genera número de lote correlativo por año: LOTE-2026-0001"""
-    from datetime import datetime
-    year = datetime.now().year
-    last = query(
-        "SELECT numero FROM lotes WHERE numero LIKE ? ORDER BY id DESC LIMIT 1",
-        (f"LOTE-{year}-%",), one=True)
-    if last:
-        try: n = int(last["numero"].split("-")[2]) + 1
-        except: n = 1
-    else:
-        n = 1
-    return f"LOTE-{year}-{n:04d}"
+    return siguiente_numero("lotes", f"LOTE-{datetime.now().year}-", 4)
 
 @app.route("/api/lotes", methods=["GET"])
 @login_required()
@@ -10899,7 +10603,7 @@ def _sync_ott_retorno_a_operacion(lote_id):
 
     # Lo aprobado ACUMULADO de este lote: lo que sigue en el lote más lo que
     # ya se consumió para esta OT. Hay que sumar lo consumido porque el
-    # semielaborado se gasta al cerrar la OTT (ver _consumir_pse_al_cerrar_ott); si
+    # semielaborado lo consume la operación siguiente (ver _materiales_ott_pendientes_por_operacion); si
     # se mirara solo cantidad_activa, una segunda aprobación parcial pisaría
     # qty_producida con el delta nuevo en vez del total.
     consumido = 0.0
@@ -10916,82 +10620,44 @@ def _sync_ott_retorno_a_operacion(lote_id):
     # el estado de la operación ni de la OTT — el cierre es manual, ver
     # ott_completar.
     if ott["oo_estado"] != "Completada":
+        usa_cajones = _ot_usa_cajones(ott["oo_orden_id"])
         execute("UPDATE orden_operaciones SET qty_producida=? WHERE id=?",
             (aprobado, ott["oo_id"]))
+        _sync_cajones_op_tercerizada(ott["oo_id"], usa_cajones)
 
 
-def _consumir_pse_al_cerrar_ott(ott_id):
-    """El semielaborado que vuelve de una tercerizada intermedia se consume en
-    la MISMA operación que lo produjo, al cerrarse la OTT.
-
-    El circuito real es: la pieza sale del taller, el proveedor la trabaja y
-    vuelve; el semielaborado existe para dejar registrado ese paso, no para
-    quedarse en el depósito. Si se lo deja en stock queda un remanente que
-    nadie gasta nunca — es lo que venía pasando con los semielaborados
-    anteriores. Entre el ingreso del lote y este consumo, la trazabilidad
-    queda completa y el stock neto vuelve a cero.
-
-    POR QUE ACA Y NO AL APROBAR: clasificar en Calidad es iterativo — se
-    aprueba una parte, llegan más piezas, se corrige una clasificación mal
-    cargada. Consumir en cada aprobación bajaba cantidad_disponible, que es
-    justamente contra lo que update_lote valida el reparto
-    Aprobado/Rechazado/Pendiente, y dejaba el lote en 'Agotado' fuera de la
-    cola de Calidad: no se podía reclasificar ni recibir el resto. El cierre
-    manual de la OTT (botón "Completar") es el momento en que Calidad ya
-    terminó y las piezas pasan a la operación siguiente.
-
-    EXCEPCION: si el paso siguiente de la ruta también es tercerizado, el
-    semielaborado NO se consume acá — esas mismas piezas se le mandan al
-    segundo proveedor, y ese envío ya descuenta el lote al emitir su remito
-    (ver ott_emitir_remito). Consumirlo dos veces dejaría al segundo remito
-    sin stock que descontar y lo haría fallar.
-    """
-    ott = query("""SELECT ott.*, oo.orden_id oo_orden_id, oo.orden oo_orden
-        FROM ordenes_tercerizado ott
-        LEFT JOIN orden_operaciones oo ON oo.id=ott.operacion_id
-        WHERE ott.id=? AND ott.es_ultimo_nivel=0""", (ott_id,), one=True)
-    if not ott or not ott["lote_retorno_id"] or not ott["ot_origen_id"]:
-        return
-    lote = query("""SELECT id,numero,material_id,cantidad_activa,cantidad_disponible
-        FROM lotes WHERE id=?""", (ott["lote_retorno_id"],), one=True)
-    if not lote:
-        return
-    aprobado_en_lote = float(lote["cantidad_activa"] or 0)
-    if aprobado_en_lote <= 0.0001:
-        return
-
-    try:
-        orden_num = int(ott["oo_orden"])
-    except (TypeError, ValueError):
-        return
-    siguiente = query("""SELECT es_tercerizada FROM orden_operaciones
-        WHERE orden_id=? AND CAST(orden AS INTEGER) > ?
-        ORDER BY CAST(orden AS INTEGER) ASC LIMIT 1""",
-        (ott["oo_orden_id"], orden_num), one=True)
-    if siguiente and siguiente["es_tercerizada"]:
-        return
-
-    mat_id = lote["material_id"]
-    execute("""UPDATE lotes SET
-            cantidad_activa=MAX(0, cantidad_activa-?),
-            cantidad_disponible=MAX(0, cantidad_disponible-?),
-            cantidad_reservada=MAX(0, COALESCE(cantidad_reservada,0)-?),
-            estado=CASE WHEN cantidad_disponible-? <= 0.0001 THEN 'Agotado' ELSE estado END
-        WHERE id=?""",
-        (aprobado_en_lote, aprobado_en_lote, aprobado_en_lote,
-         aprobado_en_lote, lote["id"]))
-    execute("""UPDATE materiales SET stock=MAX(0, stock-?),
-            actualizado=datetime('now','localtime') WHERE id=?""",
-        (aprobado_en_lote, mat_id))
-    execute("""UPDATE orden_lotes SET cantidad_consumida=COALESCE(cantidad_consumida,0)+?
-        WHERE orden_id=? AND lote_id=?""",
-        (aprobado_en_lote, ott["ot_origen_id"], lote["id"]))
-    execute("""INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id)
-        VALUES (?,?,'salida',?,?,?)""",
-        (mat_id, lote["id"], aprobado_en_lote,
-         f"Consumo del semielaborado al cerrar la operación tercerizada {ott['numero']} "
-         f"— Lote {lote['numero']} (entra y se gasta en el mismo paso)",
-         session.get("user_id")))
+def _consumir_pse_sobrante_ot(oid):
+    """Al completar la OT, da de baja el semielaborado aprobado que quedó en
+    los lotes de retorno de sus OTT intermedias sin que la operación
+    siguiente lo consumiera (piezas que no siguieron la ruta). Antes esto se
+    hacía al cerrar cada OTT, pero ahí todavía hacía falta para la operación
+    siguiente."""
+    for ott in query("""SELECT ott.id, ott.numero, ott.lote_retorno_id FROM ordenes_tercerizado ott
+            WHERE ott.ot_origen_id=? AND ott.es_ultimo_nivel=0
+              AND ott.lote_retorno_id IS NOT NULL""", (oid,)):
+        lote = query("""SELECT id,numero,material_id,cantidad_activa FROM lotes WHERE id=?""",
+            (ott["lote_retorno_id"],), one=True)
+        if not lote:
+            continue
+        sobrante = float(lote["cantidad_activa"] or 0)
+        if sobrante <= 0.0001:
+            continue
+        execute("""UPDATE lotes SET
+                cantidad_activa=MAX(0, cantidad_activa-?),
+                cantidad_disponible=MAX(0, cantidad_disponible-?),
+                cantidad_reservada=MAX(0, COALESCE(cantidad_reservada,0)-?),
+                estado=CASE WHEN cantidad_disponible-? <= 0.0001 THEN 'Agotado' ELSE estado END
+            WHERE id=?""", (sobrante, sobrante, sobrante, sobrante, lote["id"]))
+        execute("""UPDATE materiales SET stock=MAX(0, stock-?),
+                actualizado=datetime('now','localtime') WHERE id=?""",
+            (sobrante, lote["material_id"]))
+        execute("""UPDATE orden_lotes SET cantidad_consumida=COALESCE(cantidad_consumida,0)+?
+            WHERE orden_id=? AND lote_id=?""", (sobrante, oid, lote["id"]))
+        execute("""INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id)
+            VALUES (?,?,'salida',?,?,?)""",
+            (lote["material_id"], lote["id"], sobrante,
+             f"Baja del semielaborado sobrante al completar la OT — OTT {ott['numero']} "
+             f"— Lote {lote['numero']}", session.get("user_id")))
 
 
 @app.route("/api/lotes/<int:lid>", methods=["PUT"])
@@ -11000,6 +10666,16 @@ def update_lote(lid):
     d = request.json
     lote = query("SELECT * FROM lotes WHERE id=?", (lid,), one=True)
     if not lote: return jsonify({"error": "Lote no encontrado"}), 404
+
+    if query("SELECT 1 FROM cajones WHERE lote_id=? LIMIT 1", (lid,), one=True):
+        if ("cantidad_aprobada" in d or "cantidad_rechazada" in d
+                or ("estado" in d and d.get("estado") != lote["estado"])):
+            return jsonify({"error": "Este lote tiene cajones: Calidad libera o rechaza cada cajón "
+                                     "desde la lista de cajones del lote."}), 400
+        execute("UPDATE lotes SET referencia_proveedor=?,certificado=?,obs=? WHERE id=?",
+            (d.get("referencia_proveedor", lote["referencia_proveedor"]),
+             d.get("certificado", lote["certificado"]), d.get("obs", lote["obs"]), lid))
+        return jsonify({"ok": True, "numero_lote": lote["numero"], "estado": lote["estado"]})
 
     disp = float(lote["cantidad_disponible"])
 
@@ -11016,9 +10692,21 @@ def update_lote(lid):
         if aprobado + rechazado > disp + 0.001:
             return jsonify({"error": "Aprobado (%.2f) + Rechazado (%.2f) no puede superar el total disponible (%.2f)"
                 % (aprobado, rechazado, disp)}), 400
+        # Lo aprobado no puede quedar por debajo de lo que ya está reservado
+        # para OTs (asignado desde "Lotes asignados" o retorno de OTT): la
+        # reserva quedaría apuntando a piezas que ya no están aprobadas.
+        # (lo que pase a Rechazado libera reserva en la misma medida, ver abajo)
+        reservado_lote = max(0.0, float(lote["cantidad_reservada"] or 0)
+                             - max(0.0, rechazado - float(lote["cantidad_rechazada"] or 0)))
+        if aprobado < float(lote["cantidad_activa"] or 0) and aprobado + 0.001 < reservado_lote:
+            return jsonify({"error": "No se puede bajar el aprobado a %.2f: hay %.2f reservadas para OTs en este lote. "
+                "Liberá esa asignación desde Órdenes de trabajo → Lotes asignados antes de corregir."
+                % (aprobado, reservado_lote)}), 400
 
         pendiente = max(0.0, disp - aprobado - rechazado)
-        if pendiente <= 0.001 and aprobado >= rechazado:
+        if disp <= 0.0001:
+            estado_lote = "Agotado"
+        elif pendiente <= 0.001 and aprobado >= rechazado:
             estado_lote = "Aprobado"
         elif pendiente <= 0.001 and rechazado > aprobado:
             estado_lote = "Rechazado"
@@ -11132,6 +10820,247 @@ def update_lote(lid):
     return jsonify({"ok": True, "accion": "estado_actualizado",
         "estado": nuevo_estado, "cant_activa": nueva_activa_total})
 
+# ── Cajones: consulta, calidad, transferencia y baja ─────────────────────────
+_CAJON_SQL = """SELECT cj.*, o.numero ot_numero, o.estado ot_estado, oor.numero ot_origen_numero,
+        m.codigo producto_codigo, m.descripcion producto_nombre, l.numero lote_numero
+    FROM cajones cj
+    JOIN ordenes o ON o.id=cj.orden_id
+    LEFT JOIN ordenes oor ON oor.id=cj.orden_origen_id
+    JOIN materiales m ON m.id=cj.producto_id
+    LEFT JOIN lotes l ON l.id=cj.lote_id"""
+
+
+def _cajon_dict(c, paso=None):
+    d = dict(c)
+    por_paso = _cajon_por_paso(c["id"])
+    d["terminadas"] = _cajon_terminadas(c, por_paso)
+    d["por_paso"] = {str(k): v for k, v in sorted(por_paso.items())}
+    if paso is not None:
+        d["disponible"] = _cajon_disponible(c, paso, por_paso)
+    return d
+
+
+@app.route("/api/ordenes/<int:oid>/cajones", methods=["GET"])
+@login_required()
+def get_cajones_ot(oid):
+    """Cajones de la OT. Con orden_operacion_id dice si es el primer paso
+    (ahí los cajones se llenan solos) o cuánto tiene disponible cada cajón
+    para esa operación."""
+    oo_id = request.args.get("orden_operacion_id", type=int)
+    pasos = _pasos_ot(oid)
+    paso, primero = None, False
+    if oo_id:
+        r = query("SELECT CAST(orden AS INTEGER) p FROM orden_operaciones WHERE id=? AND orden_id=?",
+            (oo_id, oid), one=True)
+        if r:
+            paso = r["p"]
+            primero = bool(pasos) and paso == pasos[0]
+    rows = query(_CAJON_SQL + " WHERE cj.orden_id=? AND cj.estado<>'Baja' ORDER BY cj.id", (oid,))
+    cajones = [_cajon_dict(c, None if primero else paso) for c in rows]
+    abierto = next((c for c in cajones if c["estado"] == "En proceso"
+                    and c["orden_origen_id"] == c["orden_id"]
+                    and c["cantidad"] < c["capacidad"] - 0.0001
+                    and c["cantidad_liberada"] + c["cantidad_rechazada"] == 0), None)
+    prod = query("""SELECT p.capacidad_cajon FROM ordenes o JOIN productos p ON p.id=o.producto_id
+        WHERE o.id=?""", (oid,), one=True)
+    return jsonify({"usa_cajones": _ot_usa_cajones(oid), "primer_paso": primero, "paso": paso,
+                    "capacidad": prod["capacidad_cajon"] if prod else None,
+                    "abierto": abierto, "cajones": cajones})
+
+
+@app.route("/api/cajones", methods=["GET"])
+@login_required()
+def get_cajones():
+    where, params = [], []
+    buscar = (request.args.get("buscar") or "").strip()
+    if buscar:
+        where.append("""(cj.numero LIKE ? OR o.numero LIKE ? OR m.codigo LIKE ?
+            OR m.descripcion LIKE ? OR l.numero LIKE ?)""")
+        params += [f"%{buscar}%"] * 5
+    for arg, col in (("lote_id", "cj.lote_id"), ("orden_id", "cj.orden_id"), ("estado", "cj.estado")):
+        if request.args.get(arg):
+            where.append(f"{col}=?")
+            params.append(request.args.get(arg))
+    sql = _CAJON_SQL + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY cj.id DESC LIMIT 500"
+    return jsonify([_cajon_dict(c) for c in query(sql, tuple(params))])
+
+
+@app.route("/api/cajones/<int:cid>", methods=["GET"])
+@login_required()
+def get_cajon(cid):
+    """Trazabilidad del cajón: OT, lote, producto, piezas por paso, novedades
+    (operación, operario, máquina, fecha), lotes de material consumidos en
+    esas novedades, decisión de Calidad y remitos con su cliente."""
+    c = query(_CAJON_SQL + " WHERE cj.id=?", (cid,), one=True)
+    if not c:
+        return jsonify({"error": "Cajón no encontrado"}), 404
+    d = _cajon_dict(c)
+    d["novedades"] = [dict(r) for r in query("""SELECT n.id, n.numero, n.fecha, nc.cantidad,
+            oo.nombre operacion, oo.orden paso, o.numero ot_numero,
+            e.nombre||' '||e.apellido empleado_nombre, mq.codigo||' — '||mq.nombre maquina_nombre
+        FROM novedad_cajones nc
+        JOIN novedades_produccion n ON n.id=nc.novedad_id
+        JOIN orden_operaciones oo ON oo.id=n.orden_operacion_id
+        JOIN ordenes o ON o.id=n.orden_id
+        LEFT JOIN empleados e ON e.id=n.empleado_id
+        LEFT JOIN maquinas mq ON mq.id=n.maquina_id
+        WHERE nc.cajon_id=? ORDER BY CAST(oo.orden AS INTEGER), n.fecha, n.id""", (cid,))]
+    d["tercerizadas"] = [dict(r) for r in query("""SELECT oc.cantidad, oo.nombre operacion, oo.orden paso,
+            o.numero ot_numero,
+            (SELECT GROUP_CONCAT(t.numero, ', ') FROM ordenes_tercerizado t WHERE t.operacion_id=oo.id) ott_numero
+        FROM ott_cajones oc
+        JOIN orden_operaciones oo ON oo.id=oc.orden_operacion_id
+        JOIN ordenes o ON o.id=oo.orden_id
+        WHERE oc.cajon_id=? ORDER BY CAST(oo.orden AS INTEGER)""", (cid,))]
+    # Una novedad que abarcó varios cajones muestra sus lotes de material en
+    # todos ellos: el consumo no se puede repartir por cajón.
+    d["materiales"] = [dict(r) for r in query("""SELECT n.numero novedad_numero, l.numero lote_numero,
+            m.codigo material_codigo, m.descripcion material,
+            SUM(CASE WHEN mv.tipo='salida' THEN mv.cantidad ELSE -mv.cantidad END) cantidad
+        FROM novedad_cajones nc
+        JOIN novedades_produccion n ON n.id=nc.novedad_id
+        JOIN movimientos mv ON (mv.referencia LIKE 'Consumo real por Novedad ' || n.numero || ' %'
+                             OR mv.referencia LIKE 'Ajuste consumo ' || n.numero || ' %')
+        JOIN lotes l ON l.id=mv.lote_id
+        JOIN materiales m ON m.id=mv.material_id
+        WHERE nc.cajon_id=?
+        GROUP BY n.id, l.id ORDER BY n.id, l.id""", (cid,))]
+    u = query("SELECT nombre FROM usuarios WHERE id=?", (c["calidad_por"],), one=True) if c["calidad_por"] else None
+    d["calidad_por_nombre"] = u["nombre"] if u else None
+    d["remitos"] = [dict(r) for r in query("""SELECT r.id, r.numero, r.fecha, r.estado,
+            cl.razon cliente_nombre, ric.cantidad
+        FROM remito_item_cajones ric
+        JOIN remito_items ri ON ri.id=ric.remito_item_id
+        JOIN remitos r ON r.id=ri.remito_id
+        LEFT JOIN clientes cl ON cl.id=r.cliente_id
+        WHERE ric.cajon_id=? ORDER BY r.id""", (cid,))]
+    return jsonify(d)
+
+
+@app.route("/api/cajones/<int:cid>/calidad", methods=["POST"])
+@login_required(roles=["admin","almacen","calidad"])
+def calidad_cajon(cid):
+    """Calidad libera y/o rechaza piezas terminadas del cajón (valores
+    absolutos: se puede liberar una parte y dejar el resto pendiente, o
+    corregir/deshacer mientras no se haya remitido). Lo liberado pasa a
+    disponible del lote (cantidad_activa) y lo rechazado a su columna
+    Rechazado; el estado del lote se deriva de sus cajones."""
+    d = request.json or {}
+    c = query("SELECT * FROM cajones WHERE id=?", (cid,), one=True)
+    if not c:
+        return jsonify({"error": "Cajón no encontrado"}), 404
+    if c["estado"] in ("Baja", "En espera"):
+        return jsonify({"error": f"El cajón está {c['estado'].lower()}"}), 400
+    term = _cajon_terminadas(c)
+    lote_id = c["lote_id"] or _lote_pt_ot(c["orden_id"])
+    if term <= 0.0001 or not lote_id:
+        return jsonify({"error": "El cajón todavía no tiene piezas terminadas por la última operación"}), 400
+    try:
+        lib = float(d.get("cantidad_liberada", c["cantidad_liberada"]) or 0)
+        rech = float(d.get("cantidad_rechazada", c["cantidad_rechazada"]) or 0)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Cantidades inválidas"}), 400
+    if lib < 0 or rech < 0:
+        return jsonify({"error": "Las cantidades no pueden ser negativas"}), 400
+    if lib + rech > term + 0.0001:
+        return jsonify({"error": f"Liberado ({lib:g}) + rechazado ({rech:g}) no puede superar las "
+                                 f"{term:g} piezas terminadas del cajón"}), 400
+    if lib < float(c["cantidad_remitida"] or 0) - 0.0001:
+        return jsonify({"error": f"Del cajón ya se remitieron {float(c['cantidad_remitida']):g} piezas: "
+                                 f"no se puede liberar menos"}), 400
+    lote = query("SELECT * FROM lotes WHERE id=?", (lote_id,), one=True)
+    d_lib = lib - float(c["cantidad_liberada"] or 0)
+    d_rech = rech - float(c["cantidad_rechazada"] or 0)
+    if d_lib < 0 and float(lote["cantidad_activa"] or 0) + d_lib < -0.0001:
+        return jsonify({"error": "El lote ya no tiene esas piezas liberadas disponibles "
+                                 "(salieron por otro movimiento)"}), 400
+    execute("""UPDATE lotes SET cantidad_activa=MAX(0, COALESCE(cantidad_activa,0)+?),
+        cantidad_rechazada=MAX(0, COALESCE(cantidad_rechazada,0)+?) WHERE id=?""", (d_lib, d_rech, lote_id))
+    execute("""UPDATE cajones SET cantidad_liberada=?, cantidad_rechazada=?, calidad_por=?,
+        calidad_fecha=datetime('now','localtime'), calidad_obs=?, lote_id=? WHERE id=?""",
+        (lib, rech, session["user_id"], d.get("obs", c["calidad_obs"]), lote_id, cid))
+    _cajon_recalcular(cid)
+    _lote_estado_por_cajones(lote_id)
+    execute("""INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id)
+        VALUES (?,?,?,?,?,?)""",
+        (c["producto_id"], lote_id, "ajuste", term,
+         f"Calidad cajón {c['numero']} → Liberado:{lib:g} Rechazado:{rech:g} "
+         f"Pendiente:{term - lib - rech:g} | Lote {lote['numero']}"
+         + (" | Obs: " + d["obs"] if d.get("obs") else ""), session["user_id"]))
+    c = query("SELECT estado FROM cajones WHERE id=?", (cid,), one=True)
+    return jsonify({"ok": True, "estado": c["estado"], "cantidad_liberada": lib,
+                    "cantidad_rechazada": rech, "pendiente": term - lib - rech})
+
+
+@app.route("/api/cajones/<int:cid>/destinos", methods=["GET"])
+@login_required()
+def get_cajon_destinos(cid):
+    """OTs abiertas del mismo producto a las que se puede pasar el cajón."""
+    c = query("SELECT * FROM cajones WHERE id=?", (cid,), one=True)
+    if not c:
+        return jsonify({"error": "Cajón no encontrado"}), 404
+    return jsonify([dict(r) for r in query("""SELECT id, numero, estado, cantidad FROM ordenes
+        WHERE producto_id=? AND id<>? AND estado NOT IN ('Cancelada','Completada')
+        ORDER BY id DESC""", (c["producto_id"], c["orden_id"]))])
+
+
+@app.route("/api/cajones/<int:cid>/transferir", methods=["POST"])
+@login_required(roles=["admin","operario"])
+def transferir_cajon(cid):
+    """Un cajón en espera (su OT se canceló) pasa a otra OT abierta del mismo
+    producto, que sigue desde la operación donde quedó: el tope de cada paso
+    sale de lo que el cajón ya hizo en la OT anterior."""
+    d = request.json or {}
+    c = query("SELECT * FROM cajones WHERE id=?", (cid,), one=True)
+    if not c:
+        return jsonify({"error": "Cajón no encontrado"}), 404
+    if c["estado"] != "En espera":
+        return jsonify({"error": "Solo se pueden pasar a otra OT los cajones en espera (de una OT cancelada)"}), 400
+    try:
+        destino = int(d.get("orden_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Elegí la OT destino"}), 400
+    o = query("SELECT id, numero, producto_id, estado FROM ordenes WHERE id=?", (destino,), one=True)
+    if not o or o["id"] == c["orden_id"]:
+        return jsonify({"error": "OT destino inválida"}), 400
+    if o["producto_id"] != c["producto_id"]:
+        return jsonify({"error": "La OT destino tiene que ser del mismo producto"}), 400
+    if o["estado"] in ("Cancelada", "Completada"):
+        return jsonify({"error": "La OT destino tiene que estar abierta"}), 400
+    por_paso = _cajon_por_paso(cid)
+    if por_paso and not [p for p in _pasos_ot(destino) if p > max(por_paso)]:
+        return jsonify({"error": f"La OT {o['numero']} no tiene operaciones después del paso "
+                                 f"{max(por_paso)}, donde quedó el cajón"}), 400
+    origen = query("SELECT numero FROM ordenes WHERE id=?", (c["orden_id"],), one=True)
+    quien = query("SELECT nombre FROM usuarios WHERE id=?", (session["user_id"],), one=True)
+    nota = (f"{datetime.now().strftime('%Y-%m-%d %H:%M')} pasado de {origen['numero']} a {o['numero']}"
+            f" por {quien['nombre'] if quien else '—'}")
+    execute("""UPDATE cajones SET orden_id=?, lote_id=NULL, estado='En proceso',
+        obs=CASE WHEN COALESCE(obs,'')='' THEN ? ELSE obs || char(10) || ? END WHERE id=?""",
+        (destino, nota, nota, cid))
+    _cajon_recalcular(cid)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/cajones/<int:cid>/baja", methods=["POST"])
+@login_required(roles=["admin"])
+def baja_cajon(cid):
+    """Da de baja un cajón en espera (sus piezas no siguen). El número no se
+    reutiliza."""
+    d = request.json or {}
+    c = query("SELECT * FROM cajones WHERE id=?", (cid,), one=True)
+    if not c:
+        return jsonify({"error": "Cajón no encontrado"}), 404
+    if c["estado"] != "En espera":
+        return jsonify({"error": "Solo se pueden dar de baja los cajones en espera (de una OT cancelada)"}), 400
+    quien = query("SELECT nombre FROM usuarios WHERE id=?", (session["user_id"],), one=True)
+    nota = (f"{datetime.now().strftime('%Y-%m-%d %H:%M')} baja por {quien['nombre'] if quien else '—'}"
+            + (f": {d['obs']}" if d.get("obs") else ""))
+    execute("""UPDATE cajones SET estado='Baja',
+        obs=CASE WHEN COALESCE(obs,'')='' THEN ? ELSE obs || char(10) || ? END WHERE id=?""", (nota, nota, cid))
+    return jsonify({"ok": True})
+
+
 @app.route("/api/lotes/<int:lid>/trazabilidad", methods=["GET"])
 @login_required()
 def trazabilidad_lote(lid):
@@ -11160,14 +11089,6 @@ def trazabilidad_lote(lid):
         "movimientos": [dict(r) for r in movimientos],
         "ordenes": [dict(r) for r in ordenes],
     })
-
-@app.route("/api/materiales/<int:mid>/lotes", methods=["GET"])
-@login_required()
-def get_lotes_by_material(mid):
-    rows = query("""SELECT l.*,p.razon proveedor_nombre
-        FROM lotes l LEFT JOIN proveedores p ON p.id=l.proveedor_id
-        WHERE l.material_id=? ORDER BY l.id DESC""", (mid,))
-    return jsonify([dict(r) for r in rows])
 
 # ── Solicitudes de compra ─────────────────────────────────────────────────────
 def auto_generar_sc_bajo_stock(material_id, motivo=""):
@@ -11216,7 +11137,7 @@ def auto_generar_sc_bajo_stock(material_id, motivo=""):
                 (material_id,), one=True)
     # "Producto terminado" NUNCA es comprable en Compras: si un material de
     # esta categoría queda bajo stock, el faltante se resuelve fabricándolo
-    # (OT auxiliar vía _gap_analysis_materiales / explotar_multinivel), no
+    # (OT auxiliar vía _gap_analysis_materiales), no
     # con una Solicitud de Compra. Este chequeo antes decía excluir "Producto
     # terminado" en el comentario de arriba pero lo dejaba pasar en el código
     # (bug) — quedaba visible como faltante comprable en Compras.
@@ -11644,17 +11565,7 @@ def _ott_sync_oc_recibido(ott_id):
 
 def _gen_recepcion_numero():
     """Genera número de recepción correlativo por año: REC-2026-0001"""
-    from datetime import datetime
-    year = datetime.now().year
-    last = query(
-        "SELECT numero FROM recepciones WHERE numero LIKE ? ORDER BY id DESC LIMIT 1",
-        (f"REC-{year}-%",), one=True)
-    if last:
-        try: n = int(last["numero"].split("-")[2]) + 1
-        except: n = 1
-    else:
-        n = 1
-    return f"REC-{year}-{n:04d}"
+    return siguiente_numero("recepciones", f"REC-{datetime.now().year}-", 4)
 
 @app.route("/api/recepciones", methods=["GET"])
 @login_required()
@@ -11790,6 +11701,10 @@ def create_recepcion():
 @app.route("/api/ordenes_compra/<int:ocid>/aprobar", methods=["POST"])
 @login_required(roles=["admin","vendedor"])
 def aprobar_oc(ocid):
+    oc = query("SELECT estado FROM ordenes_compra WHERE id=?", (ocid,), one=True)
+    if not oc: return jsonify({"error":"OC no encontrada"}), 404
+    if oc["estado"] not in ("Borrador", "Pendiente aprobacion"):
+        return jsonify({"error": f"No se puede aprobar una OC en estado \"{oc['estado']}\""}), 400
     execute("UPDATE ordenes_compra SET estado='Aprobada',aprobado_por=?,fecha_aprobacion=datetime('now','localtime') WHERE id=?",
         (session["user_id"], ocid))
     return jsonify({"ok":True})
@@ -11797,15 +11712,34 @@ def aprobar_oc(ocid):
 @app.route("/api/ordenes_compra/<int:ocid>/recibir", methods=["POST"])
 @login_required(roles=["admin","almacen","vendedor"])
 def recibir_oc(ocid):
-    d = request.json
+    d = request.json or {}
     recepciones = d.get("items", [])
+    # ── Validaciones ANTES de grabar nada ─────────────────────────────────
+    # Solo se recibe una OC aprobada (o ya en recepción / cerrada por saldo
+    # que finalmente llega). Antes se podía recibir una OC pendiente de
+    # aprobación (salteando la aprobación), una anulada o una completada, y
+    # cantidades negativas.
+    oc_chk = query("SELECT estado FROM ordenes_compra WHERE id=?", (ocid,), one=True)
+    if not oc_chk: return jsonify({"error":"OC no encontrada"}), 404
+    if oc_chk["estado"] not in ("Aprobada", "Enviada", "Recibida parcial", "Recibida", "Cerrada"):
+        return jsonify({"error": f"No se puede recibir una OC en estado \"{oc_chk['estado']}\""
+                                  + (" — primero tiene que aprobarse" if oc_chk["estado"] in ("Borrador", "Pendiente aprobacion") else "")}), 400
     for recv in recepciones:
-        item = query("SELECT * FROM ordenes_compra_items WHERE id=?", (recv["item_id"],), one=True)
-        if not item: continue
+        item = query("SELECT * FROM ordenes_compra_items WHERE id=? AND oc_id=?", (recv.get("item_id"), ocid), one=True)
+        if not item:
+            return jsonify({"error":"Ítem de OC no encontrado en esta OC"}), 400
+        try:
+            qty_chk = float(recv.get("cantidad", 0))
+        except (TypeError, ValueError):
+            return jsonify({"error":"Cantidad inválida"}), 400
+        if qty_chk <= 0:
+            return jsonify({"error":"La cantidad recibida debe ser mayor a 0"}), 400
         if item["solicitud_id"]:
             _sc_ott = query("SELECT ott_id FROM solicitudes_compra WHERE id=?", (item["solicitud_id"],), one=True)
             if _sc_ott and _sc_ott["ott_id"]:
                 return jsonify({"error": "Los ítems de una OC generada por una OTT se reciben desde Recepción → Pendientes de retorno — Terceros (OTT), cargando el remito."}), 400
+    for recv in recepciones:
+        item = query("SELECT * FROM ordenes_compra_items WHERE id=?", (recv["item_id"],), one=True)
         qty = float(recv.get("cantidad",0))
         # ── Se puede recibir una cantidad distinta a la pedida (de más o de
         # menos). Si además viene un precio_unit distinto al cargado en la
@@ -11851,12 +11785,8 @@ def recibir_oc(ocid):
                     execute("""UPDATE materiales SET stock=stock+?,
                         actualizado=datetime('now','localtime') WHERE id=?""",
                         (crecimiento, item["material_id"]))
-                    execute("""INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id)
-                        VALUES (?,?,?,?,?,?)""",
-                        (item["material_id"], item["lote_id"], "ajuste", crecimiento,
-                         f"Recepción de OC {oc['numero']} — lote actualizado a lo efectivamente recibido "
-                         f"(+{crecimiento:.2f}, pendiente de aprobación de Calidad)",
-                         session["user_id"]))
+                    # (el movimiento de esta recepción se registra una sola
+                    # vez más abajo, ya con el lote — antes se grababan dos)
                 # ── Reingreso de piezas devueltas por rechazo: si este ítem
                 # tuvo alguna devolución a proveedor (ver oc_devolver_rechazo),
                 # lo que ahora llega como reemplazo NO forma un lote nuevo:
@@ -11885,10 +11815,13 @@ def recibir_oc(ocid):
                 # cantidad efectivamente recibida (pueda ser más o menos que
                 # lo pedido).
                 execute("UPDATE materiales SET stock=stock+?,actualizado=datetime('now','localtime') WHERE id=?", (qty, item["material_id"]))
-            execute("INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id) VALUES (?,?,?,?,?,?)",
-                (item["material_id"], None,
-                 "entrada" if not (mat_cat and mat_cat["categoria"] in ("Material","Producto terminado")) else "recepcion",
-                 qty, f"Recep. {oc['numero']}" + (f" · Remito {d.get('remito')}" if d.get("remito") else ""), session["user_id"]))
+            _es_lote = bool(mat_cat and mat_cat["categoria"] in ("Material","Producto terminado"))
+            _qty_mov = (qty - a_reingresar) if _es_lote else qty
+            if _qty_mov > 0.0001:
+              execute("INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id) VALUES (?,?,?,?,?,?)",
+                (item["material_id"], item["lote_id"] if _es_lote else None,
+                 "recepcion" if _es_lote else "entrada",
+                 _qty_mov, f"Recep. {oc['numero']}" + (f" · Remito {d.get('remito')}" if d.get("remito") else ""), session["user_id"]))
         _sync_requerimiento_desde_compra(item["id"])
     items = query("SELECT cantidad,cantidad_recibida,precio_unit FROM ordenes_compra_items WHERE oc_id=?", (ocid,))
     total_ord = sum(i["cantidad"] for i in items)
@@ -11987,10 +11920,7 @@ def oc_devolver_rechazo(ocid):
     d = request.json or {}
 
     # 3) Remito de devolución al proveedor (uno solo para toda la OC)
-    last_rem = query("SELECT numero FROM remitos ORDER BY id DESC LIMIT 1", one=True)
-    try: nr = int(last_rem["numero"].split("-")[1])+1 if last_rem else 1
-    except: nr = 1
-    num_rem = f"REM-{nr:04d}"
+    num_rem = siguiente_numero("remitos", "REM-", 4)
     obs_default = f"Devolución a proveedor — piezas rechazadas OC {oc['numero']}: " + "; ".join(detalle)
     rid = execute("""INSERT INTO remitos (numero,cliente_id,fecha,estado,obs,creado_por,tipo,oc_id)
         VALUES (?,NULL,date('now','localtime'),'Emitido',?,?,?,?)""",
@@ -12112,15 +12042,6 @@ def completar_oc(ocid):
         (remito or None, ocid))
     return jsonify({"ok":True,"estado":"Completada","tipo":tipo})
 
-@app.route("/api/ordenes_compra/<int:ocid>", methods=["PUT"])
-@login_required(roles=["admin","almacen","vendedor"])
-@solo_con_monetario
-def update_oc(ocid):
-    d = request.json
-    execute("UPDATE ordenes_compra SET estado=?,fecha_entrega_est=?,obs=? WHERE id=?",
-        (d.get("estado"),d.get("fecha_entrega_est"),d.get("obs"),ocid))
-    return jsonify({"ok":True})
-
 # ── MRP ampliado ──────────────────────────────────────────────────────────────
 @app.route("/api/mrp")
 @login_required()
@@ -12168,7 +12089,6 @@ def get_rendimiento_operario():
         GROUP BY e.id, strftime('%Y-%m-%d', n.fecha)
         ORDER BY e.apellido, e.nombre, n.fecha DESC""")
     # Group by empleado → año → mes → dia
-    from collections import defaultdict
     result = {}
     for r in rows:
         eid = r["emp_id"]
@@ -12267,22 +12187,198 @@ def get_rendimiento_operario_dias():
 @login_required()
 def get_remitos():
     cliente_id = request.args.get("cliente_id")
-    sql = """SELECT r.*,c.razon cliente_nombre,oc.numero oc_numero
+    sql = """SELECT r.*,c.razon cliente_nombre,oc.numero oc_numero,
+            ott.numero ott_numero, ocp.numero oc_proveedor_numero,
+            COALESCE(c.razon, pott.razon, pocp.razon) destinatario
         FROM remitos r
         LEFT JOIN clientes c ON c.id=r.cliente_id
-        LEFT JOIN ordenes_cliente oc ON oc.id=r.orden_cliente_id"""
-    rows = query(sql+" WHERE r.cliente_id=? ORDER BY r.id DESC",(cliente_id,)) if cliente_id else query(sql+" ORDER BY r.id DESC")
-    result = []
-    for r in rows:
-        d = dict(r)
-        d["items"] = [dict(x) for x in query("""SELECT ri.*,m.descripcion mat_descripcion,
+        LEFT JOIN ordenes_cliente oc ON oc.id=r.orden_cliente_id
+        LEFT JOIN ordenes_tercerizado ott ON ott.id=r.ott_id
+        LEFT JOIN proveedores pott ON pott.id=ott.proveedor_id
+        LEFT JOIN ordenes_compra ocp ON ocp.id=r.oc_id
+        LEFT JOIN proveedores pocp ON pocp.id=ocp.proveedor_id"""
+    items_sql = """SELECT ri.*,m.descripcion mat_descripcion,
             m.codigo mat_codigo,m.unidad,l.numero lote_numero
             FROM remito_items ri
             JOIN materiales m ON m.id=ri.material_id
             JOIN lotes l ON l.id=ri.lote_id
-            WHERE ri.remito_id=?""", (r["id"],))]
+            WHERE ri.remito_id IN ({})"""
+
+    # Modo paginado (pantalla "Remitos emitidos"): filtra y pagina en la base,
+    # así se pueden recorrer todos los remitos sin cargarlos de una vez.
+    if request.args.get("pagina") is not None:
+        w, p = [], []
+        if cliente_id:
+            w.append("r.cliente_id=?"); p.append(cliente_id)
+        fecha = (request.args.get("fecha") or "").strip()
+        if fecha:
+            w.append("substr(r.fecha,1,10)=?"); p.append(fecha)
+        oc = (request.args.get("oc") or "").strip()
+        if oc:
+            w.append("IFNULL(oc.numero,'') LIKE ?"); p.append(f"%{oc}%")
+        mat = (request.args.get("material") or "").strip()
+        if mat:
+            w.append("""(EXISTS (SELECT 1 FROM remito_items ri2
+                JOIN materiales m2 ON m2.id=ri2.material_id
+                WHERE ri2.remito_id=r.id
+                AND (IFNULL(m2.codigo,'')||' '||IFNULL(m2.descripcion,'')) LIKE ?)
+                OR EXISTS (SELECT 1 FROM ordenes_tercerizado o2
+                LEFT JOIN proceso_operaciones po2 ON po2.id=o2.proceso_op_id
+                LEFT JOIN productos pr2 ON pr2.id=po2.producto_id
+                LEFT JOIN materiales ms2 ON ms2.id=o2.material_se_id
+                WHERE o2.id=r.ott_id
+                AND (IFNULL(pr2.codigo,'')||' '||IFNULL(pr2.nombre,'')||' '||
+                     IFNULL(ms2.codigo,'')||' '||IFNULL(ms2.descripcion,'')) LIKE ?))""")
+            p.extend([f"%{mat}%", f"%{mat}%"])
+        where = (" WHERE " + " AND ".join(w)) if w else ""
+        try:
+            por_pagina = int(request.args.get("por_pagina", 25))
+        except (TypeError, ValueError):
+            por_pagina = 25
+        por_pagina = min(200, max(10, por_pagina))
+        try:
+            pagina = max(1, int(request.args.get("pagina", 1)))
+        except (TypeError, ValueError):
+            pagina = 1
+        total = query("SELECT COUNT(*) c FROM remitos r LEFT JOIN ordenes_cliente oc "
+                      "ON oc.id=r.orden_cliente_id" + where, p, one=True)["c"]
+        paginas = max(1, -(-total // por_pagina))
+        pagina = min(pagina, paginas)
+        rows = query(sql + where + " ORDER BY r.id DESC LIMIT ? OFFSET ?",
+                     (*p, por_pagina, (pagina - 1) * por_pagina))
+        result = [dict(r) for r in rows]
+        por_id = {d["id"]: d for d in result}
+        for d in result:
+            d["items"] = []
+        if por_id:
+            ids = list(por_id)
+            for x in query(items_sql.format(",".join("?" * len(ids))), ids):
+                por_id[x["remito_id"]]["items"].append(dict(x))
+        _items_remitos_proveedor(result)
+        return jsonify({"total": total, "pagina": pagina, "por_pagina": por_pagina,
+                        "paginas": paginas, "rows": result})
+
+    # Modo clásico (sin paginar): devuelve la lista completa.
+    rows = query(sql+" WHERE r.cliente_id=? ORDER BY r.id DESC",(cliente_id,)) if cliente_id else query(sql+" ORDER BY r.id DESC")
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["items"] = [dict(x) for x in query(items_sql.format("?"), (r["id"],))]
         result.append(d)
+    _items_remitos_proveedor(result)
     return jsonify(result)
+
+@app.route("/api/remitos/<int:rid>", methods=["GET"])
+@login_required()
+def get_remito(rid):
+    """Detalle completo de un remito para la vista "Ver" de Remitos emitidos."""
+    r = query("""SELECT r.*, oc.numero oc_cliente_numero, u.nombre creado_por_nombre,
+            ott.numero ott_numero, ott.estado ott_estado, ott.proveedor_id ott_proveedor_id,
+            o.numero ot_numero, po.nombre operacion_nombre,
+            ocp.numero oc_numero, ocp.proveedor_id ocp_proveedor_id
+        FROM remitos r
+        LEFT JOIN ordenes_cliente oc ON oc.id=r.orden_cliente_id
+        LEFT JOIN usuarios u ON u.id=r.creado_por
+        LEFT JOIN ordenes_tercerizado ott ON ott.id=r.ott_id
+        LEFT JOIN ordenes o ON o.id=ott.ot_origen_id
+        LEFT JOIN proceso_operaciones po ON po.id=ott.proceso_op_id
+        LEFT JOIN ordenes_compra ocp ON ocp.id=r.oc_id
+        WHERE r.id=?""", (rid,), one=True)
+    if not r: return jsonify({"error": "Remito no encontrado"}), 404
+    d = dict(r)
+    if d.get("cliente_id"):
+        c = query("""SELECT razon,cuit,direccion,localidad,contacto,telefono
+            FROM clientes WHERE id=?""", (d["cliente_id"],), one=True)
+        d["destino"] = dict(c, tipo="cliente") if c else None
+    else:
+        prov_id = d.get("ott_proveedor_id") or d.get("ocp_proveedor_id")
+        p = query("SELECT razon,cuit,contacto,telefono FROM proveedores WHERE id=?",
+                  (prov_id,), one=True) if prov_id else None
+        d["destino"] = dict(p, tipo="proveedor") if p else None
+    d["items"] = [dict(x) for x in query("""SELECT ri.*, m.descripcion mat_descripcion,
+            m.codigo mat_codigo, m.unidad, l.numero lote_numero
+        FROM remito_items ri
+        JOIN materiales m ON m.id=ri.material_id
+        JOIN lotes l ON l.id=ri.lote_id
+        WHERE ri.remito_id=?""", (rid,))]
+    _items_remitos_proveedor([d])
+    return jsonify(d)
+
+def _items_remitos_proveedor(remitos):
+    """Los remitos hacia proveedores (traslado/devolución de OTT, devolución
+    de OC) no generan remito_items, así que su columna Ítems salía vacía.
+    Para mostrarlos se arma el ítem a partir de la OTT/OC de origen. Son
+    solo de lectura (sin lote_id): no afectan stock ni entregas."""
+    for d in remitos:
+        if d.get("items"):
+            continue
+        tipo = d.get("tipo")
+        if tipo in ("traslado_ott", "devolucion_ott") and d.get("ott_id"):
+            if tipo == "traslado_ott":
+                # La pieza que viaja: el producto de la operación; en una
+                # OTT manual (sin operación) el material insumo enviado.
+                it = query("""SELECT COALESCE(pr.codigo, m.codigo) mat_codigo,
+                        COALESCE(pr.nombre, m.descripcion) mat_descripcion,
+                        COALESCE(pr.unidad, m.unidad) unidad
+                    FROM ordenes_tercerizado ott
+                    LEFT JOIN proceso_operaciones po ON po.id=ott.proceso_op_id
+                    LEFT JOIN productos pr ON pr.id=po.producto_id
+                    LEFT JOIN materiales m ON m.id=ott.material_se_id
+                    WHERE ott.id=?""", (d["ott_id"],), one=True)
+            else:
+                it = query("""SELECT m.codigo mat_codigo, m.descripcion mat_descripcion,
+                        m.unidad, l.numero lote_numero
+                    FROM ordenes_tercerizado ott
+                    JOIN lotes l ON l.id=ott.lote_retorno_id
+                    JOIN materiales m ON m.id=l.material_id
+                    WHERE ott.id=?""", (d["ott_id"],), one=True)
+            if it and (it["mat_codigo"] or it["mat_descripcion"]):
+                x = dict(it)
+                cant = d.get("ott_cantidad")
+                if cant is None and tipo == "traslado_ott":
+                    # Remitos viejos sin cantidad guardada: si es el único
+                    # traslado de esa OTT, la cantidad es la enviada.
+                    _o = query("""SELECT cantidad_enviada,
+                            (SELECT COUNT(*) FROM remitos WHERE ott_id=ott.id AND tipo='traslado_ott') n
+                        FROM ordenes_tercerizado ott WHERE id=?""", (d["ott_id"],), one=True)
+                    if _o and _o["n"] == 1 and float(_o["cantidad_enviada"] or 0) > 0:
+                        cant = _o["cantidad_enviada"]
+                x.update(remito_id=d["id"], cantidad=cant)
+                d["items"] = [x]
+        elif tipo == "devolucion_oc" and d.get("oc_id"):
+            # Lo devuelto queda acumulado por ítem de OC; la cantidad solo es
+            # exacta si la OC tiene un único remito de devolución.
+            unico = query("""SELECT COUNT(*) c FROM remitos
+                WHERE oc_id=? AND tipo='devolucion_oc'""", (d["oc_id"],), one=True)["c"] == 1
+            d["items"] = [dict(remito_id=d["id"], mat_codigo=x["mat_codigo"],
+                               mat_descripcion=x["mat_descripcion"], unidad=x["unidad"],
+                               cantidad=x["cantidad"] if unico else None)
+                for x in query("""SELECT COALESCE(m.codigo, i.descripcion) mat_codigo,
+                        COALESCE(m.descripcion, i.descripcion) mat_descripcion, m.unidad,
+                        i.cantidad_rechazada_devuelta cantidad
+                    FROM ordenes_compra_items i LEFT JOIN materiales m ON m.id=i.material_id
+                    WHERE i.oc_id=? AND COALESCE(i.cantidad_rechazada_devuelta,0) > 0""",
+                    (d["oc_id"],))]
+
+@app.route("/api/remitos/opciones", methods=["GET"])
+@login_required()
+def get_remitos_opciones():
+    """Sugerencias para los filtros de Remitos emitidos (OC y materiales usados)."""
+    ocs = query("""SELECT DISTINCT oc.numero FROM remitos r
+        JOIN ordenes_cliente oc ON oc.id=r.orden_cliente_id
+        WHERE oc.numero IS NOT NULL ORDER BY oc.numero""")
+    mats = query("""SELECT m.codigo, m.descripcion FROM remito_items ri
+            JOIN materiales m ON m.id=ri.material_id
+        UNION
+        SELECT COALESCE(pr.codigo, ms.codigo), COALESCE(pr.nombre, ms.descripcion)
+            FROM remitos r JOIN ordenes_tercerizado ott ON ott.id=r.ott_id
+            LEFT JOIN proceso_operaciones po ON po.id=ott.proceso_op_id
+            LEFT JOIN productos pr ON pr.id=po.producto_id
+            LEFT JOIN materiales ms ON ms.id=ott.material_se_id
+            WHERE COALESCE(pr.codigo, ms.codigo) IS NOT NULL
+        ORDER BY 1""")
+    return jsonify({"ocs": [r["numero"] for r in ocs],
+                    "materiales": [{"codigo": r["codigo"], "descripcion": r["descripcion"]} for r in mats]})
 
 @app.route("/api/pt_disponible", methods=["GET"])
 @login_required()
@@ -12315,13 +12411,16 @@ def get_pt_disponible():
         oc.numero oc_numero,
         CASE WHEN oc.id IS NOT NULL THEN oc.cliente_id END oc_cliente_id,
         CASE WHEN oc.id IS NOT NULL THEN
-            (SELECT COALESCE(SUM(ri.cantidad),0) FROM remito_items ri WHERE ri.orden_cliente_item_id=oc_items.id)
+            (SELECT COALESCE(SUM(ri.cantidad),0) FROM remito_items ri JOIN remitos rr ON rr.id=ri.remito_id
+             WHERE ri.orden_cliente_item_id=oc_items.id AND rr.estado!='Anulado')
         END ya_remitido
         FROM lotes l
         JOIN materiales m ON m.id=l.material_id
         LEFT JOIN productos p ON p.id=m.id
         LEFT JOIN clientes pcli ON pcli.id=p.cliente_id
-        LEFT JOIN ordenes ot_gen ON ot_gen.numero=l.numero
+        LEFT JOIN ordenes ot_gen ON (ot_gen.numero=l.numero
+            OR l.numero=ot_gen.numero || '-PT'
+            OR l.numero LIKE ot_gen.numero || '-C%')
         LEFT JOIN orden_cliente_item_ots ocio ON ocio.ot_id=ot_gen.id
         LEFT JOIN ordenes_cliente_items oc_items ON oc_items.id=ocio.item_id
             AND oc_items.producto_id=p.id
@@ -12330,7 +12429,8 @@ def get_pt_disponible():
         WHERE m.categoria='Producto terminado'
         AND l.cantidad_activa>0 AND l.estado != 'Agotado' AND l.estado != 'Bloqueado'
         AND oc.id IS NOT NULL
-        AND oc_items.cantidad > (SELECT COALESCE(SUM(ri.cantidad),0) FROM remito_items ri WHERE ri.orden_cliente_item_id=oc_items.id)
+        AND oc_items.cantidad > (SELECT COALESCE(SUM(ri.cantidad),0) FROM remito_items ri JOIN remitos rr ON rr.id=ri.remito_id
+             WHERE ri.orden_cliente_item_id=oc_items.id AND rr.estado!='Anulado')
         """ + ("AND oc.cliente_id=?" if cliente_id else "") + """
         ORDER BY l.id DESC""", (cliente_id,) if cliente_id else ())
     return jsonify([dict(r) for r in rows])
@@ -12343,10 +12443,26 @@ def create_remito():
     items_in = [it for it in (d.get("items") or []) if it.get("lote_id") and it.get("cantidad")]
     if not items_in:
         return jsonify({"error": "El remito debe tener al menos un ítem"}), 400
-    last = query("SELECT numero FROM remitos ORDER BY id DESC LIMIT 1", one=True)
-    try: n = int(last["numero"].split("-")[1])+1 if last else 1
-    except: n = 1
-    numero = f"REM-{n:04d}"
+    # Validar TODOS los ítems antes de grabar nada: antes un ítem que pedía
+    # más de lo aprobado se salteaba en silencio y el remito salía igual,
+    # incompleto, sin avisar. Se suma por lote por si el mismo lote viene en
+    # más de un renglón.
+    pedido_por_lote = {}
+    for it in items_in:
+        try:
+            qty_it = float(it["cantidad"])
+        except (TypeError, ValueError):
+            return jsonify({"error": "Cantidad inválida en un ítem del remito"}), 400
+        if qty_it <= 0:
+            return jsonify({"error": "Las cantidades del remito deben ser mayores a 0"}), 400
+        pedido_por_lote[it["lote_id"]] = pedido_por_lote.get(it["lote_id"], 0.0) + qty_it
+    for lid_it, qty_it in pedido_por_lote.items():
+        l_it = query("SELECT numero,cantidad_activa FROM lotes WHERE id=?", (lid_it,), one=True)
+        if not l_it:
+            return jsonify({"error": "Lote no encontrado en un ítem del remito"}), 400
+        if qty_it > float(l_it["cantidad_activa"] or 0) + 0.0001:
+            return jsonify({"error": f"El lote {l_it['numero']} tiene {float(l_it['cantidad_activa'] or 0):g} aprobado/disponible y se quieren remitir {qty_it:g}"}), 400
+    numero = siguiente_numero("remitos", "REM-", 4)
     rid = execute("""INSERT INTO remitos (numero,cliente_id,orden_cliente_id,obs,creado_por)
         VALUES (?,?,?,?,?)""",
         (numero, d.get("cliente_id"), d.get("orden_cliente_id"),
@@ -12361,7 +12477,7 @@ def create_remito():
         if qty > activa:
             # Can't remit more than what's active/approved
             continue
-        execute("""INSERT INTO remito_items
+        ri_id = execute("""INSERT INTO remito_items
             (remito_id,material_id,lote_id,orden_cliente_item_id,cantidad,obs)
             VALUES (?,?,?,?,?,?)""",
             (rid, lote["material_id"], item["lote_id"],
@@ -12373,6 +12489,9 @@ def create_remito():
         nuevo_estado = "Agotado" if nueva_disp <= 0 else ("Aprobado" if nueva_activa > 0 else "Ingresado")
         execute("""UPDATE lotes SET cantidad_disponible=?,cantidad_activa=?,estado=?
             WHERE id=?""", (nueva_disp, nueva_activa, nuevo_estado, lote["id"]))
+        if query("SELECT 1 FROM cajones WHERE lote_id=? LIMIT 1", (lote["id"],), one=True):
+            _remitir_de_cajones(ri_id, lote["id"], qty)
+            _lote_estado_por_cajones(lote["id"])
         # Discount from PT stock
         execute("UPDATE materiales SET stock=MAX(0,stock-?),actualizado=datetime('now','localtime') WHERE id=?",
             (qty, lote["material_id"]))
@@ -12415,6 +12534,7 @@ def create_remito():
                 total_ent += float(ent)
             if total_req > 0 and total_ent >= total_req - 0.001:
                 execute("UPDATE ordenes_cliente SET estado='Completada' WHERE id=?", (ocid_remito,))
+                _forzar_completar_ots_oc(ocid_remito)
 
     return jsonify({"ok": True, "id": rid, "numero": numero}), 201
 
@@ -12447,12 +12567,14 @@ def save_config():
         execute("UPDATE configuracion SET valor=? WHERE clave=?", (str(valor), clave))
     return jsonify({"ok": True})
 
-# ── Emisión de OT (PDF con ReportLab) ────────────────────────────────────────
-@app.route("/api/ordenes/<int:oid>/pdf")
-@login_required()
-def emitir_ot_pdf(oid):
+# ── PDFs: base común (OT, OP y OC) ───────────────────────────────────────────
+# Los tres PDFs comparten la configuración, la paleta de la marca, la cabecera
+# con logo, la ficha, las barras de sección, las tablas y el pie con firmas.
+# Todo eso vive acá; cada _build_*_pdf arma solo su contenido.
+def _pdf_o_error(armar, *args):
+    """Devuelve el PDF que arma `armar`, o una página con el error si falla."""
     try:
-        return _build_ot_pdf(oid)
+        return armar(*args)
     except Exception:
         import traceback
         tb = traceback.format_exc()
@@ -12465,19 +12587,320 @@ def emitir_ot_pdf(oid):
         ), 500
 
 
+def _pdf_fecha(d):
+    if not d: return "—"
+    try: return datetime.strptime(d[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
+    except: return str(d)
+
+
+def _pdf_dinero(n):
+    try: return f"$ {float(n or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except: return "$ 0,00"
+
+
+class _PdfBase:
+    """Documento A4 con la estética de la empresa. Uso:
+        pdf = _PdfBase(numero, titulo)       # titulo: metadato del PDF
+        pdf.cabecera("ORDEN DE TRABAJO", numero)
+        ... pdf.story.append(...) con pdf.P, pdf.ficha, pdf.tabla, etc.
+        pdf.firmas("Supervisor de producción", "Control de calidad")
+        return pdf.enviar("OT-001.pdf")
+    """
+
+    def __init__(self, numero, titulo):
+        import io
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.lib import colors
+        from reportlab.platypus import SimpleDocTemplate
+
+        cfg = {r["clave"]: (r["valor"] or "") for r in query("SELECT clave, valor FROM configuracion")}
+        self.cfg = cfg
+        self.numero = numero
+
+        h = (cfg.get("pdf_color_hex") or "2C5F8A").strip().lstrip("#")
+        if len(h) != 6:
+            h = "2C5F8A"
+        try:
+            self.PRIMARY = colors.HexColor("#" + h)
+        except Exception:
+            self.PRIMARY = colors.HexColor("#2C5F8A")
+        self.PRIMARY_L = colors.HexColor("#ECF3FA")   # variante clara para filas alternadas
+        self.GRAY_L    = colors.HexColor("#F5F5F5")
+        self.GRAY_D    = colors.HexColor("#CCCCCC")
+        self.WHITE     = colors.white
+        self.BLACK     = colors.HexColor("#1A1A1A")
+        self.MUTED     = colors.HexColor("#666666")
+
+        self.W, self.H = A4
+        self.M = 15 * mm
+        self.FOOTER_H = 34 * mm  # espacio reservado al pie para firmas/nota/generado
+        self.CW = self.W - 2 * self.M
+        self.buf = io.BytesIO()
+        self.doc = SimpleDocTemplate(
+            self.buf, pagesize=A4,
+            leftMargin=self.M, rightMargin=self.M,
+            topMargin=self.M, bottomMargin=self.M + self.FOOTER_H,
+            title=titulo,
+        )
+        self.story = []
+        self.firma_tbl = None
+
+    def paleta(self):
+        return (self.PRIMARY, self.PRIMARY_L, self.GRAY_L, self.GRAY_D,
+                self.WHITE, self.BLACK, self.MUTED)
+
+    # ── Estilos ──────────────────────────────────────────────────────────────
+    def sty(self, size=9, bold=False, color=None, align=None, leading=None, space_after=0):
+        from reportlab.lib.styles import ParagraphStyle
+        from reportlab.lib.enums import TA_LEFT
+        align = TA_LEFT if align is None else align
+        return ParagraphStyle(
+            name=f"s{size}{'b' if bold else ''}{align}",
+            fontSize=size,
+            fontName="Helvetica-Bold" if bold else "Helvetica",
+            textColor=color or self.BLACK,
+            alignment=align,
+            leading=leading or size * 1.35,
+            spaceAfter=space_after,
+        )
+
+    def P(self, text, **kw):
+        from reportlab.platypus import Paragraph
+        return Paragraph(str(text or "—"), self.sty(**kw))
+
+    # ── 1. Encabezado: logo y empresa (izq) | tipo y número (der) ─────────────
+    def cabecera(self, tipo, numero):
+        import io, base64
+        from reportlab.lib.units import mm
+        from reportlab.lib.enums import TA_RIGHT
+        from reportlab.platypus import Paragraph, Spacer, Table, TableStyle, Image
+        cfg, P, CW = self.cfg, self.P, self.CW
+
+        empresa_nombre    = "Mecanizado Ituzaingo"
+        empresa_subtitulo = cfg.get("empresa_subtitulo", "")
+        contact_parts = [p for p in [cfg.get("empresa_direccion", ""),
+                                     cfg.get("empresa_telefono", ""),
+                                     cfg.get("empresa_email", "")] if p]
+        empresa_txt = "<br/>".join(
+            [f'<font size="12"><b>{empresa_nombre}</b></font>'] +
+            ([f'<font size="9" color="#555555">{empresa_subtitulo}</font>'] if empresa_subtitulo else []) +
+            ([f'<font size="8" color="#888888">{" · ".join(contact_parts)}</font>'] if contact_parts else [])
+        )
+
+        logo_w, logo_h = 26*mm, 26*mm * (408/576)
+        logo_img = Image(io.BytesIO(base64.b64decode(_LOGO_ITUZAINGO_B64)),
+                          width=logo_w, height=logo_h)
+
+        empresa_bloque = Table([[
+            logo_img,
+            Paragraph(empresa_txt, self.sty(size=10)),
+        ]], colWidths=[logo_w + 3*mm, CW - 72*mm - logo_w - 3*mm])
+        empresa_bloque.setStyle(TableStyle([
+            ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+            ("LEFTPADDING", (0,0), (-1,-1), 0),
+            ("RIGHTPADDING", (0,0), (0,-1), 0),
+            ("TOPPADDING", (0,0), (-1,-1), 0),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 0),
+        ]))
+
+        hdr = Table([[
+            empresa_bloque,
+            Table([[
+                P(tipo, size=8, bold=True, color=self.MUTED, align=TA_RIGHT),
+                P(numero, size=20, bold=True, color=self.PRIMARY, align=TA_RIGHT),
+            ]], colWidths=[30*mm, 40*mm],
+               style=TableStyle([("VALIGN",(0,0),(-1,-1),"BOTTOM"),("BOTTOMPADDING",(0,0),(-1,-1),0)])),
+        ]], colWidths=[CW - 72*mm, 72*mm])
+        hdr.setStyle(TableStyle([
+            ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+            ("LINEBELOW", (0,0), (-1,0), 2, self.PRIMARY),
+            ("BOTTOMPADDING", (0,0), (-1,0), 6),
+            ("TOPPADDING", (0,0), (-1,0), 2),
+        ]))
+        self.story.append(hdr)
+        self.story.append(Spacer(1, 4*mm))
+
+    # ── 2. Ficha: 4 columnas, rótulos sobre fondo de la marca ─────────────────
+    def ficha(self, filas, estilo_extra=()):
+        from reportlab.lib.units import mm
+        from reportlab.platypus import Table, TableStyle
+        CW = self.CW
+        tbl = Table(filas, colWidths=[32*mm, CW/2-32*mm, 28*mm, CW/2-28*mm])
+        tbl.setStyle(TableStyle([
+            ("GRID",            (0,0), (-1,-1), 0.4, self.GRAY_D),
+            ("BACKGROUND",      (0,0), (0,-1), self.PRIMARY_L),
+            ("BACKGROUND",      (2,0), (2,-1), self.PRIMARY_L),
+            ("ROWBACKGROUNDS",  (0,0), (-1,-1), [self.WHITE, self.GRAY_L]),
+            ("VALIGN",          (0,0), (-1,-1), "MIDDLE"),
+            *estilo_extra,
+            ("TOPPADDING",      (0,0), (-1,-1), 4),
+            ("BOTTOMPADDING",   (0,0), (-1,-1), 4),
+            ("LEFTPADDING",     (0,0), (-1,-1), 5),
+        ]))
+        self.story.append(tbl)
+
+    def observaciones(self, texto):
+        """Recuadro amarillo de observaciones, solo si hay texto."""
+        if not texto:
+            return
+        from reportlab.lib.units import mm
+        from reportlab.lib import colors
+        from reportlab.platypus import Spacer, Table, TableStyle
+        self.story.append(Spacer(1, 2*mm))
+        obs_tbl = Table([[
+            self.P("Observaciones:", size=8, bold=True, color=self.MUTED),
+            self.P(texto, size=8, color=self.MUTED),
+        ]], colWidths=[32*mm, self.CW-32*mm])
+        obs_tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#FFFDE7")),
+            ("GRID", (0,0), (-1,-1), 0.3, self.GRAY_D),
+            ("VALIGN", (0,0), (-1,-1), "TOP"),
+            ("TOPPADDING", (0,0), (-1,-1), 4),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+            ("LEFTPADDING", (0,0), (-1,-1), 5),
+        ]))
+        self.story.append(obs_tbl)
+
+    # ── Secciones y tablas ───────────────────────────────────────────────────
+    def barra(self, titulo):
+        """Barra de título de sección (OPERACIONES, MATERIALES, ...)."""
+        from reportlab.platypus import Table, TableStyle
+        return Table([[self.P(titulo, size=10, bold=True, color=self.WHITE)]],
+                     colWidths=[self.CW],
+                     style=TableStyle([
+                         ("BACKGROUND", (0,0), (-1,-1), self.PRIMARY),
+                         ("TOPPADDING", (0,0), (-1,-1), 5),
+                         ("BOTTOMPADDING", (0,0), (-1,-1), 5),
+                         ("LEFTPADDING", (0,0), (-1,-1), 6),
+                     ]))
+
+    def tabla(self, filas, anchos, estilo_extra=()):
+        """Tabla de datos: encabezado con el color de la marca y filas alternadas."""
+        from reportlab.platypus import Table, TableStyle
+        tbl = Table(filas, colWidths=anchos)
+        tbl.setStyle(TableStyle([
+            ("BACKGROUND",     (0,0), (-1,0), self.PRIMARY),
+            ("ROWBACKGROUNDS", (0,1), (-1,-1), [self.WHITE, self.PRIMARY_L]),
+            ("GRID",           (0,0), (-1,-1), 0.4, self.GRAY_D),
+            ("VALIGN",         (0,0), (-1,-1), "MIDDLE"),
+            ("TOPPADDING",     (0,0), (-1,-1), 4),
+            ("BOTTOMPADDING",  (0,0), (-1,-1), 4),
+            ("LEFTPADDING",    (0,0), (-1,-1), 4),
+            *estilo_extra,
+        ]))
+        return tbl
+
+    def vacio(self, texto):
+        """Renglón gris para una sección sin datos."""
+        from reportlab.platypus import Table, TableStyle
+        return Table([[self.P(texto, size=8, color=self.MUTED)]],
+            colWidths=[self.CW], style=TableStyle([
+                ("BACKGROUND", (0,0), (-1,-1), self.GRAY_L),
+                ("TOPPADDING", (0,0), (-1,-1), 6),
+                ("BOTTOMPADDING", (0,0), (-1,-1), 6),
+                ("LEFTPADDING", (0,0), (-1,-1), 6),
+            ]))
+
+    # ── Pie: firmas + nota + datos de emisión, fijo en cada página ────────────
+    def firmas(self, firma_centro, firma_derecha):
+        """Arma la tabla de firmas. La primera columna ("Emitido por") se
+        completa sola con el usuario logueado."""
+        from reportlab.lib.units import mm
+        from reportlab.lib.enums import TA_CENTER
+        from reportlab.platypus import Table, TableStyle
+        P, MUTED, GRAY_D = self.P, self.MUTED, self.GRAY_D
+        emisor_nombre = session.get("nombre") or session.get("username") or "—"
+        emisor_rol = (session.get("rol") or "").strip()
+        emisor_rol_label = {"admin": "Administrador"}.get(emisor_rol, emisor_rol.capitalize() if emisor_rol else "")
+        firma_head = [
+            P(f"Emitido por: {emisor_nombre}" + (f" ({emisor_rol_label})" if emisor_rol_label else ""),
+              size=7, color=MUTED, align=TA_CENTER),
+            P(firma_centro, size=7, color=MUTED, align=TA_CENTER),
+            P(firma_derecha, size=7, color=MUTED, align=TA_CENTER),
+        ]
+        firma_sign = [
+            P("Generado automáticamente por el sistema", size=6.5, color=GRAY_D, align=TA_CENTER),
+            P("", size=7), P("", size=7),
+        ]
+        firma_label = [
+            P("Usuario y rol", size=6, color=GRAY_D, align=TA_CENTER),
+            P("Firma y aclaración", size=6, color=GRAY_D, align=TA_CENTER),
+            P("Firma y aclaración", size=6, color=GRAY_D, align=TA_CENTER),
+        ]
+        fw = self.CW / 3
+        self.firma_tbl = Table(
+            [firma_head, firma_sign, firma_label],
+            colWidths=[fw, fw, fw],
+            rowHeights=[8*mm, 18*mm, 6*mm],
+        )
+        self.firma_tbl.setStyle(TableStyle([
+            ("BOX",        (0,0), (-1,-1), 0.5, GRAY_D),
+            ("INNERGRID",  (0,0), (-1,-1), 0.4, GRAY_D),
+            ("BACKGROUND", (0,0), (-1,0),  self.PRIMARY_L),
+            ("BACKGROUND", (0,2), (-1,2),  self.GRAY_L),
+            ("LINEBELOW",  (0,1), (-1,1),  0.8, self.BLACK),
+            ("VALIGN",     (0,0), (-1,-1), "BOTTOM"),
+            ("ALIGN",      (0,0), (-1,-1), "CENTER"),
+            ("TOPPADDING", (0,0), (-1,-1), 3),
+            ("BOTTOMPADDING",(0,0),(-1,-1),3),
+        ]))
+
+    def enviar(self, nombre_archivo):
+        """Arma el PDF (con el pie dibujado sobre cada página) y lo devuelve."""
+        from reportlab.lib.units import mm
+        from reportlab.platypus import Paragraph
+        from flask import send_file
+        M, W, CW, FOOTER_H = self.M, self.W, self.CW, self.FOOTER_H
+        nota_pie = self.cfg.get("pdf_nota_pie", "")
+        ahora = datetime.now().strftime("%d/%m/%Y %H:%M")
+
+        # Firmas, nota y datos de emisión se dibujan directo sobre el canvas
+        # para que queden anclados al pie sin importar cuánto contenido tenga
+        # el documento ni en cuántas páginas se divida.
+        def _draw_footer(canvas, doc_):
+            canvas.saveState()
+            y = M + FOOTER_H  # tope del área reservada al pie
+            fw_, fh_ = self.firma_tbl.wrap(CW, FOOTER_H)
+            self.firma_tbl.drawOn(canvas, M, y - fh_)
+            y -= fh_ + 2*mm
+            if nota_pie:
+                canvas.setStrokeColor(self.GRAY_D)
+                canvas.setLineWidth(0.5)
+                canvas.line(M, y, W - M, y)
+                y -= 3*mm
+                nota_p = Paragraph(nota_pie, self.sty(size=7.5, color=self.MUTED, space_after=0))
+                nw_, nh_ = nota_p.wrap(CW, 12*mm)
+                nota_p.drawOn(canvas, M, y - nh_)
+                y -= nh_ + 2*mm
+            canvas.setStrokeColor(self.GRAY_D)
+            canvas.setLineWidth(0.5)
+            canvas.line(M, y, W - M, y)
+            canvas.setFont("Helvetica", 7)
+            canvas.setFillColor(self.GRAY_D)
+            canvas.drawCentredString(
+                W/2, y - 9,
+                f'MetalERP v3 · {self.numero} · Generado el {ahora} · Página {doc_.page}')
+            canvas.restoreState()
+
+        self.doc.build(self.story, onFirstPage=_draw_footer, onLaterPages=_draw_footer)
+        self.buf.seek(0)
+        return send_file(self.buf, mimetype="application/pdf",
+                         as_attachment=False, download_name=nombre_archivo)
+
+
+# ── Emisión de OT (PDF con ReportLab) ────────────────────────────────────────
+@app.route("/api/ordenes/<int:oid>/pdf")
+@login_required()
+def emitir_ot_pdf(oid):
+    return _pdf_o_error(_build_ot_pdf, oid)
+
+
 def _build_ot_pdf(oid):
-    import io, base64
-    from datetime import datetime
-    from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
     from reportlab.lib import colors
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
-    from reportlab.platypus import (
-        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-        HRFlowable, KeepTogether, Image
-    )
-    from flask import send_file
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.platypus import Paragraph, Spacer, KeepTogether
 
     # ── Datos ────────────────────────────────────────────────────────────────
     ot = query("""SELECT o.*,c.razon cliente_nombre,
@@ -12487,7 +12910,6 @@ def _build_ot_pdf(oid):
         LEFT JOIN productos p ON p.id=o.producto_id
         WHERE o.id=?""", (oid,), one=True)
     if not ot:
-        from flask import jsonify
         return jsonify({"error": "OT no encontrada"}), 404
 
     ops = query("""SELECT oo.*,
@@ -12506,64 +12928,16 @@ def _build_ot_pdf(oid):
         JOIN materiales m ON m.id=om.material_id
         WHERE om.orden_id=? ORDER BY m.codigo""", (oid,))
 
-    # ── Config ───────────────────────────────────────────────────────────────
-    cfg_rows = query("SELECT clave, valor FROM configuracion")
-    cfg = {r["clave"]: (r["valor"] or "") for r in cfg_rows}
+    pdf = _PdfBase(ot["numero"], f"OT {ot['numero']}")
+    PRIMARY, PRIMARY_L, GRAY_L, GRAY_D, WHITE, BLACK, MUTED = pdf.paleta()
+    P, sty, story = pdf.P, pdf.sty, pdf.story
 
-    def hex_to_color(h, fallback="2C5F8A"):
-        h = (h or fallback).strip().lstrip("#")
-        if len(h) != 6:
-            h = fallback
-        try:
-            return colors.HexColor("#" + h)
-        except Exception:
-            return colors.HexColor("#" + fallback)
-
-    PRIMARY   = hex_to_color(cfg.get("pdf_color_hex"), "2C5F8A")
-    PRIMARY_L = colors.HexColor("#ECF3FA")   # light variant for alternating rows
-    GRAY_L    = colors.HexColor("#F5F5F5")
-    GRAY_D    = colors.HexColor("#CCCCCC")
-    WHITE     = colors.white
-    BLACK     = colors.HexColor("#1A1A1A")
-    MUTED     = colors.HexColor("#666666")
-
-    mostrar_costos  = cfg.get("pdf_mostrar_costos",  "0") == "1"
-    mostrar_precios = cfg.get("pdf_mostrar_precios", "0") == "1"
+    mostrar_costos  = pdf.cfg.get("pdf_mostrar_costos",  "0") == "1"
+    mostrar_precios = pdf.cfg.get("pdf_mostrar_precios", "0") == "1"
     # Sin el permiso no hay importes en el PDF, aunque la configuración los pida.
     ver_monetario_pdf = puede_ver_monetario()
     if not ver_monetario_pdf:
         mostrar_costos = mostrar_precios = False
-
-    empresa_nombre    = "Mecanizado Ituzaingo"
-    empresa_subtitulo = cfg.get("empresa_subtitulo", "")
-    empresa_dir       = cfg.get("empresa_direccion", "")
-    empresa_tel       = cfg.get("empresa_telefono",  "")
-    empresa_email     = cfg.get("empresa_email",     "")
-    nota_pie          = cfg.get("pdf_nota_pie",      "")
-
-    # ── Estilos ──────────────────────────────────────────────────────────────
-    def sty(size=9, bold=False, color=None, align=TA_LEFT, leading=None, space_after=0):
-        return ParagraphStyle(
-            name=f"s{size}{'b' if bold else ''}",
-            fontSize=size,
-            fontName="Helvetica-Bold" if bold else "Helvetica",
-            textColor=color or BLACK,
-            alignment=align,
-            leading=leading or size * 1.35,
-            spaceAfter=space_after,
-        )
-
-    def P(text, **kw):
-        return Paragraph(str(text or "—"), sty(**kw))
-
-    def fmt_date(d):
-        if not d: return "—"
-        try: return datetime.strptime(d[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
-        except: return str(d)
-
-    def fmt_money(n):
-        try: return f"$ {float(n or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        except: return "$ 0,00"
 
     def fmt_min(n):
         try:
@@ -12574,83 +12948,21 @@ def _build_ot_pdf(oid):
             return str(int(v))
         return f"{v:.1f}".replace(".", ",")
 
-    # ── Documento ────────────────────────────────────────────────────────────
-    W, H = A4
-    M = 15 * mm
-    FOOTER_H = 34 * mm  # espacio reservado al pie de página para firmas/nota/generado
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buf, pagesize=A4,
-        leftMargin=M, rightMargin=M,
-        topMargin=M, bottomMargin=M + FOOTER_H,
-        title=f"OT {ot['numero']}",
-    )
-    CW = W - 2 * M
-    story = []
-
-    # ── Quién emite el PDF (se completa solo con el usuario logueado) ─────────
-    emisor_nombre = session.get("nombre") or session.get("username") or "—"
-    emisor_rol = (session.get("rol") or "").strip()
-    emisor_rol_label = {"admin": "Administrador"}.get(emisor_rol, emisor_rol.capitalize() if emisor_rol else "")
-
     # ── 1. Encabezado ─────────────────────────────────────────────────────────
+    pdf.cabecera("ORDEN DE TRABAJO", ot["numero"])
+
+    # ── 2. Ficha OT ───────────────────────────────────────────────────────────
     estado_color = {
         "Pendiente":  colors.HexColor("#E65100"),
         "En proceso": PRIMARY,
         "Completada": colors.HexColor("#1B5E20"),
         "Cancelada":  colors.HexColor("#A32D2D"),
     }.get(ot["estado"], BLACK)
-
-    # Tabla encabezado: empresa (izq) | número OT (der)
-    empresa_lines = [empresa_nombre]
-    if empresa_subtitulo: empresa_lines.append(empresa_subtitulo)
-    contact_parts = [p for p in [empresa_dir, empresa_tel, empresa_email] if p]
-    empresa_txt = "<br/>".join(
-        [f'<font size="12"><b>{empresa_lines[0]}</b></font>'] +
-        ([f'<font size="9" color="#555555">{empresa_lines[1]}</font>'] if len(empresa_lines) > 1 else []) +
-        ([f'<font size="8" color="#888888">{" · ".join(contact_parts)}</font>'] if contact_parts else [])
-    )
-
-    logo_w, logo_h = 26*mm, 26*mm * (408/576)
-    logo_img = Image(io.BytesIO(base64.b64decode(_LOGO_ITUZAINGO_B64)),
-                      width=logo_w, height=logo_h)
-
-    empresa_bloque = Table([[
-        logo_img,
-        Paragraph(empresa_txt, sty(size=10)),
-    ]], colWidths=[logo_w + 3*mm, CW - 72*mm - logo_w - 3*mm])
-    empresa_bloque.setStyle(TableStyle([
-        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-        ("LEFTPADDING", (0,0), (-1,-1), 0),
-        ("RIGHTPADDING", (0,0), (0,-1), 0),
-        ("TOPPADDING", (0,0), (-1,-1), 0),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 0),
-    ]))
-
-    hdr = Table([[
-        empresa_bloque,
-        Table([[
-            P("ORDEN DE TRABAJO", size=8, bold=True, color=MUTED, align=TA_RIGHT),
-            P(ot["numero"], size=20, bold=True, color=PRIMARY, align=TA_RIGHT),
-        ]], colWidths=[30*mm, 40*mm],
-           style=TableStyle([("VALIGN",(0,0),(-1,-1),"BOTTOM"),("BOTTOMPADDING",(0,0),(-1,-1),0)])),
-    ]], colWidths=[CW - 72*mm, 72*mm])
-    hdr.setStyle(TableStyle([
-        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-        ("LINEBELOW", (0,0), (-1,0), 2, PRIMARY),
-        ("BOTTOMPADDING", (0,0), (-1,0), 6),
-        ("TOPPADDING", (0,0), (-1,0), 2),
-    ]))
-    story.append(hdr)
-    story.append(Spacer(1, 4*mm))
-
-    # ── 2. Ficha OT ───────────────────────────────────────────────────────────
     estado_badge = (
         f'<font color="{estado_color.hexval()}"><b>{ot["estado"].upper()}</b></font>'
     )
-    prio_map = {"Alta": "🔴", "Media": "🟡", "Baja": "🟢", "Urgente": "🔴🔴"}
 
-    info_data = [
+    pdf.ficha([
         [P("Producto / descripción", size=8, bold=True, color=MUTED),
          P(ot["producto_nombre"] or ot["descripcion"] or "—", size=9),
          P("Estado", size=8, bold=True, color=MUTED),
@@ -12664,64 +12976,25 @@ def _build_ot_pdf(oid):
         [P("Cantidad", size=8, bold=True, color=MUTED),
          P(str(ot["cantidad"]), size=9),
          P("Fecha inicio", size=8, bold=True, color=MUTED),
-         P(fmt_date(ot["fecha_inicio"]), size=9)],
+         P(_pdf_fecha(ot["fecha_inicio"]), size=9)],
 
         # Sin permiso no queda ni la etiqueta: con los flags apagados esta
         # celda mostraba igual el rótulo "Precio venta" con un guión debajo,
         # que es un rastro de que ahí va un importe.
         [P("Costo material" if mostrar_costos else "Fecha entrega",
            size=8, bold=True, color=MUTED),
-         P(fmt_money(ot["costo_mat"]) if mostrar_costos else fmt_date(ot["fecha_entrega"]), size=9),
+         P(_pdf_dinero(ot["costo_mat"]) if mostrar_costos else _pdf_fecha(ot["fecha_entrega"]), size=9),
          P(("Fecha entrega" if mostrar_costos else "Precio venta") if ver_monetario_pdf else "",
            size=8, bold=True, color=MUTED),
-         P((fmt_date(ot["fecha_entrega"]) if mostrar_costos else
-            (fmt_money(ot["precio_venta"]) if mostrar_precios else "—"))
+         P((_pdf_fecha(ot["fecha_entrega"]) if mostrar_costos else
+            (_pdf_dinero(ot["precio_venta"]) if mostrar_precios else "—"))
            if ver_monetario_pdf else "", size=9)],
-    ]
-
-    c1, c2, c3, c4 = 32*mm, CW/2-32*mm, 28*mm, CW/2-28*mm
-    info_tbl = Table(info_data, colWidths=[c1, c2, c3, c4])
-    info_tbl.setStyle(TableStyle([
-        ("GRID",            (0,0), (-1,-1), 0.4, GRAY_D),
-        ("BACKGROUND",      (0,0), (0,-1), PRIMARY_L),
-        ("BACKGROUND",      (2,0), (2,-1), PRIMARY_L),
-        ("ROWBACKGROUNDS",  (0,0), (-1,-1), [WHITE, GRAY_L]),
-        ("VALIGN",          (0,0), (-1,-1), "MIDDLE"),
-        ("TOPPADDING",      (0,0), (-1,-1), 4),
-        ("BOTTOMPADDING",   (0,0), (-1,-1), 4),
-        ("LEFTPADDING",     (0,0), (-1,-1), 5),
-    ]))
-    story.append(info_tbl)
-
-    if ot["obs"]:
-        story.append(Spacer(1, 2*mm))
-        obs_tbl = Table([[
-            P("Observaciones:", size=8, bold=True, color=MUTED),
-            P(ot["obs"], size=8, color=MUTED),
-        ]], colWidths=[32*mm, CW-32*mm])
-        obs_tbl.setStyle(TableStyle([
-            ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#FFFDE7")),
-            ("GRID", (0,0), (-1,-1), 0.3, GRAY_D),
-            ("VALIGN", (0,0), (-1,-1), "TOP"),
-            ("TOPPADDING", (0,0), (-1,-1), 4),
-            ("BOTTOMPADDING", (0,0), (-1,-1), 4),
-            ("LEFTPADDING", (0,0), (-1,-1), 5),
-        ]))
-        story.append(obs_tbl)
-
+    ])
+    pdf.observaciones(ot["obs"])
     story.append(Spacer(1, 6*mm))
 
     # ── 3. Operaciones ────────────────────────────────────────────────────────
-    story.append(KeepTogether([
-        Table([[P("OPERACIONES", size=10, bold=True, color=WHITE)]],
-              colWidths=[CW],
-              style=TableStyle([
-                  ("BACKGROUND", (0,0), (-1,-1), PRIMARY),
-                  ("TOPPADDING", (0,0), (-1,-1), 5),
-                  ("BOTTOMPADDING", (0,0), (-1,-1), 5),
-                  ("LEFTPADDING", (0,0), (-1,-1), 6),
-              ])),
-    ]))
+    story.append(KeepTogether([pdf.barra("OPERACIONES")]))
 
     if ops:
         op_head = [
@@ -12768,42 +13041,17 @@ def _build_ot_pdf(oid):
                 P("", size=8),   # firma
             ])
 
-        op_tbl = Table(op_rows,
-            colWidths=[9*mm, 42*mm, 36*mm, 14*mm, 14*mm, 14*mm, 19*mm, 20*mm, 12*mm])
-        op_tbl.setStyle(TableStyle([
-            ("BACKGROUND",     (0,0), (-1,0), PRIMARY),
-            ("ROWBACKGROUNDS", (0,1), (-1,-1), [WHITE, PRIMARY_L]),
-            ("GRID",           (0,0), (-1,-1), 0.4, GRAY_D),
-            ("VALIGN",         (0,0), (-1,-1), "MIDDLE"),
-            ("TOPPADDING",     (0,0), (-1,-1), 4),
-            ("BOTTOMPADDING",  (0,0), (-1,-1), 4),
-            ("LEFTPADDING",    (0,0), (-1,-1), 4),
-            # Firma box: thicker border
-            ("BOX",            (8,1), (8,-1), 0.8, GRAY_D),
-        ]))
-        story.append(op_tbl)
+        story.append(pdf.tabla(op_rows,
+            [9*mm, 42*mm, 36*mm, 14*mm, 14*mm, 14*mm, 19*mm, 20*mm, 12*mm],
+            # Recuadro de la firma con borde más grueso
+            [("BOX", (8,1), (8,-1), 0.8, GRAY_D)]))
     else:
-        story.append(Table([[P("Sin operaciones registradas.", size=8, color=MUTED)]],
-            colWidths=[CW], style=TableStyle([
-                ("BACKGROUND", (0,0), (-1,-1), GRAY_L),
-                ("TOPPADDING", (0,0), (-1,-1), 6),
-                ("BOTTOMPADDING", (0,0), (-1,-1), 6),
-                ("LEFTPADDING", (0,0), (-1,-1), 6),
-            ])))
+        story.append(pdf.vacio("Sin operaciones registradas."))
 
     story.append(Spacer(1, 6*mm))
 
     # ── 4. Materiales ─────────────────────────────────────────────────────────
-    story.append(KeepTogether([
-        Table([[P("MATERIALES / INSUMOS", size=10, bold=True, color=WHITE)]],
-              colWidths=[CW],
-              style=TableStyle([
-                  ("BACKGROUND", (0,0), (-1,-1), PRIMARY),
-                  ("TOPPADDING", (0,0), (-1,-1), 5),
-                  ("BOTTOMPADDING", (0,0), (-1,-1), 5),
-                  ("LEFTPADDING", (0,0), (-1,-1), 6),
-              ])),
-    ]))
+    story.append(KeepTogether([pdf.barra("MATERIALES / INSUMOS")]))
 
     if mats:
         mat_head = [
@@ -12829,136 +13077,29 @@ def _build_ot_pdf(oid):
                 P(m["stock"], size=8, align=TA_CENTER),
             ])
 
-        mat_tbl = Table(mat_rows,
-            colWidths=[25*mm, 70*mm, 26*mm, 26*mm, 18*mm, 15*mm])
-        mat_tbl.setStyle(TableStyle([
-            ("BACKGROUND",     (0,0), (-1,0), PRIMARY),
-            ("ROWBACKGROUNDS", (0,1), (-1,-1), [WHITE, PRIMARY_L]),
-            ("GRID",           (0,0), (-1,-1), 0.4, GRAY_D),
-            ("VALIGN",         (0,0), (-1,-1), "MIDDLE"),
-            ("TOPPADDING",     (0,0), (-1,-1), 4),
-            ("BOTTOMPADDING",  (0,0), (-1,-1), 4),
-            ("LEFTPADDING",    (0,0), (-1,-1), 4),
-        ]))
-        story.append(mat_tbl)
+        story.append(pdf.tabla(mat_rows, [25*mm, 70*mm, 26*mm, 26*mm, 18*mm, 15*mm]))
     else:
-        story.append(Table([[P("Sin materiales registrados.", size=8, color=MUTED)]],
-            colWidths=[CW], style=TableStyle([
-                ("BACKGROUND", (0,0), (-1,-1), GRAY_L),
-                ("TOPPADDING", (0,0), (-1,-1), 6),
-                ("BOTTOMPADDING", (0,0), (-1,-1), 6),
-                ("LEFTPADDING", (0,0), (-1,-1), 6),
-            ])))
+        story.append(pdf.vacio("Sin materiales registrados."))
 
-    # ── 5/6. Firmas + nota + datos de emisión: van fijos al pie de cada página ─
-    # (armados como flowables y dibujados directamente sobre el canvas en
-    # _draw_footer, para que queden anclados al pie sin importar cuánto
-    # contenido tenga la OT ni en cuántas páginas se divida)
-    firma_head = [
-        P(f"Emitido por: {emisor_nombre}" + (f" ({emisor_rol_label})" if emisor_rol_label else ""),
-          size=7, color=MUTED, align=TA_CENTER),
-        P("Supervisor de producción", size=7, color=MUTED, align=TA_CENTER),
-        P("Control de calidad", size=7, color=MUTED, align=TA_CENTER),
-    ]
-    firma_sign = [
-        P("Generado automáticamente por el sistema", size=6.5, color=GRAY_D, align=TA_CENTER),
-        P("", size=7), P("", size=7),
-    ]
-    firma_label = [
-        P("Usuario y rol", size=6, color=GRAY_D, align=TA_CENTER),
-        P("Firma y aclaración", size=6, color=GRAY_D, align=TA_CENTER),
-        P("Firma y aclaración", size=6, color=GRAY_D, align=TA_CENTER),
-    ]
-    fw = CW / 3
-    firma_tbl = Table(
-        [firma_head, firma_sign, firma_label],
-        colWidths=[fw, fw, fw],
-        rowHeights=[8*mm, 18*mm, 6*mm],
-    )
-    firma_tbl.setStyle(TableStyle([
-        ("BOX",        (0,0), (-1,-1), 0.5, GRAY_D),
-        ("INNERGRID",  (0,0), (-1,-1), 0.4, GRAY_D),
-        ("BACKGROUND", (0,0), (-1,0),  PRIMARY_L),
-        ("BACKGROUND", (0,2), (-1,2),  GRAY_L),
-        ("LINEBELOW",  (0,1), (-1,1),  0.8, BLACK),
-        ("VALIGN",     (0,0), (-1,-1), "BOTTOM"),
-        ("ALIGN",      (0,0), (-1,-1), "CENTER"),
-        ("TOPPADDING", (0,0), (-1,-1), 3),
-        ("BOTTOMPADDING",(0,0),(-1,-1),3),
-    ]))
-
-    ahora = datetime.now().strftime("%d/%m/%Y %H:%M")
-
-    def _draw_footer(canvas, doc_):
-        canvas.saveState()
-        y = M + FOOTER_H  # tope del área reservada al pie
-        # 1. Tabla de firmas (Emitido por ya completado automáticamente)
-        fw_, fh_ = firma_tbl.wrap(CW, FOOTER_H)
-        firma_tbl.drawOn(canvas, M, y - fh_)
-        y -= fh_ + 2*mm
-        # 2. Nota al pie configurable (si existe)
-        if nota_pie:
-            canvas.setStrokeColor(GRAY_D)
-            canvas.setLineWidth(0.5)
-            canvas.line(M, y, W - M, y)
-            y -= 3*mm
-            nota_p = Paragraph(nota_pie, sty(size=7.5, color=MUTED, space_after=0))
-            nw_, nh_ = nota_p.wrap(CW, 12*mm)
-            nota_p.drawOn(canvas, M, y - nh_)
-            y -= nh_ + 2*mm
-        # 3. Línea + datos de generación / paginado
-        canvas.setStrokeColor(GRAY_D)
-        canvas.setLineWidth(0.5)
-        canvas.line(M, y, W - M, y)
-        canvas.setFont("Helvetica", 7)
-        canvas.setFillColor(GRAY_D)
-        canvas.drawCentredString(
-            W/2, y - 9,
-            f'MetalERP v3 · {ot["numero"]} · Generado el {ahora} · Página {doc_.page}')
-        canvas.restoreState()
-
-    # ── Build ─────────────────────────────────────────────────────────────────
-    doc.build(story, onFirstPage=_draw_footer, onLaterPages=_draw_footer)
-    buf.seek(0)
-    return send_file(buf, mimetype="application/pdf",
-                     as_attachment=False,
-                     download_name=f'{ot["numero"]}.pdf')
+    # ── 5. Pie ────────────────────────────────────────────────────────────────
+    pdf.firmas("Supervisor de producción", "Control de calidad")
+    return pdf.enviar(f'{ot["numero"]}.pdf')
 
 
 # ── Emisión de OP (planilla de trazabilidad por operación) ──────────────────
 @app.route("/api/ordenes/<int:oid>/operaciones/<int:opid>/pdf")
 @login_required()
 def emitir_op_pdf(oid, opid):
-    try:
-        return _build_op_pdf(oid, opid)
-    except Exception:
-        import traceback
-        tb = traceback.format_exc()
-        return (
-            '<html><body style="font-family:monospace;padding:20px">'
-            '<h2 style="color:red">Error al generar PDF</h2>'
-            '<pre style="background:#f5f5f5;padding:16px;border-radius:4px;font-size:12px">'
-            + tb.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;')
-            + '</pre></body></html>'
-        ), 500
+    return _pdf_o_error(_build_op_pdf, oid, opid)
 
 
 def _build_op_pdf(oid, opid):
     """Genera la planilla de trazabilidad de una operación puntual de una OT,
-    con la misma estética (logo, colores de marca, cabecera, pie con firmas)
-    que el PDF de OT, más una tabla de fecha/operador/piezas OK/piezas NOK
-    para completar a mano."""
-    import io, base64
-    from datetime import datetime
-    from reportlab.lib.pagesizes import A4
+    con la misma estética que el PDF de OT, más una tabla de
+    fecha/operador/piezas OK/piezas NOK para completar a mano."""
     from reportlab.lib.units import mm
-    from reportlab.lib import colors
-    from reportlab.lib.styles import ParagraphStyle
-    from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
-    from reportlab.platypus import (
-        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
-    )
-    from flask import send_file
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.platypus import Spacer, Table, TableStyle
 
     ot = query("""SELECT o.*,c.razon cliente_nombre,
         p.nombre producto_nombre, p.codigo producto_codigo
@@ -12981,124 +13122,26 @@ def _build_op_pdf(oid, opid):
 
     # Materias primas asociadas a este paso puntual del proceso (si el
     # proceso definió consumos para esta operación).
-    mats = []
-    if True:
-        mats = query("""SELECT mt.codigo,mt.descripcion,mt.unidad
-            FROM orden_operacion_materiales om
-            JOIN materiales mt ON mt.id=om.material_id
-            WHERE om.orden_operacion_id=? AND om.material_id IS NOT NULL""", (op["id"],))
+    mats = query("""SELECT mt.codigo,mt.descripcion,mt.unidad
+        FROM orden_operacion_materiales om
+        JOIN materiales mt ON mt.id=om.material_id
+        WHERE om.orden_operacion_id=? AND om.material_id IS NOT NULL""", (op["id"],))
     mat_prima_txt = ", ".join(f'{m["codigo"]} — {m["descripcion"]}' for m in mats) if mats else "—"
 
     maquina_txt = op["maquina_nombre"] or op["cat_maquina_nombre"] or ("Tercerizado — " + (op["proveedor_nombre"] or "—") if op["es_tercerizada"] else "—")
     pieza_txt = f'{ot["producto_codigo"] or ""} {ot["producto_nombre"] or ""}'.strip() or "—"
     unidad = "PZ"
 
-    # ── Config (misma paleta y datos de empresa que la OT) ─────────────────
-    cfg_rows = query("SELECT clave, valor FROM configuracion")
-    cfg = {r["clave"]: (r["valor"] or "") for r in cfg_rows}
-
-    def hex_to_color(h, fallback="2C5F8A"):
-        h = (h or fallback).strip().lstrip("#")
-        if len(h) != 6:
-            h = fallback
-        try:
-            return colors.HexColor("#" + h)
-        except Exception:
-            return colors.HexColor("#" + fallback)
-
-    PRIMARY   = hex_to_color(cfg.get("pdf_color_hex"), "2C5F8A")
-    PRIMARY_L = colors.HexColor("#ECF3FA")
-    GRAY_L    = colors.HexColor("#F5F5F5")
-    GRAY_D    = colors.HexColor("#CCCCCC")
-    WHITE     = colors.white
-    BLACK     = colors.HexColor("#1A1A1A")
-    MUTED     = colors.HexColor("#666666")
-
-    empresa_nombre    = "Mecanizado Ituzaingo"
-    empresa_subtitulo = cfg.get("empresa_subtitulo", "")
-    empresa_dir       = cfg.get("empresa_direccion", "")
-    empresa_tel       = cfg.get("empresa_telefono",  "")
-    empresa_email     = cfg.get("empresa_email",     "")
-    nota_pie          = cfg.get("pdf_nota_pie",      "")
-
-    def sty(size=9, bold=False, color=None, align=TA_LEFT, leading=None, space_after=0):
-        return ParagraphStyle(
-            name=f"os{size}{'b' if bold else ''}{align}",
-            fontSize=size,
-            fontName="Helvetica-Bold" if bold else "Helvetica",
-            textColor=color or BLACK,
-            alignment=align,
-            leading=leading or size * 1.35,
-            spaceAfter=space_after,
-        )
-
-    def P(text, **kw):
-        return Paragraph(str(text or "—"), sty(**kw))
-
-    # ── Documento ────────────────────────────────────────────────────────────
-    W, H = A4
-    M = 15 * mm
-    FOOTER_H = 34 * mm
     numero_op = f'{ot["numero"]}-{op["orden"]}'
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buf, pagesize=A4,
-        leftMargin=M, rightMargin=M,
-        topMargin=M, bottomMargin=M + FOOTER_H,
-        title=f'OP {numero_op}',
-    )
-    CW = W - 2 * M
-    story = []
-
-    emisor_nombre = session.get("nombre") or session.get("username") or "—"
-    emisor_rol = (session.get("rol") or "").strip()
-    emisor_rol_label = {"admin": "Administrador"}.get(emisor_rol, emisor_rol.capitalize() if emisor_rol else "")
+    pdf = _PdfBase(numero_op, f'OP {numero_op}')
+    PRIMARY, PRIMARY_L, GRAY_L, GRAY_D, WHITE, BLACK, MUTED = pdf.paleta()
+    P, CW, story = pdf.P, pdf.CW, pdf.story
 
     # ── 1. Encabezado (idéntico al de la OT) ────────────────────────────────
-    empresa_lines = [empresa_nombre]
-    if empresa_subtitulo: empresa_lines.append(empresa_subtitulo)
-    contact_parts = [p for p in [empresa_dir, empresa_tel, empresa_email] if p]
-    empresa_txt = "<br/>".join(
-        [f'<font size="12"><b>{empresa_lines[0]}</b></font>'] +
-        ([f'<font size="9" color="#555555">{empresa_lines[1]}</font>'] if len(empresa_lines) > 1 else []) +
-        ([f'<font size="8" color="#888888">{" · ".join(contact_parts)}</font>'] if contact_parts else [])
-    )
-
-    logo_w, logo_h = 26*mm, 26*mm * (408/576)
-    logo_img = Image(io.BytesIO(base64.b64decode(_LOGO_ITUZAINGO_B64)),
-                      width=logo_w, height=logo_h)
-
-    empresa_bloque = Table([[
-        logo_img,
-        Paragraph(empresa_txt, sty(size=10)),
-    ]], colWidths=[logo_w + 3*mm, CW - 72*mm - logo_w - 3*mm])
-    empresa_bloque.setStyle(TableStyle([
-        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-        ("LEFTPADDING", (0,0), (-1,-1), 0),
-        ("RIGHTPADDING", (0,0), (0,-1), 0),
-        ("TOPPADDING", (0,0), (-1,-1), 0),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 0),
-    ]))
-
-    hdr = Table([[
-        empresa_bloque,
-        Table([[
-            P("ORDEN DE PROCESO", size=8, bold=True, color=MUTED, align=TA_RIGHT),
-            P(numero_op, size=20, bold=True, color=PRIMARY, align=TA_RIGHT),
-        ]], colWidths=[30*mm, 40*mm],
-           style=TableStyle([("VALIGN",(0,0),(-1,-1),"BOTTOM"),("BOTTOMPADDING",(0,0),(-1,-1),0)])),
-    ]], colWidths=[CW - 72*mm, 72*mm])
-    hdr.setStyle(TableStyle([
-        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-        ("LINEBELOW", (0,0), (-1,0), 2, PRIMARY),
-        ("BOTTOMPADDING", (0,0), (-1,0), 6),
-        ("TOPPADDING", (0,0), (-1,0), 2),
-    ]))
-    story.append(hdr)
-    story.append(Spacer(1, 4*mm))
+    pdf.cabecera("ORDEN DE PROCESO", numero_op)
 
     # ── 2. Ficha de la operación (misma paleta que la ficha de la OT) ──────
-    info_data = [
+    pdf.ficha([
         [P("Cliente", size=8, bold=True, color=MUTED),
          P(ot["cliente_nombre"] or "—", size=9),
          P("Partida (OT)", size=8, bold=True, color=MUTED),
@@ -13118,36 +13161,12 @@ def _build_op_pdf(oid, opid):
          P(mat_prima_txt, size=8.5),
          P("", size=8, bold=True, color=MUTED),
          P("", size=9)],
-    ]
-
-    c1, c2, c3, c4 = 32*mm, CW/2-32*mm, 28*mm, CW/2-28*mm
-    info_tbl = Table(info_data, colWidths=[c1, c2, c3, c4])
-    info_tbl.setStyle(TableStyle([
-        ("GRID",            (0,0), (-1,-1), 0.4, GRAY_D),
-        ("BACKGROUND",      (0,0), (0,-1), PRIMARY_L),
-        ("BACKGROUND",      (2,0), (2,-1), PRIMARY_L),
-        ("ROWBACKGROUNDS",  (0,0), (-1,-1), [WHITE, GRAY_L]),
-        ("VALIGN",          (0,0), (-1,-1), "MIDDLE"),
-        ("SPAN",            (1,3), (1,3)),
-        ("SPAN",            (2,3), (3,3)),
-        ("TOPPADDING",      (0,0), (-1,-1), 4),
-        ("BOTTOMPADDING",   (0,0), (-1,-1), 4),
-        ("LEFTPADDING",     (0,0), (-1,-1), 5),
-    ]))
-    story.append(info_tbl)
+    ], [("SPAN", (1,3), (1,3)),
+        ("SPAN", (2,3), (3,3))])
     story.append(Spacer(1, 6*mm))
 
     # ── 3. Trazabilidad ──────────────────────────────────────────────────────
-    story.append(
-        Table([[P("TRAZABILIDAD", size=10, bold=True, color=WHITE)]],
-              colWidths=[CW],
-              style=TableStyle([
-                  ("BACKGROUND", (0,0), (-1,-1), PRIMARY),
-                  ("TOPPADDING", (0,0), (-1,-1), 5),
-                  ("BOTTOMPADDING", (0,0), (-1,-1), 5),
-                  ("LEFTPADDING", (0,0), (-1,-1), 6),
-              ]))
-    )
+    story.append(pdf.barra("TRAZABILIDAD"))
 
     n_rows = 19  # ajustado para que la planilla entre siempre en una sola página
     tbl_head = [P("Fecha", size=8, bold=True, color=WHITE, align=TA_CENTER),
@@ -13166,72 +13185,9 @@ def _build_op_pdf(oid, opid):
     ]))
     story.append(trz)
 
-    # ── 4. Pie de página: firmas + nota + datos de emisión (igual que OT) ──
-    firma_head = [
-        P(f"Emitido por: {emisor_nombre}" + (f" ({emisor_rol_label})" if emisor_rol_label else ""),
-          size=7, color=MUTED, align=TA_CENTER),
-        P("Operador", size=7, color=MUTED, align=TA_CENTER),
-        P("Control de calidad", size=7, color=MUTED, align=TA_CENTER),
-    ]
-    firma_sign = [
-        P("Generado automáticamente por el sistema", size=6.5, color=GRAY_D, align=TA_CENTER),
-        P("", size=7), P("", size=7),
-    ]
-    firma_label = [
-        P("Usuario y rol", size=6, color=GRAY_D, align=TA_CENTER),
-        P("Firma y aclaración", size=6, color=GRAY_D, align=TA_CENTER),
-        P("Firma y aclaración", size=6, color=GRAY_D, align=TA_CENTER),
-    ]
-    fw = CW / 3
-    firma_tbl = Table(
-        [firma_head, firma_sign, firma_label],
-        colWidths=[fw, fw, fw],
-        rowHeights=[8*mm, 18*mm, 6*mm],
-    )
-    firma_tbl.setStyle(TableStyle([
-        ("BOX",        (0,0), (-1,-1), 0.5, GRAY_D),
-        ("INNERGRID",  (0,0), (-1,-1), 0.4, GRAY_D),
-        ("BACKGROUND", (0,0), (-1,0),  PRIMARY_L),
-        ("BACKGROUND", (0,2), (-1,2),  GRAY_L),
-        ("LINEBELOW",  (0,1), (-1,1),  0.8, BLACK),
-        ("VALIGN",     (0,0), (-1,-1), "BOTTOM"),
-        ("ALIGN",      (0,0), (-1,-1), "CENTER"),
-        ("TOPPADDING", (0,0), (-1,-1), 3),
-        ("BOTTOMPADDING",(0,0),(-1,-1),3),
-    ]))
-
-    ahora = datetime.now().strftime("%d/%m/%Y %H:%M")
-
-    def _draw_footer(canvas, doc_):
-        canvas.saveState()
-        y = M + FOOTER_H
-        fw_, fh_ = firma_tbl.wrap(CW, FOOTER_H)
-        firma_tbl.drawOn(canvas, M, y - fh_)
-        y -= fh_ + 2*mm
-        if nota_pie:
-            canvas.setStrokeColor(GRAY_D)
-            canvas.setLineWidth(0.5)
-            canvas.line(M, y, W - M, y)
-            y -= 3*mm
-            nota_p = Paragraph(nota_pie, sty(size=7.5, color=MUTED, space_after=0))
-            nw_, nh_ = nota_p.wrap(CW, 12*mm)
-            nota_p.drawOn(canvas, M, y - nh_)
-            y -= nh_ + 2*mm
-        canvas.setStrokeColor(GRAY_D)
-        canvas.setLineWidth(0.5)
-        canvas.line(M, y, W - M, y)
-        canvas.setFont("Helvetica", 7)
-        canvas.setFillColor(GRAY_D)
-        canvas.drawCentredString(
-            W/2, y - 9,
-            f'MetalERP v3 · {numero_op} · Generado el {ahora} · Página {doc_.page}')
-        canvas.restoreState()
-
-    # ── Build ─────────────────────────────────────────────────────────────────
-    doc.build(story, onFirstPage=_draw_footer, onLaterPages=_draw_footer)
-    buf.seek(0)
-    return send_file(buf, mimetype="application/pdf", as_attachment=False,
-                     download_name=f'OP_{ot["numero"]}_op{op["orden"]}.pdf')
+    # ── 4. Pie (igual que OT) ────────────────────────────────────────────────
+    pdf.firmas("Operador", "Control de calidad")
+    return pdf.enviar(f'OP_{ot["numero"]}_op{op["orden"]}.pdf')
 
 
 # ── Emisión de OC (PDF con ReportLab, misma estética que la OT) ─────────────
@@ -13239,35 +13195,16 @@ def _build_op_pdf(oid, opid):
 @login_required()
 @solo_con_monetario
 def emitir_oc_pdf(ocid):
-    try:
-        return _build_oc_pdf(ocid)
-    except Exception:
-        import traceback
-        tb = traceback.format_exc()
-        return (
-            '<html><body style="font-family:monospace;padding:20px">'
-            '<h2 style="color:red">Error al generar PDF</h2>'
-            '<pre style="background:#f5f5f5;padding:16px;border-radius:4px;font-size:12px">'
-            + tb.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;')
-            + '</pre></body></html>'
-        ), 500
+    return _pdf_o_error(_build_oc_pdf, ocid)
 
 
 def _build_oc_pdf(ocid):
-    """Genera el PDF de la Orden de Compra con la misma estética (logo,
-    colores de marca, cabecera, pie con firmas) que el PDF de OT."""
-    import io, base64
-    from datetime import datetime
-    from reportlab.lib.pagesizes import A4
+    """Genera el PDF de la Orden de Compra con la misma estética que el PDF
+    de OT."""
     from reportlab.lib.units import mm
     from reportlab.lib import colors
-    from reportlab.lib.styles import ParagraphStyle
-    from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
-    from reportlab.platypus import (
-        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-        KeepTogether, Image
-    )
-    from flask import send_file, jsonify
+    from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+    from reportlab.platypus import Paragraph, Spacer, KeepTogether
 
     # ── Datos ────────────────────────────────────────────────────────────────
     oc = query("""SELECT oc.*, p.razon proveedor_nombre, p.cuit proveedor_cuit,
@@ -13291,118 +13228,12 @@ def _build_oc_pdf(ocid):
         LEFT JOIN cotizaciones_compra c ON c.solicitud_id=i.solicitud_id AND c.seleccionada=1
         WHERE i.oc_id=?""", (ocid,))
 
-    # ── Config (misma paleta y datos de empresa que la OT) ─────────────────
-    cfg_rows = query("SELECT clave, valor FROM configuracion")
-    cfg = {r["clave"]: (r["valor"] or "") for r in cfg_rows}
-
-    def hex_to_color(h, fallback="2C5F8A"):
-        h = (h or fallback).strip().lstrip("#")
-        if len(h) != 6:
-            h = fallback
-        try:
-            return colors.HexColor("#" + h)
-        except Exception:
-            return colors.HexColor("#" + fallback)
-
-    PRIMARY   = hex_to_color(cfg.get("pdf_color_hex"), "2C5F8A")
-    PRIMARY_L = colors.HexColor("#ECF3FA")
-    GRAY_L    = colors.HexColor("#F5F5F5")
-    GRAY_D    = colors.HexColor("#CCCCCC")
-    WHITE     = colors.white
-    BLACK     = colors.HexColor("#1A1A1A")
-    MUTED     = colors.HexColor("#666666")
-
-    empresa_nombre    = "Mecanizado Ituzaingo"
-    empresa_subtitulo = cfg.get("empresa_subtitulo", "")
-    empresa_dir       = cfg.get("empresa_direccion", "")
-    empresa_tel       = cfg.get("empresa_telefono",  "")
-    empresa_email     = cfg.get("empresa_email",     "")
-    nota_pie          = cfg.get("pdf_nota_pie",      "")
-
-    # ── Estilos ──────────────────────────────────────────────────────────────
-    def sty(size=9, bold=False, color=None, align=TA_LEFT, leading=None, space_after=0):
-        return ParagraphStyle(
-            name=f"soc{size}{'b' if bold else ''}{align}",
-            fontSize=size,
-            fontName="Helvetica-Bold" if bold else "Helvetica",
-            textColor=color or BLACK,
-            alignment=align,
-            leading=leading or size * 1.35,
-            spaceAfter=space_after,
-        )
-
-    def P(text, **kw):
-        return Paragraph(str(text or "—"), sty(**kw))
-
-    def fmt_date(d):
-        if not d: return "—"
-        try: return datetime.strptime(d[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
-        except: return str(d)
-
-    def fmt_money(n):
-        try: return f"$ {float(n or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        except: return "$ 0,00"
-
-    # ── Documento ────────────────────────────────────────────────────────────
-    W, H = A4
-    M = 15 * mm
-    FOOTER_H = 34 * mm
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buf, pagesize=A4,
-        leftMargin=M, rightMargin=M,
-        topMargin=M, bottomMargin=M + FOOTER_H,
-        title=f"OC {oc['numero']}",
-    )
-    CW = W - 2 * M
-    story = []
-
-    emisor_nombre = session.get("nombre") or session.get("username") or "—"
-    emisor_rol = (session.get("rol") or "").strip()
-    emisor_rol_label = {"admin": "Administrador"}.get(emisor_rol, emisor_rol.capitalize() if emisor_rol else "")
+    pdf = _PdfBase(oc["numero"], f"OC {oc['numero']}")
+    PRIMARY, PRIMARY_L, GRAY_L, GRAY_D, WHITE, BLACK, MUTED = pdf.paleta()
+    P, sty, story = pdf.P, pdf.sty, pdf.story
 
     # ── 1. Encabezado ─────────────────────────────────────────────────────────
-    empresa_lines = [empresa_nombre]
-    if empresa_subtitulo: empresa_lines.append(empresa_subtitulo)
-    contact_parts = [p for p in [empresa_dir, empresa_tel, empresa_email] if p]
-    empresa_txt = "<br/>".join(
-        [f'<font size="12"><b>{empresa_lines[0]}</b></font>'] +
-        ([f'<font size="9" color="#555555">{empresa_lines[1]}</font>'] if len(empresa_lines) > 1 else []) +
-        ([f'<font size="8" color="#888888">{" · ".join(contact_parts)}</font>'] if contact_parts else [])
-    )
-
-    logo_w, logo_h = 26*mm, 26*mm * (408/576)
-    logo_img = Image(io.BytesIO(base64.b64decode(_LOGO_ITUZAINGO_B64)),
-                      width=logo_w, height=logo_h)
-
-    empresa_bloque = Table([[
-        logo_img,
-        Paragraph(empresa_txt, sty(size=10)),
-    ]], colWidths=[logo_w + 3*mm, CW - 72*mm - logo_w - 3*mm])
-    empresa_bloque.setStyle(TableStyle([
-        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-        ("LEFTPADDING", (0,0), (-1,-1), 0),
-        ("RIGHTPADDING", (0,0), (0,-1), 0),
-        ("TOPPADDING", (0,0), (-1,-1), 0),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 0),
-    ]))
-
-    hdr = Table([[
-        empresa_bloque,
-        Table([[
-            P("ORDEN DE COMPRA", size=8, bold=True, color=MUTED, align=TA_RIGHT),
-            P(oc["numero"], size=20, bold=True, color=PRIMARY, align=TA_RIGHT),
-        ]], colWidths=[30*mm, 40*mm],
-           style=TableStyle([("VALIGN",(0,0),(-1,-1),"BOTTOM"),("BOTTOMPADDING",(0,0),(-1,-1),0)])),
-    ]], colWidths=[CW - 72*mm, 72*mm])
-    hdr.setStyle(TableStyle([
-        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-        ("LINEBELOW", (0,0), (-1,0), 2, PRIMARY),
-        ("BOTTOMPADDING", (0,0), (-1,0), 6),
-        ("TOPPADDING", (0,0), (-1,0), 2),
-    ]))
-    story.append(hdr)
-    story.append(Spacer(1, 4*mm))
+    pdf.cabecera("ORDEN DE COMPRA", oc["numero"])
 
     # ── 2. Ficha OC ───────────────────────────────────────────────────────────
     estado_color = {
@@ -13417,7 +13248,7 @@ def _build_oc_pdf(ocid):
 
     prov_contacto_parts = [p for p in [oc["proveedor_telefono"], oc["proveedor_email"]] if p]
 
-    info_data = [
+    pdf.ficha([
         [P("Proveedor", size=8, bold=True, color=MUTED),
          P(oc["proveedor_nombre"] or "—", size=9),
          P("Estado", size=8, bold=True, color=MUTED),
@@ -13426,62 +13257,23 @@ def _build_oc_pdf(ocid):
         [P("CUIT", size=8, bold=True, color=MUTED),
          P(oc["proveedor_cuit"] or "—", size=9),
          P("Fecha emisión", size=8, bold=True, color=MUTED),
-         P(fmt_date(oc["creado"]), size=9)],
+         P(_pdf_fecha(oc["creado"]), size=9)],
 
         [P("Contacto", size=8, bold=True, color=MUTED),
          P(oc["proveedor_contacto"] or (" · ".join(prov_contacto_parts) if prov_contacto_parts else "—"), size=9),
          P("Entrega estimada", size=8, bold=True, color=MUTED),
-         P(fmt_date(oc["fecha_entrega_est"]), size=9)],
+         P(_pdf_fecha(oc["fecha_entrega_est"]), size=9)],
 
         [P("Monto total", size=8, bold=True, color=MUTED),
-         Paragraph(f'<b>{fmt_money(oc["monto_total"])}</b>', sty(size=9)),
+         Paragraph(f'<b>{_pdf_dinero(oc["monto_total"])}</b>', sty(size=9)),
          P("Aprobada por", size=8, bold=True, color=MUTED),
          P(oc["aprobado_por_nombre"] or "—", size=9)],
-    ]
-
-    c1, c2, c3, c4 = 32*mm, CW/2-32*mm, 28*mm, CW/2-28*mm
-    info_tbl = Table(info_data, colWidths=[c1, c2, c3, c4])
-    info_tbl.setStyle(TableStyle([
-        ("GRID",            (0,0), (-1,-1), 0.4, GRAY_D),
-        ("BACKGROUND",      (0,0), (0,-1), PRIMARY_L),
-        ("BACKGROUND",      (2,0), (2,-1), PRIMARY_L),
-        ("ROWBACKGROUNDS",  (0,0), (-1,-1), [WHITE, GRAY_L]),
-        ("VALIGN",          (0,0), (-1,-1), "MIDDLE"),
-        ("TOPPADDING",      (0,0), (-1,-1), 4),
-        ("BOTTOMPADDING",   (0,0), (-1,-1), 4),
-        ("LEFTPADDING",     (0,0), (-1,-1), 5),
-    ]))
-    story.append(info_tbl)
-
-    if oc["obs"]:
-        story.append(Spacer(1, 2*mm))
-        obs_tbl = Table([[
-            P("Observaciones:", size=8, bold=True, color=MUTED),
-            P(oc["obs"], size=8, color=MUTED),
-        ]], colWidths=[32*mm, CW-32*mm])
-        obs_tbl.setStyle(TableStyle([
-            ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#FFFDE7")),
-            ("GRID", (0,0), (-1,-1), 0.3, GRAY_D),
-            ("VALIGN", (0,0), (-1,-1), "TOP"),
-            ("TOPPADDING", (0,0), (-1,-1), 4),
-            ("BOTTOMPADDING", (0,0), (-1,-1), 4),
-            ("LEFTPADDING", (0,0), (-1,-1), 5),
-        ]))
-        story.append(obs_tbl)
-
+    ])
+    pdf.observaciones(oc["obs"])
     story.append(Spacer(1, 6*mm))
 
     # ── 3. Ítems ──────────────────────────────────────────────────────────────
-    story.append(KeepTogether([
-        Table([[P("ÍTEMS SOLICITADOS", size=10, bold=True, color=WHITE)]],
-              colWidths=[CW],
-              style=TableStyle([
-                  ("BACKGROUND", (0,0), (-1,-1), PRIMARY),
-                  ("TOPPADDING", (0,0), (-1,-1), 5),
-                  ("BOTTOMPADDING", (0,0), (-1,-1), 5),
-                  ("LEFTPADDING", (0,0), (-1,-1), 6),
-              ])),
-    ]))
+    story.append(KeepTogether([pdf.barra("ÍTEMS SOLICITADOS")]))
 
     if items:
         it_head = [
@@ -13502,107 +13294,26 @@ def _build_oc_pdf(ocid):
                 Paragraph(desc, sty(size=8)),
                 P(f'{i["cantidad"]} {i["unidad"] or ""}', size=8, align=TA_CENTER),
                 P(entrega, size=8, align=TA_CENTER),
-                P(fmt_money(i["precio_unit"]), size=8, align=TA_RIGHT),
-                Paragraph(f'<b>{fmt_money(total_item)}</b>', sty(size=8, align=TA_RIGHT)),
+                P(_pdf_dinero(i["precio_unit"]), size=8, align=TA_RIGHT),
+                Paragraph(f'<b>{_pdf_dinero(total_item)}</b>', sty(size=8, align=TA_RIGHT)),
             ])
 
-        it_tbl = Table(it_rows,
-            colWidths=[18*mm, 62*mm, 24*mm, 20*mm, 24*mm, 24*mm])
-        it_tbl.setStyle(TableStyle([
-            ("BACKGROUND",     (0,0), (-1,0), PRIMARY),
-            ("ROWBACKGROUNDS", (0,1), (-1,-1), [WHITE, PRIMARY_L]),
-            ("GRID",           (0,0), (-1,-1), 0.4, GRAY_D),
-            ("VALIGN",         (0,0), (-1,-1), "MIDDLE"),
-            ("TOPPADDING",     (0,0), (-1,-1), 4),
-            ("BOTTOMPADDING",  (0,0), (-1,-1), 4),
-            ("LEFTPADDING",    (0,0), (-1,-1), 4),
-        ]))
-        story.append(it_tbl)
+        story.append(pdf.tabla(it_rows, [18*mm, 62*mm, 24*mm, 20*mm, 24*mm, 24*mm]))
 
         condiciones = sorted(set(i["cot_condicion_pago"] for i in items if i["cot_condicion_pago"]))
         if condiciones:
             story.append(Spacer(1, 2*mm))
             story.append(P(f'Condición de pago: {", ".join(condiciones)}', size=8, color=MUTED))
     else:
-        story.append(Table([[P("Sin ítems registrados.", size=8, color=MUTED)]],
-            colWidths=[CW], style=TableStyle([
-                ("BACKGROUND", (0,0), (-1,-1), GRAY_L),
-                ("TOPPADDING", (0,0), (-1,-1), 6),
-                ("BOTTOMPADDING", (0,0), (-1,-1), 6),
-                ("LEFTPADDING", (0,0), (-1,-1), 6),
-            ])))
+        story.append(pdf.vacio("Sin ítems registrados."))
 
     story.append(Spacer(1, 6*mm))
     story.append(P("Entregar certificado de material. Por favor indicar N° de OC en factura y/o remito.",
                     size=8, color=MUTED))
 
-    # ── 4. Firmas + nota + datos de emisión (pie fijo de cada página) ─────────
-    firma_head = [
-        P(f"Emitido por: {emisor_nombre}" + (f" ({emisor_rol_label})" if emisor_rol_label else ""),
-          size=7, color=MUTED, align=TA_CENTER),
-        P("Autorizado por", size=7, color=MUTED, align=TA_CENTER),
-        P("Recepción / Proveedor", size=7, color=MUTED, align=TA_CENTER),
-    ]
-    firma_sign = [
-        P("Generado automáticamente por el sistema", size=6.5, color=GRAY_D, align=TA_CENTER),
-        P("", size=7), P("", size=7),
-    ]
-    firma_label = [
-        P("Usuario y rol", size=6, color=GRAY_D, align=TA_CENTER),
-        P("Firma y aclaración", size=6, color=GRAY_D, align=TA_CENTER),
-        P("Firma y aclaración", size=6, color=GRAY_D, align=TA_CENTER),
-    ]
-    fw = CW / 3
-    firma_tbl = Table(
-        [firma_head, firma_sign, firma_label],
-        colWidths=[fw, fw, fw],
-        rowHeights=[8*mm, 18*mm, 6*mm],
-    )
-    firma_tbl.setStyle(TableStyle([
-        ("BOX",        (0,0), (-1,-1), 0.5, GRAY_D),
-        ("INNERGRID",  (0,0), (-1,-1), 0.4, GRAY_D),
-        ("BACKGROUND", (0,0), (-1,0),  PRIMARY_L),
-        ("BACKGROUND", (0,2), (-1,2),  GRAY_L),
-        ("LINEBELOW",  (0,1), (-1,1),  0.8, BLACK),
-        ("VALIGN",     (0,0), (-1,-1), "BOTTOM"),
-        ("ALIGN",      (0,0), (-1,-1), "CENTER"),
-        ("TOPPADDING", (0,0), (-1,-1), 3),
-        ("BOTTOMPADDING",(0,0),(-1,-1),3),
-    ]))
-
-    ahora = datetime.now().strftime("%d/%m/%Y %H:%M")
-
-    def _draw_footer(canvas, doc_):
-        canvas.saveState()
-        y = M + FOOTER_H
-        fw_, fh_ = firma_tbl.wrap(CW, FOOTER_H)
-        firma_tbl.drawOn(canvas, M, y - fh_)
-        y -= fh_ + 2*mm
-        if nota_pie:
-            canvas.setStrokeColor(GRAY_D)
-            canvas.setLineWidth(0.5)
-            canvas.line(M, y, W - M, y)
-            y -= 3*mm
-            nota_p = Paragraph(nota_pie, sty(size=7.5, color=MUTED, space_after=0))
-            nw_, nh_ = nota_p.wrap(CW, 12*mm)
-            nota_p.drawOn(canvas, M, y - nh_)
-            y -= nh_ + 2*mm
-        canvas.setStrokeColor(GRAY_D)
-        canvas.setLineWidth(0.5)
-        canvas.line(M, y, W - M, y)
-        canvas.setFont("Helvetica", 7)
-        canvas.setFillColor(GRAY_D)
-        canvas.drawCentredString(
-            W/2, y - 9,
-            f'MetalERP v3 · {oc["numero"]} · Generado el {ahora} · Página {doc_.page}')
-        canvas.restoreState()
-
-    # ── Build ─────────────────────────────────────────────────────────────────
-    doc.build(story, onFirstPage=_draw_footer, onLaterPages=_draw_footer)
-    buf.seek(0)
-    return send_file(buf, mimetype="application/pdf",
-                     as_attachment=False,
-                     download_name=f'{oc["numero"]}.pdf')
+    # ── 4. Pie ────────────────────────────────────────────────────────────────
+    pdf.firmas("Autorizado por", "Recepción / Proveedor")
+    return pdf.enviar(f'{oc["numero"]}.pdf')
 
 
 # ── Gestión de archivos de producto ──────────────────────────────────────────
@@ -13636,7 +13347,6 @@ def _prod_dir(pid):
 @app.route("/api/productos/<int:pid>/versiones", methods=["GET"])
 @login_required()
 def list_versiones(pid):
-    import json
     rows = query(
         """SELECT id,version_num,motivo,creado_por,creado
            FROM producto_versiones WHERE producto_id=?
@@ -13935,192 +13645,6 @@ def bulk_import():
     return jsonify({"ok": True, "inserted": inserted,
                     "errors": errors, "total": len(rows)})
 
-# ── Debug / diagnóstico ───────────────────────────────────────────────────────
-@app.route("/api/debug/pt_materiales")
-@login_required(roles=["admin"])
-def debug_pt_materiales():
-    """Diagnóstico: muestra estado de materiales PT y ejecuta migración si faltan."""
-    db = get_db()
-    prods = query("SELECT id,codigo,nombre,unidad FROM productos WHERE tipo_articulo='Producto terminado'")
-    result = []
-    for p in prods:
-        existia = query("SELECT id FROM materiales WHERE producto_id=?", (p["id"],), one=True)
-        mat = get_or_create_pt_material(p)
-        result.append({"producto": p["codigo"], "accion": "ok" if existia else "creado",
-                        "mat_id": mat["id"], "stock": mat.get("stock", 0)})
-    return jsonify({"ok": True, "productos": result})
-
-
-@app.route("/diagnostico")
-@login_required(roles=["admin"])
-def diagnostico_page():
-    """Diagnóstico completo server-side — corre el test y devuelve HTML con resultados."""
-    lines = []
-
-    def ok(msg):  lines.append(f'<div class="ok">✓ {msg}</div>')
-    def err(msg): lines.append(f'<div class="err">✗ {msg}</div>')
-    def info(msg):lines.append(f'<div class="info">→ {msg}</div>')
-    def sep(msg): lines.append(f'<div class="sep">{msg}</div>')
-
-    sep("1. Productos y sus materiales PT")
-    prods = query("SELECT id,codigo,nombre,unidad FROM productos WHERE tipo_articulo='Producto terminado'")
-    for p in prods:
-        existia = query("SELECT id FROM materiales WHERE producto_id=?", (p["id"],), one=True)
-        mat = get_or_create_pt_material(p)
-        if existia:
-            ok(f"Producto {p['codigo']} — mat_id={mat['id']} stock={mat.get('stock',0)}")
-        else:
-            ok(f"Producto {p['codigo']} — material PT creado ahora, mat_id={mat['id']}")
-
-    sep("2. OTs activas y sus operaciones")
-    ots = query("SELECT o.*,p.nombre prod_nombre,p.codigo prod_codigo FROM ordenes o LEFT JOIN productos p ON p.id=o.producto_id WHERE o.estado IN ('Pendiente','En proceso') ORDER BY o.id DESC")
-    for ot in ots:
-        ops = query("SELECT * FROM orden_operaciones WHERE orden_id=? ORDER BY CAST(orden AS INTEGER), orden", (ot["id"],))
-        proc_ops = query("SELECT * FROM proceso_operaciones WHERE producto_id=? ORDER BY CAST(orden AS INTEGER), orden", (ot["producto_id"],)) if ot["producto_id"] else []
-        info(f"OT {ot['numero']} (id={ot['id']}) — producto: {ot['prod_nombre'] or 'SIN PRODUCTO'} — ops OT: {len(ops)} — ops proceso: {len(proc_ops)}")
-        if not ot["producto_id"]:
-            err(f"  OT {ot['numero']} no tiene producto asignado — no puede generar PT")
-        elif len(proc_ops) == 0:
-            err(f"  Producto {ot['prod_codigo']} no tiene operaciones en el proceso — definir en Procesos/Productos")
-        elif len(ops) == 0:
-            info(f"  OT {ot['numero']} no tiene ops cargadas — se pueden poblar desde el proceso")
-        else:
-            max_ord = max(op["orden"] for op in ops)
-            ok(f"  {len(ops)} operaciones cargadas. Última: orden={max_ord}")
-            for op in ops:
-                info(f"    op id={op['id']} orden={op['orden']} nombre={op['nombre']} qty_req={op['qty_requerida']} qty_prod={op['qty_producida']}")
-
-    test_ot_id = int(request.args.get('ot', 1))
-    sep(f"3. Test directo en OT id={test_ot_id} (cambiá ?ot=N en la URL para otra OT)")
-    ot6 = query("SELECT o.*,p.codigo prod_codigo FROM ordenes o LEFT JOIN productos p ON p.id=o.producto_id WHERE o.id=?", (test_ot_id,), one=True)
-    if not ot6:
-        err(f"OT id={test_ot_id} no encontrada en esta base de datos")
-    elif not ot6["producto_id"]:
-        err(f"OT-{test_ot_id} no tiene producto asignado")
-    else:
-        info(f"OT-6: producto_id={ot6['producto_id']} codigo={ot6['prod_codigo']} cantidad={ot6['cantidad']}")
-        proc_ops = query("SELECT * FROM proceso_operaciones WHERE producto_id=? ORDER BY CAST(orden AS INTEGER), orden", (ot6["producto_id"],))
-        info(f"Operaciones en proceso del producto: {len(proc_ops)}")
-        for op in proc_ops:
-            info(f"  op id={op['id']} orden={op['orden']} nombre={op['nombre']}")
-
-        execute("DELETE FROM orden_operaciones WHERE orden_id=?", (test_ot_id,))
-        for op in proc_ops:
-            execute("""INSERT INTO orden_operaciones
-                (orden_id,proceso_op_id,orden,nombre,categoria_maquina_id,maquina_id,
-                 tiempo_setup_min,tiempo_ciclo_seg,estado,qty_requerida)
-                VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                (test_ot_id, op["id"], op["orden"], op["nombre"], op["categoria_maquina_id"],
-                 op["maquina_id"], op["tiempo_setup_min"], op["tiempo_ciclo_seg"],
-                 "Pendiente", ot6["cantidad"]))
-        ok(f"Pobladas {len(proc_ops)} operaciones en OT-6")
-
-        ops6 = query("SELECT * FROM orden_operaciones WHERE orden_id=? ORDER BY CAST(orden AS INTEGER), orden", (test_ot_id,))
-        if ops6:
-            last = max(ops6, key=lambda o: o["orden"])
-            info(f"Última operación: id={last['id']} orden={last['orden']} nombre={last['nombre']} qty_req={last['qty_requerida']}")
-
-            # Simulate declaring novedad on last op
-            sep("4. Simulando novedad en última operación de OT-6")
-            qty = float(last["qty_requerida"] or 1)
-            std = float(last["tiempo_ciclo_seg"] or 60) / 60.0   # seg -> min
-            rendimiento = round((qty / qty) * 100, 1)
-
-            last_n = query("SELECT numero FROM novedades_produccion ORDER BY id DESC LIMIT 1", one=True)
-            try: n = int(last_n["numero"].split("-")[1])+1 if last_n else 1
-            except: n = 1
-            numero = f"NOV-TEST-{n:05d}"
-
-            nov_id = execute("""INSERT INTO novedades_produccion
-                (numero,orden_id,orden_operacion_id,cantidad_producida,tiempo_real_min,
-                 rendimiento_pct,desvio,creado_por)
-                VALUES (?,?,?,?,?,?,?,?)""",
-                (numero, test_ot_id, last["id"], qty, qty*std, rendimiento, 0, 1))
-            execute("UPDATE orden_operaciones SET qty_producida=qty_producida+? WHERE id=?", (qty, last["id"]))
-            ok(f"Novedad {numero} insertada (id={nov_id}) qty={qty}")
-
-            # Check PT generation
-            max_orden = query("SELECT MAX(CAST(orden AS INTEGER)) mo FROM orden_operaciones WHERE orden_id=?", (test_ot_id,), one=True)["mo"]
-            es_ultima = (last["orden"] == max_orden)
-            info(f"Es última operación: {es_ultima} (orden={last['orden']} max={max_orden})")
-
-            op_actual = query("SELECT qty_requerida,qty_producida FROM orden_operaciones WHERE id=?", (last["id"],), one=True)
-            qty_req = float(op_actual["qty_requerida"] or 0)
-            qty_prod = float(op_actual["qty_producida"] or 0)
-            info(f"qty_req={qty_req} qty_prod={qty_prod} genera_PT={es_ultima and qty_prod>=qty_req and qty_req>0}")
-
-            if es_ultima and qty_prod >= qty_req and qty_req > 0:
-                prod = query("SELECT * FROM productos WHERE id=?", (ot6["producto_id"],), one=True)
-                existia_mat = query("SELECT id FROM materiales WHERE id=?", (prod["id"],), one=True)
-                mat_pt = get_or_create_pt_material(prod)
-                if not existia_mat:
-                    info(f"Material PT creado on-the-fly id={mat_pt['id']}")
-                stock_antes = mat_pt.get("stock", 0)
-                execute(
-                    "UPDATE materiales SET stock=stock+?,actualizado=datetime('now','localtime') WHERE id=?",
-                    (qty, mat_pt["id"]))
-                # Create/update PT lote with OT number
-                lotes_ot = query("""SELECT l.numero FROM orden_lotes ol
-                    JOIN lotes l ON l.id=ol.lote_id
-                    WHERE ol.orden_id=?""", (d["orden_id"],))
-                lotes_ref = ", ".join(l["numero"] for l in lotes_ot) if lotes_ot else "—"
-                ot_row = query("SELECT numero FROM ordenes WHERE id=?", (d["orden_id"],), one=True)
-                ot_lote_num = ot_row["numero"] if ot_row else numero
-                lote_pt_row = query("SELECT id FROM lotes WHERE numero=? AND material_id=?",
-                    (ot_lote_num, mat_pt["id"]), one=True)
-                if lote_pt_row:
-                    execute("""UPDATE lotes SET
-                        cantidad_disponible=cantidad_disponible+?,
-                        cantidad_activa=cantidad_activa+?,
-                        cantidad_original=cantidad_original+?,
-                        estado='Aprobado'
-                        WHERE id=?""",
-                        (qty, qty, qty, lote_pt_row["id"]))
-                    lote_pt_id = lote_pt_row["id"]
-                else:
-                    lote_pt_id = execute("""INSERT INTO lotes
-                        (numero,material_id,cantidad_original,cantidad_disponible,
-                         cantidad_activa,referencia_proveedor,estado,obs,creado_por)
-                        VALUES (?,?,?,?,?,?,?,?,?)""",
-                        (ot_lote_num, mat_pt["id"], qty, qty, qty,
-                         f"Generado desde OT {ot_lote_num}",
-                         "Aprobado", f"Lotes MP usados: {lotes_ref}", session["user_id"]))
-                execute(
-                    "INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id) VALUES (?,?,?,?,?,?)",
-                    (mat_pt["id"], lote_pt_id, "entrada", qty,
-                     f"Prod. terminada {numero} | Lotes MP: {lotes_ref}",
-                     session["user_id"]))
-                stock_despues = query("SELECT stock FROM materiales WHERE id=?", (mat_pt["id"],), one=True)["stock"]
-                ok(f"Stock PT actualizado: {stock_antes} → {stock_despues} (material id={mat_pt['id']})")
-            else:
-                err(f"Condición no cumplida para generar PT")
-
-    sep(f"5. Novedades registradas para OT-{test_ot_id}")
-    novs = query("""SELECT n.*,oo.nombre op_nombre,oo.orden op_orden
-        FROM novedades_produccion n
-        JOIN orden_operaciones oo ON oo.id=n.orden_operacion_id
-        WHERE n.orden_id=? ORDER BY n.id DESC LIMIT 10""", (test_ot_id,))
-    if novs:
-        for n in novs:
-            info(f"  {n['numero']} op={n['op_nombre']}(ord={n['op_orden']}) qty={n['cantidad_producida']} rend={n['rendimiento_pct']}%")
-    else:
-        info(f"Sin novedades para OT-{test_ot_id}")
-
-    html_body = "\n".join(lines)
-    return f"""<!DOCTYPE html><html><head><title>Diagnóstico MetalERP</title>
-<style>
-body{{font-family:monospace;padding:24px;background:#111;color:#ccc;line-height:1.6}}
-.ok{{color:#86efac}}.err{{color:#fca5a5;font-weight:bold}}.info{{color:#93c5fd}}
-.sep{{color:#fde68a;font-weight:bold;margin-top:14px;border-bottom:1px solid #333;padding-bottom:4px}}
-</style></head><body>
-<h2 style="color:#7dd3fc">Diagnóstico MetalERP — {request.args.get('run','')}</h2>
-<a href="/diagnostico?run=1" style="background:#3b82f6;color:#fff;padding:8px 16px;border-radius:5px;text-decoration:none;font-size:13px">▶ Ejecutar diagnóstico</a>
-&nbsp;
-<a href="/" style="background:#555;color:#fff;padding:8px 16px;border-radius:5px;text-decoration:none;font-size:13px">← Volver al sistema</a>
-<hr style="border-color:#333;margin:16px 0">
-{html_body if request.args.get('run') else '<div class="info">Presioná "Ejecutar diagnóstico" para correr el test.</div>'}
-</body></html>"""
-
 # ── Boot ──────────────────────────────────────────────────────────────────────
 def get_local_ip():
     try:
@@ -14128,24 +13652,6 @@ def get_local_ip():
         s.connect(("8.8.8.8", 80)); ip = s.getsockname()[0]; s.close(); return ip
     except: return "127.0.0.1"
 
-
-@app.route("/api/rendimiento_operarios", methods=["GET"])
-@login_required()
-def rendimiento_operarios():
-    rows = query("""
-        SELECT e.id empleado_id, (e.nombre || ' ' || COALESCE(e.apellido,'')) empleado_nombre,
-               e.tipo,
-               COUNT(n.id) total_novedades,
-               COALESCE(ROUND(AVG(n.rendimiento_pct),1),0) avg_rend,
-               COALESCE(SUM(n.cantidad_producida),0) total_producido,
-               COALESCE(ROUND(SUM(n.tiempo_real_min)/60.0,1),0) total_horas
-        FROM empleados e
-        LEFT JOIN novedades_produccion n ON n.empleado_id=e.id AND n.cantidad_producida>0 AND n.tiempo_real_min>0
-        WHERE e.activo=1
-        GROUP BY e.id
-        HAVING total_novedades > 0
-        ORDER BY avg_rend DESC""")
-    return jsonify([dict(r) for r in rows])
 
 def _backfill_requerimientos_desde_ott():
     """Corre en cada arranque: sincroniza cualquier OTT que todavía no tenga
