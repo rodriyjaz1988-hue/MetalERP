@@ -4797,12 +4797,22 @@ const MODULOS_SISTEMA = [
   {k:'oc_clientes',       l:'Pedidos de clientes'},
   {k:'pronostico_ventas', l:'Pronóstico de ventas'},
   {k:'solicitudes',       l:'Compras'},
+  {k:'indicadores_compras', l:'Indicadores de compras'},
   {k:'recepciones',       l:'Recepción de material/insumo'},
   {k:'proveedores',       l:'Proveedores'},
   {k:'ott',               l:'OTT — Terceros'},
   {k:'configuracion',     l:'Configuración'},
   {k:'carga_masiva',      l:'Carga masiva'},
 ];
+// Valor del permiso de un módulo. "Indicadores de compras" no tuvo casilla
+// propia hasta 2026-10: los usuarios y roles guardados antes no traen la
+// clave, y heredan lo que tengan en Compras (mismo criterio que el servidor,
+// ver _permisos_sesion en server.py).
+function _permMod(perms,k){
+  const v=perms['mod_'+k];
+  if(v===undefined && k==='indicadores_compras') return perms['mod_solicitudes'];
+  return v;
+}
 
 async function openPermisos(uid, username){
   document.getElementById('perm-uid').value = uid;
@@ -4812,7 +4822,7 @@ async function openPermisos(uid, username){
   const perms = await api('/api/usuarios/'+uid+'/permisos');
   let h = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">';
   MODULOS_SISTEMA.forEach(function(m){
-    const checked = perms['mod_'+m.k] !== '0';
+    const checked = _permMod(perms,m.k) !== '0';
     h += '<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;padding:3px 0">'
       + '<input type="checkbox" data-perm="mod_'+m.k+'" '+(checked?'checked':'')+'>'
       + m.l + '</label>';
@@ -7698,7 +7708,7 @@ async function loadRoles(){
   _roles=rs;
   let h='<table><tr><th>Rol</th><th>Rol base</th><th>Descripción</th><th>Usuarios</th><th>Módulos ocultos</th><th>Valores monetarios</th><th></th></tr>';
   rs.forEach(function(r){
-    const ocultos=MODULOS_SISTEMA.filter(function(m){return (r.permisos||{})['mod_'+m.k]==='0';}).length;
+    const ocultos=MODULOS_SISTEMA.filter(function(m){return _permMod(r.permisos||{},m.k)==='0';}).length;
     const mon=(r.permisos||{})['ver_monetario']==='0'?'<span class="b br">No</span>':'<span class="b bg">Sí</span>';
     h+='<tr><td><b>'+r.nombre+'</b>'+(r.es_sistema?' <span class="b bk" style="font-size:10px">sistema</span>':'')+'</td>'
       +'<td>'+r.base_rol+'</td><td style="font-size:12px">'+(r.descripcion||'—')+'</td><td>'+r.usuarios+'</td><td>'+ocultos+'</td><td>'+mon+'</td>'
@@ -7720,7 +7730,7 @@ function openRol(id){
   const perms=r?(r.permisos||{}):{};
   let h='<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">';
   MODULOS_SISTEMA.forEach(function(m){
-    const checked=perms['mod_'+m.k]!=='0';
+    const checked=_permMod(perms,m.k)!=='0';
     h+='<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;padding:3px 0"><input type="checkbox" data-rperm="mod_'+m.k+'" '+(checked?'checked':'')+'>'+m.l+'</label>';
   });
   $('rol-modulos').innerHTML=h+'</div>';

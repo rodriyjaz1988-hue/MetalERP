@@ -1239,6 +1239,38 @@ def _permisos_rol(nombre):
             pass
     return dict(DEFAULT_PERMISIONES.get(_rol_base(nombre), {}))
 
+def _permisos_sesion():
+    """Permisos efectivos del usuario de la sesión: los suyos, o si no tiene
+    ninguno (y no es admin) los predeterminados de su rol."""
+    perms = {r["clave"]: r["valor"] for r in
+             query("SELECT clave, valor FROM usuario_permisos WHERE usuario_id=?", (session["user_id"],))}
+    if not perms and session.get("rol") != "admin":
+        perms = _permisos_rol(session.get("rol_nombre") or session.get("rol", "operario"))
+    # "Indicadores de compras" no tuvo casilla propia hasta 2026-10, así que
+    # quien tenía Compras desactivado igual lo veía. Lo guardado antes de eso
+    # hereda lo de Compras (ídem _permMod en app.html).
+    if "mod_indicadores_compras" not in perms and "mod_solicitudes" in perms:
+        perms["mod_indicadores_compras"] = perms["mod_solicitudes"]
+    return perms
+
+
+def modulo_requerido(mod):
+    """Bloquea el endpoint si el módulo está oculto para el usuario, con el
+    mismo criterio que el menú (setupRoles en app.html): admin ve todo,
+    logística solo lo habilitado con '1', el resto todo salvo lo puesto en '0'."""
+    def decorator(f):
+        @wraps(f)
+        def wrapped(*a, **kw):
+            rol = session.get("rol")
+            if rol != "admin":
+                v = _permisos_sesion().get("mod_" + mod)
+                if (v != "1") if rol == "logistica" else (v == "0"):
+                    return jsonify({"error": "Sin permiso"}), 403
+            return f(*a, **kw)
+        return wrapped
+    return decorator
+
+
 def login_required(roles=None):
     def decorator(f):
         @wraps(f)
@@ -2788,14 +2820,7 @@ def logout(): session.clear(); return redirect("/login")
 @app.route("/")
 @login_required()
 def index():
-    uid = session["user_id"]
-    perm_rows = query("SELECT clave, valor FROM usuario_permisos WHERE usuario_id=?", (uid,))
-    perms = {r["clave"]: r["valor"] for r in perm_rows}
-    
-    # Si no hay permisos explícitos y no es admin, usar permisos predeterminados del rol
-    if not perms and session.get("rol") != "admin":
-        perms = _permisos_rol(session.get("rol_nombre") or session.get("rol", "operario"))
-    
+    perms = _permisos_sesion()
     ver_mon = puede_ver_monetario()
     # La plantilla recibe el permiso ya resuelto por el servidor; sacarlo de
     # perms evita que quede una segunda fuente de verdad en el navegador.
@@ -3256,6 +3281,7 @@ def dashboard_requerimientos():
 # cuando esos campos manuales están en 0, que es el caso normal.
 @app.route("/api/dashboard/indicadores_compras")
 @login_required()
+@modulo_requerido("indicadores_compras")
 def dashboard_indicadores_compras():
     anio = request.args.get("anio", str(date.today().year))
     rows = query("""SELECT rp.*, p.razon proveedor_nombre, p.categoria_compra
