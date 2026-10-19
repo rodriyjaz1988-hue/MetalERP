@@ -12055,32 +12055,50 @@ async function openCajon(id){
   $('cajon-title').textContent='Cajón '+c.numero;
   const e=function(v){return schEsc(v==null||v===''?'—':v);};
   const tabla=function(cab, filas){
-    if(!filas.length) return '<div class="em">Sin datos.</div>';
+    if(!filas.length) return '<div class="em" style="padding:8px 0">Sin datos.</div>';
     return '<table><tr>'+cab.map(function(x){return '<th>'+x+'</th>';}).join('')+'</tr>'
       +filas.map(function(f){return '<tr>'+f.map(function(x){return '<td>'+x+'</td>';}).join('')+'</tr>';}).join('')+'</table>';
   };
-  const sec=function(t){return '<div style="font-size:12px;font-weight:600;margin:14px 0 6px">'+t+'</div>';};
-  let h='<div style="background:var(--color-background-secondary);border-radius:8px;padding:10px 14px;font-size:12px;line-height:1.7">'
-    +'<b>'+e(c.numero)+'</b> '+cajBadge(c.estado)
-    +' | OT: <b>'+e(c.ot_numero)+'</b>'+(c.ot_origen_numero&&c.ot_origen_numero!==c.ot_numero?' (empezó en '+e(c.ot_origen_numero)+')':'')
-    +' | Lote: <b>'+e(c.lote_numero)+'</b>'
-    +' | Producto: '+e(c.producto_codigo)+' — '+e(c.producto_nombre)
-    +'<br>Piezas: <b>'+c.cantidad+'</b> de '+c.capacidad+' | Terminadas: <b>'+(c.terminadas||0)+'</b>'
-    +' | Liberadas: <b style="color:#2e7d32">'+(c.cantidad_liberada||0)+'</b> | Rechazadas: <b style="color:#c62828">'+(c.cantidad_rechazada||0)+'</b>'
-    +' | Remitidas: <b>'+(c.cantidad_remitida||0)+'</b></div>';
-  h+=sec('Piezas por paso')+tabla(['Paso','Piezas'], Object.keys(c.por_paso||{}).map(function(k){return [e(k), c.por_paso[k]];}));
-  h+=sec('Novedades')+tabla(['Novedad','Fecha','OT','Operación','Operario','Máquina','Piezas en este cajón'],
-    c.novedades.map(function(n){return [e(n.numero), fmtD(n.fecha), e(n.ot_numero), e(n.paso)+'. '+e(n.operacion), e(n.empleado_nombre), e(n.maquina_nombre), n.cantidad];}));
-  if(c.tercerizadas.length) h+=sec('Operaciones tercerizadas')+tabla(['OT','Operación','OTT','Piezas'],
-    c.tercerizadas.map(function(t){return [e(t.ot_numero), e(t.paso)+'. '+e(t.operacion), e(t.ott_numero), t.cantidad];}));
-  h+=sec('Lotes de material consumidos')+tabla(['Novedad','Lote','Material','Cantidad'],
-    c.materiales.map(function(m){return [e(m.novedad_numero), e(m.lote_numero), e(m.material_codigo)+' — '+e(m.material), m.cantidad];}));
-  h+=sec('Calidad')+(c.calidad_fecha
-    ? '<div style="font-size:12px">'+e(c.calidad_por_nombre)+' — '+fmtD(c.calidad_fecha)+(c.calidad_obs?' — '+e(c.calidad_obs):'')+'</div>'
-    : '<div class="em">Todavía sin decisión de Calidad.</div>');
-  h+=sec('Remitos')+tabla(['Remito','Fecha','Cliente','Estado','Piezas'],
-    c.remitos.map(function(r){return [e(r.numero), fmtD(r.fecha), e(r.cliente_nombre), e(r.estado), r.cantidad];}));
-  if(c.obs) h+=sec('Historial')+'<div style="font-size:12px;white-space:pre-line">'+e(c.obs)+'</div>';
+  // Cada bloque va en su propia tarjeta con título y borde, para separar la información
+  const sec=function(t, cuerpo){
+    return '<div style="border:1px solid var(--color-border-tertiary);border-radius:8px;margin-top:12px;overflow:hidden">'
+      +'<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--color-text-secondary);background:var(--color-background-secondary);padding:7px 12px;border-bottom:1px solid var(--color-border-tertiary)">'+t+'</div>'
+      +'<div style="padding:6px 12px 8px">'+cuerpo+'</div></div>';
+  };
+  const dato=function(lbl, val, color){
+    return '<div style="padding:8px 12px;border-right:1px solid var(--color-border-tertiary);border-bottom:1px solid var(--color-border-tertiary)">'
+      +'<div style="font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--color-text-secondary)">'+lbl+'</div>'
+      +'<div style="font-size:13px;font-weight:600;margin-top:2px'+(color?';color:'+color:'')+'">'+val+'</div></div>';
+  };
+  const grilla=function(items){
+    return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));border-top:1px solid var(--color-border-tertiary);border-left:1px solid var(--color-border-tertiary);border-radius:6px;overflow:hidden;margin:4px 0">'+items.join('')+'</div>';
+  };
+  let h='<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px"><b style="font-size:15px">'+e(c.numero)+'</b> '+cajBadge(c.estado)+'</div>';
+  h+=sec('Datos del cajón', grilla([
+    dato('OT', e(c.ot_numero)+(c.ot_origen_numero&&c.ot_origen_numero!==c.ot_numero?' <span style="font-weight:400;font-size:11px">(empezó en '+e(c.ot_origen_numero)+')</span>':'')),
+    dato('Lote', e(c.lote_numero)),
+    dato('Producto', e(c.producto_codigo)+' — '+e(c.producto_nombre))
+  ]));
+  h+=sec('Piezas', grilla([
+    dato('En el cajón', c.cantidad+' <span style="font-weight:400;font-size:11px">de '+c.capacidad+'</span>'),
+    dato('Terminadas', c.terminadas||0),
+    dato('Liberadas', c.cantidad_liberada||0, '#2e7d32'),
+    dato('Rechazadas', c.cantidad_rechazada||0, '#c62828'),
+    dato('Remitidas', c.cantidad_remitida||0)
+  ]));
+  h+=sec('Piezas por paso', tabla(['Paso','Piezas'], Object.keys(c.por_paso||{}).map(function(k){return [e(k), c.por_paso[k]];})));
+  h+=sec('Novedades', tabla(['Novedad','Fecha','OT','Operación','Operario','Máquina','Piezas en este cajón'],
+    c.novedades.map(function(n){return [e(n.numero), fmtD(n.fecha), e(n.ot_numero), e(n.paso)+'. '+e(n.operacion), e(n.empleado_nombre), e(n.maquina_nombre), n.cantidad];})));
+  if(c.tercerizadas.length) h+=sec('Operaciones tercerizadas', tabla(['OT','Operación','OTT','Piezas'],
+    c.tercerizadas.map(function(t){return [e(t.ot_numero), e(t.paso)+'. '+e(t.operacion), e(t.ott_numero), t.cantidad];})));
+  h+=sec('Lotes de material consumidos', tabla(['Novedad','Lote','Material','Cantidad'],
+    c.materiales.map(function(m){return [e(m.novedad_numero), e(m.lote_numero), e(m.material_codigo)+' — '+e(m.material), m.cantidad];})));
+  h+=sec('Calidad', c.calidad_fecha
+    ? '<div style="font-size:12px;padding:4px 0">'+e(c.calidad_por_nombre)+' — '+fmtD(c.calidad_fecha)+(c.calidad_obs?' — '+e(c.calidad_obs):'')+'</div>'
+    : '<div class="em" style="padding:8px 0">Todavía sin decisión de Calidad.</div>');
+  h+=sec('Remitos', tabla(['Remito','Fecha','Cliente','Estado','Piezas'],
+    c.remitos.map(function(r){return [e(r.numero), fmtD(r.fecha), e(r.cliente_nombre), e(r.estado), r.cantidad];})));
+  if(c.obs) h+=sec('Historial', '<div style="font-size:12px;white-space:pre-line;padding:4px 0">'+e(c.obs)+'</div>');
   $('cajon-body').innerHTML=h;
 }
 function openCajCal(c){
