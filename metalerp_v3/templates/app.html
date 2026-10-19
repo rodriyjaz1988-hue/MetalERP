@@ -4412,24 +4412,33 @@ async function openHerramientas(opId, opNombre){
 
 async function loadHerramientas(){
   const canEdit = ['admin','operario'].includes(ROL);
-  // Cargar herramientas asignadas a la operación y herramientas del inventario en paralelo
-  const [asignadas, inventario] = await Promise.all([
+  // Herramientas del inventario de la operación (con piezas por herramienta),
+  // las de texto libre cargadas antes y el inventario, en paralelo
+  const [asignadas, previas, inventario] = await Promise.all([
+    api('/api/operaciones/'+_herrOpId+'/herramientas_inv'),
     api('/api/operaciones/'+_herrOpId+'/herramientas'),
     api('/api/materiales?categoria=Herramienta')
   ]);
 
-  // Lista de herramientas asignadas
   let hList = '';
-  if(!asignadas.length){
+  if(!asignadas.length && !previas.length){
     hList = '<div class="em">Sin herramientas asignadas.</div>';
   } else {
-    hList = '<table><tr><th>Herramienta</th><th>Descripción</th><th>Cant.</th><th>Unidad</th>'+(canEdit?'<th></th>':'')+'</tr>';
+    hList = '<table><tr><th>Herramienta</th><th title="Cuántas piezas hace una herramienta antes de reemplazarla">Piezas por herramienta</th><th title="Se usa solo si no hay piezas por herramienta">Cant. por pieza</th>'+(canEdit?'<th></th>':'')+'</tr>';
     asignadas.forEach(function(r){
       hList += '<tr>'
-        + '<td><b>'+r.nombre+'</b></td>'
-        + '<td>'+(r.descripcion||'—')+'</td>'
-        + '<td>'+r.cantidad+'</td>'
-        + '<td>'+r.unidad+'</td>'
+        + '<td><b>'+r.codigo+'</b> — '+(r.descripcion||'')+'</td>'
+        + (canEdit
+            ? '<td><input type="number" min="1" step="1" id="herr-vida-'+r.id+'" value="'+(r.vida_util_herramienta||'')+'" placeholder="—" style="width:90px"></td>'
+              + '<td><input type="number" min="0.01" step="0.01" id="herr-cant-'+r.id+'" value="'+r.cantidad+'" style="width:70px"> '+(r.unidad||'')+'</td>'
+              + '<td style="white-space:nowrap"><button class="btn btn-s" onclick="updateHerramientaInv('+r.id+')">Guardar</button> <button class="btn btn-s btn-d" onclick="deleteHerramientaInv('+r.id+')">✕</button></td>'
+            : '<td>'+(r.vida_util_herramienta||'—')+'</td><td>'+r.cantidad+' '+(r.unidad||'')+'</td>')
+        + '</tr>';
+    });
+    previas.forEach(function(r){
+      hList += '<tr>'
+        + '<td><b>'+r.nombre+'</b>'+(r.descripcion?' — '+r.descripcion:'')+'</td>'
+        + '<td>—</td><td>'+r.cantidad+' '+r.unidad+'</td>'
         + (canEdit?'<td><button class="btn btn-s btn-d" onclick="deleteHerramienta('+r.id+')">✕</button></td>':'')
         + '</tr>';
     });
@@ -4442,34 +4451,52 @@ async function loadHerramientas(){
   if(sel && canEdit){
     sel.innerHTML = '<option value="">— Seleccionar herramienta del inventario —</option>'
       + inventario.map(function(m){
-          return '<option value="'+m.id+'" data-nom="'+m.codigo+' — '+m.descripcion+'" data-desc="'+m.descripcion+'" data-uni="'+( m.unidad||'unid')+'">'
-            +m.codigo+' — '+m.descripcion+'</option>';
+          return '<option value="'+m.id+'">'+m.codigo+' — '+m.descripcion+'</option>';
         }).join('');
     document.getElementById('herr-inv-wrap').style.display = canEdit ? 'block' : 'none';
   }
 }
 
+async function _herrRefrescar(msg){
+  await loadHerramientas();
+  if(curProdId) verProc(curProdId, curProdNom);
+  toast(msg);
+}
+
 async function saveHerramienta(){
   const sel = document.getElementById('herr-inv-sel');
-  const opt = sel && sel.selectedOptions[0];
-  if(!opt || !opt.value){ toast('Seleccioná una herramienta del inventario','w'); return; }
-  const cant = parseFloat(document.getElementById('herr-cant').value)||1;
+  if(!sel || !sel.value){ toast('Seleccioná una herramienta del inventario','w'); return; }
   const body = {
-    orden: 1,
-    nombre: opt.getAttribute('data-nom'),
-    descripcion: opt.getAttribute('data-desc'),
-    duracion_min: 0,
-    cantidad: cant,
-    unidad: opt.getAttribute('data-uni')||'unid',
+    material_id: parseInt(sel.value),
+    cantidad: parseFloat(document.getElementById('herr-cant').value)||1,
+    vida_util_herramienta: document.getElementById('herr-vida').value||null,
   };
-  const res = await api('/api/operaciones/'+_herrOpId+'/herramientas',
+  const res = await api('/api/operaciones/'+_herrOpId+'/herramientas_inv',
     {method:'POST', body:JSON.stringify(body)});
   if(res.ok){
     sel.value='';
     document.getElementById('herr-cant').value='1';
-    await loadHerramientas();
-    toast('Herramienta agregada');
+    document.getElementById('herr-vida').value='';
+    await _herrRefrescar('Herramienta agregada');
   } else toast(res.error||'Error','e');
+}
+
+async function updateHerramientaInv(rid){
+  const body = {
+    cantidad: parseFloat(document.getElementById('herr-cant-'+rid).value)||0,
+    vida_util_herramienta: document.getElementById('herr-vida-'+rid).value||null,
+  };
+  const res = await api('/api/operaciones/'+_herrOpId+'/herramientas_inv/'+rid,
+    {method:'PUT', body:JSON.stringify(body)});
+  if(res.ok) await _herrRefrescar('Herramienta guardada');
+  else toast(res.error||'Error','e');
+}
+
+async function deleteHerramientaInv(rid){
+  if(!confirm('¿Quitar herramienta de la operación?')) return;
+  const res = await api('/api/operaciones/'+_herrOpId+'/herramientas_inv/'+rid,{method:'DELETE'});
+  if(res.ok) await _herrRefrescar('Quitada');
+  else toast(res.error||'Error','e');
 }
 
 async function deleteHerramienta(hid){
@@ -13666,7 +13693,7 @@ setupRoles();
 
 
 <!-- HERRAMIENTAS DE OPERACIÓN -->
-<div class="ov" id="mo-herramientas"><div class="mo" style="width:620px">
+<div class="ov" id="mo-herramientas"><div class="mo" style="width:720px">
   <div class="mh">Herramientas — <span id="herr-op-nombre"></span> <span class="mx" onclick="closeMo('mo-herramientas')">×</span></div>
   <div id="herr-list" style="min-height:60px"></div>
   <div id="herr-inv-wrap" style="display:none;margin-top:14px;padding-top:13px;border-top:1px solid #e8e8e3">
@@ -13675,11 +13702,15 @@ setupRoles();
       <div class="fg" style="flex:1"><label>Herramienta</label>
         <select id="herr-inv-sel" style="width:100%"></select>
       </div>
-      <div class="fg" style="width:80px"><label>Cantidad</label>
+      <div class="fg" style="width:120px"><label title="Cuántas piezas hace una herramienta antes de reemplazarla">Piezas por herramienta</label>
+        <input type="number" id="herr-vida" min="1" step="1" placeholder="Ej: 500">
+      </div>
+      <div class="fg" style="width:90px"><label title="Se usa solo si no se carga piezas por herramienta">Cant. por pieza</label>
         <input type="number" id="herr-cant" value="1" min="0.01" step="0.01">
       </div>
       <button class="btn btn-p" onclick="saveHerramienta()" style="white-space:nowrap;margin-bottom:1px">+ Agregar</button>
     </div>
+    <div style="font-size:11px;color:var(--color-text-secondary);margin-top:6px">Con piezas por herramienta se necesita 1 herramienta cada esa cantidad de piezas (redondeando hacia arriba). Si queda vacío se usa la cantidad por pieza.</div>
   </div>
   <div class="ma"><button class="btn" onclick="closeMo('mo-herramientas')">Cerrar</button></div>
 </div></div>

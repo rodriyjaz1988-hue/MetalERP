@@ -8241,6 +8241,86 @@ def delete_herramienta(opid, hid):
     execute("DELETE FROM herramientas_operacion WHERE id=? AND operacion_id=?", (hid, opid))
     return jsonify({"ok": True})
 
+# Herramientas del inventario de una operación: son las filas de
+# operacion_materiales cuyo material es de categoría Herramienta, las mismas
+# que se editan en "Editar" operación, así la vida útil (piezas por
+# herramienta) alimenta requerimientos y consumos.
+def _herr_inv_fila(opid, rid):
+    return query("""SELECT om.id FROM operacion_materiales om
+        JOIN materiales m ON m.id=om.material_id
+        WHERE om.id=? AND om.operacion_id=? AND m.categoria='Herramienta'""", (rid, opid), one=True)
+
+def _herr_inv_datos(d):
+    try:
+        cant = float(d.get("cantidad") or 1)
+    except (TypeError, ValueError):
+        cant = 0
+    if cant <= 0:
+        return None, None, "La cantidad tiene que ser mayor a 0"
+    vida = d.get("vida_util_herramienta")
+    if vida not in (None, ""):
+        try:
+            vida = int(float(vida))
+        except (TypeError, ValueError):
+            vida = 0
+        if vida <= 0:
+            return None, None, "Piezas por herramienta tiene que ser un entero mayor a 0"
+    else:
+        vida = None
+    return cant, vida, None
+
+@app.route("/api/operaciones/<int:opid>/herramientas_inv", methods=["GET"])
+@login_required()
+def get_herramientas_inv(opid):
+    rows = query("""SELECT om.id, om.material_id, om.cantidad, om.unidad, om.vida_util_herramienta,
+        m.codigo, m.descripcion
+        FROM operacion_materiales om JOIN materiales m ON m.id=om.material_id
+        WHERE om.operacion_id=? AND m.categoria='Herramienta' ORDER BY om.id""", (opid,))
+    return jsonify([dict(r) for r in rows])
+
+@app.route("/api/operaciones/<int:opid>/herramientas_inv", methods=["POST"])
+@login_required(roles=["admin","operario"])
+def add_herramienta_inv(opid):
+    d = request.json or {}
+    op = query("SELECT producto_id,nombre FROM proceso_operaciones WHERE id=?", (opid,), one=True)
+    if not op: return jsonify({"error":"Operación no encontrada"}), 404
+    mat = query("SELECT id,codigo,unidad,categoria FROM materiales WHERE id=?", (d.get("material_id"),), one=True)
+    if not mat or mat["categoria"] != "Herramienta":
+        return jsonify({"error":"Seleccioná una herramienta del inventario"}), 400
+    cant, vida, err = _herr_inv_datos(d)
+    if err: return jsonify({"error": err}), 400
+    guardar_version_producto(op["producto_id"], motivo="Herramienta agregada en "+(op["nombre"] or "")+": "+mat["codigo"],
+                             creado_por=session.get("username","sistema"))
+    previa = query("SELECT id FROM operacion_materiales WHERE operacion_id=? AND material_id=?", (opid, mat["id"]), one=True)
+    if previa:
+        execute("UPDATE operacion_materiales SET cantidad=?, vida_util_herramienta=? WHERE id=?", (cant, vida, previa["id"]))
+        return jsonify({"ok": True, "id": previa["id"]})
+    rid = execute("""INSERT INTO operacion_materiales (operacion_id,material_id,cantidad,unidad,tipo,vida_util_herramienta)
+        VALUES (?,?,?,?,'material',?)""", (opid, mat["id"], cant, mat["unidad"] or "unid", vida))
+    return jsonify({"ok": True, "id": rid}), 201
+
+@app.route("/api/operaciones/<int:opid>/herramientas_inv/<int:rid>", methods=["PUT"])
+@login_required(roles=["admin","operario"])
+def update_herramienta_inv(opid, rid):
+    if not _herr_inv_fila(opid, rid): return jsonify({"error":"Herramienta no encontrada"}), 404
+    cant, vida, err = _herr_inv_datos(request.json or {})
+    if err: return jsonify({"error": err}), 400
+    op = query("SELECT producto_id,nombre FROM proceso_operaciones WHERE id=?", (opid,), one=True)
+    guardar_version_producto(op["producto_id"], motivo="Herramienta editada en "+(op["nombre"] or ""),
+                             creado_por=session.get("username","sistema"))
+    execute("UPDATE operacion_materiales SET cantidad=?, vida_util_herramienta=? WHERE id=?", (cant, vida, rid))
+    return jsonify({"ok": True})
+
+@app.route("/api/operaciones/<int:opid>/herramientas_inv/<int:rid>", methods=["DELETE"])
+@login_required(roles=["admin","operario"])
+def delete_herramienta_inv(opid, rid):
+    if not _herr_inv_fila(opid, rid): return jsonify({"error":"Herramienta no encontrada"}), 404
+    op = query("SELECT producto_id,nombre FROM proceso_operaciones WHERE id=?", (opid,), one=True)
+    guardar_version_producto(op["producto_id"], motivo="Herramienta quitada en "+(op["nombre"] or ""),
+                             creado_por=session.get("username","sistema"))
+    execute("DELETE FROM operacion_materiales WHERE id=?", (rid,))
+    return jsonify({"ok": True})
+
 # ── Avance de entrega de OC ───────────────────────────────────────────────────
 @app.route("/api/ordenes_cliente/<int:ocid>/avance")
 @login_required()
