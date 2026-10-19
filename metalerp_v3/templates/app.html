@@ -1702,7 +1702,7 @@
     <div class="fg" id="prod-cmo-wrap"><label>Costo MO ($) <span style="font-size:10px;color:var(--color-text-secondary)">calculado</span></label><input type="number" id="prod-cmo" placeholder="0" readonly style="background:var(--color-background-secondary);cursor:default"></div>
     <div class="fg" id="prod-pv-wrap"><label>Precio de venta ($)</label><input type="number" id="prod-pv" placeholder="0"></div>
     <div class="fg"><label>Peso (kg)</label><input type="number" id="prod-peso" placeholder="0" step="0.001" min="0"></div>
-    <div class="fg"><label>Piezas por cajón <span class="req">*</span></label><input type="number" id="prod-cajon" placeholder="Ej: 100" step="1" min="1"></div>
+    <div class="fg"><label title="Cuántas piezas entran en un cajón. Al cargar la primera operación de una OT las piezas se reparten en cajones de este tamaño.">Piezas por cajón <span class="req">*</span></label><input type="number" id="prod-cajon" placeholder="Ej: 100" step="1" min="1"></div>
     <div class="fg s2"><label>Código de barras / QR / DataMatrix <span style="font-size:10px;color:var(--color-text-secondary)">(uso futuro)</span></label><input id="prod-bar" placeholder="Valor leído por el lector"></div>
     <div class="fg s2"><label>Observaciones</label><textarea id="prod-obs" style="min-height:50px"></textarea></div>
   </div>
@@ -2161,7 +2161,7 @@
       <div id="nov-emp-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:7px;margin-top:3px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.14);z-index:10"></div>
     </div>
     <div class="fg"><label>Fecha</label><input type="date" id="nov-fecha"></div>
-    <div class="fg"><label>Cantidad producida (OK) <span class="req">*</span></label><input type="number" id="nov-qty" placeholder="0" min="0" step="1" oninput="autoNovCajones()"></div>
+    <div class="fg"><label>Cantidad producida (OK) <span class="req">*</span></label><input type="number" id="nov-qty" placeholder="0" min="0" step="1" oninput="autoNovCajones();novCajSuma()"></div>
     <div class="fg"><label>Piezas observadas / no OK</label><input type="number" id="nov-obs-qty" placeholder="0" min="0" step="1"></div>
     <div class="fg s2" id="nov-caj-wrap" style="display:none">
       <label>Nro de cajón</label>
@@ -4479,6 +4479,7 @@ async function loadHerramientas(){
       + inventario.map(function(m){
           return '<option value="'+m.id+'">'+m.codigo+' — '+m.descripcion+'</option>';
         }).join('');
+    if(!inventario.length) sel.innerHTML='<option value="">No hay herramientas en Inventario (categoría Herramienta)</option>';
     document.getElementById('herr-inv-wrap').style.display = canEdit ? 'block' : 'none';
   }
 }
@@ -6981,7 +6982,7 @@ function sortPcot(col){
 }
 function _pcotUnit(r){ return (VER_MONETARIO&&r.precio_total!=null&&r.cantidad>0)?r.precio_total/r.cantidad:null; }
 function renderPcot(){
-  if(!_pcot.length){$('pcot-list').innerHTML='<div class="em">No hay pedidos de cotización.</div>';actualizarToolbarPcot();return;}
+  if(!_pcot.length){$('pcot-list').innerHTML='<div class="em">No hay pedidos de cotización.'+(['admin','vendedor'].includes(ROL)?' Usá "Nuevo pedido" para cargar el primero.':'')+'</div>';actualizarToolbarPcot();return;}
   const q=($('pcot-buscar')?$('pcot-buscar').value:'').trim().toLowerCase();
   let lista=_pcot;
   if(q) lista=lista.filter(r=>(r.numero||'').toLowerCase().includes(q)||(r.cliente_nombre||'').toLowerCase().includes(q)
@@ -8840,8 +8841,8 @@ async function loadNovCajones(oid, opId, propiasLista){
   body.innerHTML='<table><tr><th>Cajón</th><th>Disponible</th><th>Cantidad</th></tr>'+lista.map(function(c){
     const disp=(c.disponible||0)+(propias[c.id]||0);
     return '<tr><td><b>'+schEsc(c.numero)+'</b></td><td>'+disp+'</td><td><input type="number" class="nov-caj-q" data-id="'+c.id+'" data-disp="'+disp
-      +'" min="0" max="'+disp+'" step="1" value="'+(propias[c.id]||'')+'" oninput="_novCajTocado=true" style="width:90px"></td></tr>';
-  }).join('')+'</table><div style="'+nota+';margin-top:4px">La suma tiene que ser igual a la cantidad OK.</div>';
+      +'" min="0" max="'+disp+'" step="1" value="'+(propias[c.id]||'')+'" oninput="_novCajTocado=true;novCajSuma()" style="width:90px"></td></tr>';
+  }).join('')+'</table><div id="nov-caj-suma" style="'+nota+';margin-top:4px">La suma tiene que ser igual a la cantidad OK.</div>';
   autoNovCajones();
 }
 // Mientras no se toque a mano, reparte la cantidad OK en orden entre los cajones.
@@ -8852,6 +8853,17 @@ function autoNovCajones(){
     const t=Math.min(resto, parseFloat(i.dataset.disp)||0);
     i.value=t>0?t:''; resto-=t;
   });
+  novCajSuma();
+}
+// Muestra cuánto se repartió entre cajones contra la cantidad OK
+function novCajSuma(){
+  const el=$('nov-caj-suma'); if(!el) return;
+  let suma=0;
+  document.querySelectorAll('#nov-caj-body .nov-caj-q').forEach(function(i){suma+=parseFloat(i.value)||0;});
+  const ok=parseFloat($('nov-qty').value)||0;
+  const bien=Math.abs(suma-ok)<0.001;
+  el.innerHTML='Repartido en cajones: <b style="color:'+(bien?'#2e7d32':'#c62828')+'">'+suma+' de '+ok+'</b>'
+    +(bien?'':' — la suma tiene que ser igual a la cantidad OK');
 }
 function getNovCajones(){
   if(!_novCaj||!_novCaj.usa_cajones||_novCaj.primer_paso) return null;
@@ -12032,14 +12044,17 @@ function _cajPend(c){ return Math.max(0,(c.terminadas||0)-(c.cantidad_liberada||
 function renderCajones(){
   if(_cajSel && !_caj.some(function(c){return c.id===_cajSel;})) _cajSel=null;
   if(!_caj.length){
-    $('caj-list').innerHTML='<div class="em">No hay cajones para mostrar.</div>';
+    const sinFiltro=!($('caj-buscar').value||'').trim()&&!$('caj-lote-fil').value;
+    $('caj-list').innerHTML='<div class="em">'+(sinFiltro
+      ?'Todavía no hay cajones. Se crean solos al cargar la novedad de la primera operación de una OT.'
+      :'No hay cajones para los filtros elegidos.')+'</div>';
     actualizarToolbarCaj(); return;
   }
   let h='<table><tr><th style="width:24px"></th><th>Cajón</th><th>OT</th><th>Producto</th><th>Lote</th>'
     +'<th>Piezas</th><th>Terminadas</th><th style="color:#2e7d32">Liberadas</th><th style="color:#c62828">Rechazadas</th>'
     +'<th>Pendiente Calidad</th><th>Remitidas</th><th>Creado</th></tr>';
   _caj.forEach(function(c){
-    h+='<tr class="'+(_cajSel===c.id?'ot-sel':'')+'" style="cursor:pointer" onclick="selCaj('+c.id+')" ondblclick="openCajon('+c.id+')">'
+    h+='<tr class="'+(_cajSel===c.id?'ot-sel':'')+'" style="cursor:pointer" title="Estado: '+schEsc(c.estado)+' · doble clic para ver el detalle" onclick="selCaj('+c.id+')" ondblclick="openCajon('+c.id+')">'
       +'<td><input type="radio" name="caj-sel"'+(_cajSel===c.id?' checked':'')+' onclick="event.stopPropagation();selCaj('+c.id+')"></td>'
       +'<td><b>'+schEsc(c.numero)+'</b></td>'
       +'<td>'+schEsc(c.ot_numero||'—')+(c.ot_origen_numero&&c.ot_origen_numero!==c.ot_numero?' <span style="font-size:11px;color:var(--color-text-secondary)">(de '+schEsc(c.ot_origen_numero)+')</span>':'')+'</td>'
@@ -12047,7 +12062,7 @@ function renderCajones(){
       +'<td>'+c.cantidad+' / '+c.capacidad+'</td><td>'+(c.terminadas||0)+'</td>'
       +'<td style="color:#2e7d32;font-weight:600">'+(c.cantidad_liberada||0)+'</td>'
       +'<td style="color:#c62828;font-weight:600">'+(c.cantidad_rechazada||0)+'</td>'
-      +'<td>'+_cajPend(c)+'</td><td>'+(c.cantidad_remitida||0)+'</td><td>'+fmtD(c.creado)+'</td></tr>';
+      +'<td'+(_cajPend(c)>0?' style="color:#E65100;font-weight:600" title="Piezas terminadas esperando decisión de Calidad"':'')+'>'+_cajPend(c)+'</td><td>'+(c.cantidad_remitida||0)+'</td><td>'+fmtD(c.creado)+'</td></tr>';
   });
   $('caj-list').innerHTML=h+'</table>';
   actualizarToolbarCaj();
@@ -12057,12 +12072,23 @@ function actualizarToolbarCaj(){
   const c=_cajSel?_caj.find(function(x){return x.id===_cajSel;}):null;
   $('caj-sel-label').textContent=c?c.numero:'–';
   $('caj-b-ver').disabled=!c;
+  $('caj-b-ver').title=c?'Trazabilidad del cajón seleccionado':'Seleccioná un cajón de la lista';
   const bc=$('caj-b-cal'); bc.style.display=(ROL==='admin'||ROL==='almacen')?'':'none';
   bc.disabled=!c||['En espera','Baja'].includes(c.estado)||!(c.terminadas>0);
+  // El título dice por qué un botón está deshabilitado
+  bc.title=!c?'Seleccioná un cajón de la lista'
+    :c.estado==='En espera'?'El cajón está en espera (su OT se canceló): pasalo a otra OT primero'
+    :c.estado==='Baja'?'El cajón está dado de baja'
+    :!(c.terminadas>0)?'Todavía no hay piezas terminadas por la última operación'
+    :'Liberar o rechazar piezas del cajón';
+  const enEspera=c&&c.estado==='En espera';
+  const motivoEspera=!c?'Seleccioná un cajón de la lista':'Solo para cajones en espera (de una OT cancelada)';
   const bt=$('caj-b-transf'); bt.style.display=(ROL==='admin'||ROL==='operario')?'':'none';
-  bt.disabled=!c||c.estado!=='En espera';
+  bt.disabled=!enEspera;
+  bt.title=enEspera?'Pasar el cajón en espera a otra OT del mismo producto':motivoEspera;
   const bb=$('caj-b-baja'); bb.style.display=ROL==='admin'?'':'none';
-  bb.disabled=!c||c.estado!=='En espera';
+  bb.disabled=!enEspera;
+  bb.title=enEspera?'Dar de baja el cajón en espera':motivoEspera;
 }
 function cajSelAccion(a){
   const c=_cajSel?_caj.find(function(x){return x.id===_cajSel;}):null;
