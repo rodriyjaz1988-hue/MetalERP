@@ -994,7 +994,6 @@
           </div>
           <div class="vhead-row vhead-fil">
             <input type="text" id="caj-buscar" class="sel-fil vh-fil-wide" placeholder="🔍 Buscar por cajón, OT, lote o producto" oninput="clearTimeout(window._cajT);window._cajT=setTimeout(loadCajones,300)" autocomplete="off">
-            <select id="caj-estado-fil" class="sel-fil" onchange="loadCajones()"><option value="">Todos los estados</option><option>En proceso</option><option>En espera</option><option>Liberado</option><option>Rechazado</option><option>Baja</option></select>
             <input type="hidden" id="caj-lote-fil" value="">
             <span class="vh-badge" id="caj-lote-chip" style="display:none;cursor:pointer" onclick="clearCajLote()" title="Quitar filtro de lote"></span>
             <button class="vh-fil-clear" onclick="clearCajFiltros()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.2 2.8h11.6L9.3 8.2v4.4l-2.6 1.3V8.2z"/><path d="M2 14 14 2"/></svg>Limpiar filtros</button>
@@ -12018,13 +12017,12 @@ function clearCajLote(){
   loadCajones();
 }
 function clearCajFiltros(){
-  $('caj-buscar').value=''; $('caj-estado-fil').value='';
+  $('caj-buscar').value='';
   clearCajLote();
 }
 async function loadCajones(){
   const p=[];
   const b=($('caj-buscar').value||'').trim(); if(b) p.push('buscar='+encodeURIComponent(b));
-  const e=$('caj-estado-fil').value; if(e) p.push('estado='+encodeURIComponent(e));
   const l=$('caj-lote-fil').value; if(l) p.push('lote_id='+l);
   const rows=await api('/api/cajones'+(p.length?'?'+p.join('&'):''));
   _caj=Array.isArray(rows)?rows:[];
