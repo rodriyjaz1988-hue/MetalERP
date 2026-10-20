@@ -35,6 +35,17 @@
   .ni:hover{background:#f7f7f4;color:#1a1a1a}
   .ni.active{color:#1a1a1a;font-weight:500;border-left:2px solid #378ADD;background:#f0f7ff}
   .ni svg{width:15px;height:15px;flex-shrink:0;opacity:.7}.ni.active svg{opacity:1}
+  /* Menú lateral plegable por sección (se recuerda en el navegador). */
+  /* En el celular el menú es solo de íconos: no se pliega. */
+  @media(min-width:769px){
+    .sl.sl-pleg{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none}
+    .sl.sl-pleg:hover{color:#888}
+    .ni-plegado{display:none!important}
+  }
+  .sl-chev{margin-left:auto;font-size:9px;transition:transform .15s}
+  .sl.plegada .sl-chev{transform:rotate(-90deg)}
+  .sl-aviso{display:none;width:7px;height:7px;border-radius:50%;background:#E24B4A}
+  .sl.plegada.con-aviso .sl-aviso{display:inline-block}
   .sf{margin-top:auto;padding:12px 16px;border-top:1px solid #e8e8e3}
   .sf a{font-size:12px;color:#999;text-decoration:none}.sf a:hover{color:#A32D2D}
   .main{flex:1;overflow-y:auto;overflow-x:hidden;padding:22px;background:#f4f4f2}
@@ -49,7 +60,11 @@
     position:sticky;top:-22px;z-index:20;background:#f4f4f2;margin:-22px -22px 13px;padding:22px 22px 11px}
   /* Secciones con pestañas arriba del encabezado (Lotes / Cajones, Pedidos de
      cotización): el encabezado no se monta sobre las pestañas. */
-  #lote-sec-lotes>.vhead,#lote-sec-cajones>.vhead,#pres-sec-pcot>.vhead{top:-8px;margin-top:-10px;padding-top:8px}
+  #lote-sec-lotes>.vhead,#lote-sec-cajones>.vhead{top:-8px;margin-top:-10px;padding-top:8px}
+  /* Presupuestos: un solo encabezado para las dos pestañas; cada control
+     se muestra solo en la suya (sin pisar el display que pone el rol). */
+  #p-presupuestos[data-pt="pres"] .pres-solo-pcot,#p-presupuestos[data-pt="pcot"] .pres-solo-pres{display:none!important}
+  .pres-est-sel{height:26px;padding:0 6px;font-size:12px;border:1px solid #e3e5e8;border-radius:7px;background:#fff;cursor:pointer;font-family:inherit}
   .vhead-card{background:#fff;border:1px solid var(--vh-line);border-radius:14px;
     box-shadow:0 1px 2px rgba(16,24,40,.05),0 8px 20px -12px rgba(16,24,40,.16)}
   .vhead-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
@@ -153,6 +168,31 @@
   .al-g{background:#EAF3DE;color:#3B6D11;border:1px solid #C0DD97}.al-b{background:#E6F1FB;color:#185FA5;border:1px solid #B5D4F4}
   .ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:100;align-items:center;justify-content:center}
   .ov.open{display:flex}
+  /* Cuadro de confirmación propio (reemplaza al confirm() del navegador). */
+  .cfm-ov{z-index:10000}
+  .cfm-mo{width:440px;padding:20px 22px 16px}
+  .cfm-tit{display:flex;gap:11px;align-items:flex-start;font-size:14.5px;font-weight:600;line-height:1.4;color:#1a1a1a}
+  .cfm-ic{flex:none;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;background:#E6F1FB;color:#185FA5}
+  .cfm-peligro .cfm-ic{background:#FCEBEB;color:#C0392B}
+  .cfm-det{margin:10px 0 0 41px;font-size:12.5px;color:#5c636b;line-height:1.5;white-space:pre-line}
+  .cfm-mo .ma{margin-top:18px;padding-top:12px}
+  .cfm-txt{margin:12px 0 0 41px}
+  /* Aviso "Deshacer" de los borrados diferidos. */
+  #undo-wrap{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:9998;display:flex;flex-direction:column;gap:8px;align-items:center}
+  .undo-t{position:relative;overflow:hidden;display:flex;align-items:center;gap:14px;min-width:300px;max-width:90vw;padding:10px 12px 10px 16px;border-radius:10px;background:#2b3137;color:#fff;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+  .undo-t span{flex:1}
+  .undo-t button{flex:none;font-family:inherit;font-size:12.5px;font-weight:600;color:#8cc4ff;background:none;border:1px solid rgba(140,196,255,.45);border-radius:7px;padding:5px 11px;cursor:pointer}
+  .undo-t button:hover{background:rgba(140,196,255,.12)}
+  .undo-t i{position:absolute;left:0;bottom:0;height:3px;background:#8cc4ff;width:100%;transform-origin:left;animation:undoBar linear forwards}
+  @keyframes undoBar{from{transform:scaleX(1)}to{transform:scaleX(0)}}
+  .cfm-mo .btn{height:32px;padding:0 14px;font-size:12.5px}
+  .cfm-peligro .btn-p{background:#C0392B;border-color:#C0392B}
+  .cfm-peligro .btn-p:hover{background:#A32D2D;border-color:#A32D2D}
+  /* Filas con entrega vencida (rojo) o por vencer en los próximos días (ámbar). */
+  tr.fila-vencida>td:first-child{box-shadow:inset 4px 0 0 #E24B4A}
+  tr.fila-por-vencer>td:first-child{box-shadow:inset 4px 0 0 #EF9F27}
+  .fecha-vencida{color:#A32D2D;font-weight:600}
+  .fecha-por-vencer{color:#854F0B;font-weight:600}
   .mo{background:#fff;border-radius:12px;width:560px;max-width:95vw;max-height:90vh;overflow-y:auto;padding:20px 24px;box-shadow:0 8px 32px rgba(0,0,0,.14)}
   .mh{font-size:15px;font-weight:600;margin-bottom:14px;padding-bottom:11px;border-bottom:1px solid #e8e8e3;display:flex;justify-content:space-between;align-items:center}
   .mx{cursor:pointer;font-size:18px;color:#999;padding:0 3px}.mx:hover{color:#1a1a1a}
@@ -709,12 +749,17 @@
     </div>
 
     <div class="page" id="p-mrp">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
-        <div>
-          <div class="pt">Planificación MRP</div>
-          <div class="ps">Requerimiento de materiales basado en órdenes activas</div>
+      <div class="vhead">
+        <div class="vhead-card">
+          <div class="vhead-row vhead-top">
+            <div class="vhead-tit">
+              <div class="pt" title="Requerimiento de materiales basado en órdenes activas">Planificación MRP</div>
+            </div>
+            <div class="vh-acciones">
+              <button class="btn" onclick="loadMRP()" title="Volver a calcular">↻ Actualizar</button>
+            </div>
+          </div>
         </div>
-        <button class="btn btn-s" style="white-space:nowrap" onclick="loadMRP()">↻ Actualizar</button>
       </div>
       <div class="card">
         <div class="ch"><span class="ct">Pedidos de clientes pendientes de procesar</span><button class="btn btn-p" onclick="consolidarTodo()">Consolidar y generar OTs →</button></div>
@@ -1005,17 +1050,19 @@
     </div>
 
     <div class="page" id="p-recepciones">
-      <div class="pt">Recepción de material/insumo</div>
-      <div class="ps">Todo lo que entra a planta se aprueba desde acá — recepción directa, Compras (OC) y Terceros (OTT) — sin incluir salidas</div>
-
-      <div class="card">
-        <div class="ch"><span class="ct">Recepcionar material / insumo</span>
-          <div style="display:flex;gap:6px" id="rec-toolbar">
-            <button class="btn btn-p" id="b-rec-oc" style="display:none" onclick="openRecSegunOC()">Recepcionar según OC</button>
-            <button class="btn btn-p" id="b-recepcion" style="display:none" onclick="openRecepcion()">Recepcionar sin OC</button>
+      <div class="vhead">
+        <div class="vhead-card">
+          <div class="vhead-row vhead-top">
+            <div class="vhead-tit">
+              <div class="pt" title="Todo lo que entra a planta se aprueba desde acá — recepción directa, Compras (OC) y Terceros (OTT) — sin incluir salidas">Recepción de material/insumo</div>
+            </div>
+            <div class="vh-acciones">
+              <button class="btn" onclick="irAMovimientosRecepciones()" title="Historial de recepciones en Movimientos">Ver historial</button>
+              <button class="btn btn-p" id="b-rec-oc" style="display:none" onclick="openRecSegunOC()">Recepcionar según OC</button>
+              <button class="btn btn-p" id="b-recepcion" style="display:none" onclick="openRecepcion()">Recepcionar sin OC</button>
+            </div>
           </div>
         </div>
-        <div style="font-size:12px;color:var(--color-text-secondary)">El historial de recepciones se consulta en <a href="#" onclick="irAMovimientosRecepciones();return false;" style="color:var(--color-accent)">Movimientos</a> (filtro "Recepciones").</div>
       </div>
 
       <div class="card">
@@ -1057,8 +1104,18 @@
     </div>
 
     <div class="page" id="p-remitir">
-      <div class="pt">Remitir a cliente</div>
-      <div class="ps">Generar remitos desde stock de productos terminados para cubrir pedidos de clientes</div>
+      <div class="vhead">
+        <div class="vhead-card">
+          <div class="vhead-row vhead-top">
+            <div class="vhead-tit">
+              <div class="pt" title="Generar remitos desde stock de productos terminados para cubrir pedidos de clientes">Remitir a cliente</div>
+            </div>
+            <div class="vh-acciones">
+              <button class="btn" onclick="irAPantalla('remitos_emitidos')" title="Ver los remitos ya generados">Remitos emitidos</button>
+            </div>
+          </div>
+        </div>
+      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start">
         <div class="card">
           <div class="ch">
@@ -1162,32 +1219,54 @@
       </div>
     </div>
 
-    <div class="page" id="p-presupuestos">
-      <div class="pt">Presupuestos</div><div class="ps">Cotizaciones y facturación a clientes</div>
-      <div class="tabs" id="pres-tabs" style="margin-bottom:10px"><div class="tab active" data-t="pres">Presupuestos</div><div class="tab" data-t="pcot">Pedidos de cotización</div></div>
-      <div id="pres-sec-pres">
-      <div class="card"><div class="ch"><span class="ct">Presupuestos</span><button class="btn btn-p" id="b-pres" style="display:none" onclick="openPres()">+ Nuevo</button></div><div id="pres-list"><div class="ld">Cargando...</div></div></div>
-      </div>
-      <div id="pres-sec-pcot" style="display:none">
+    <div class="page" id="p-presupuestos" data-pt="pres">
       <div class="vhead">
         <div class="vhead-card">
           <div class="vhead-row vhead-top">
             <div class="vhead-tit">
-              <div class="pt" title="Pedidos de cotización que llegan de clientes">Pedidos de cotización</div>
-              <span class="vh-badge" id="pcot-sel-label" title="Pedido seleccionado">–</span>
+              <div class="pt" title="Cotizaciones y facturación a clientes">Presupuestos</div>
+              <span class="vh-badge pres-solo-pres" id="pres-sel-label" title="Presupuesto seleccionado">–</span>
+              <span class="vh-badge pres-solo-pcot" id="pcot-sel-label" title="Pedido seleccionado">–</span>
             </div>
-            <div class="vh-acciones" id="pcot-toolbar">
-              <button class="btn" id="pcot-b-edit" style="display:none" onclick="pcotSelAccion('edit')" disabled title="Editar el pedido seleccionado"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11.1 2.2a1.3 1.3 0 0 1 1.9 0l.8.8a1.3 1.3 0 0 1 0 1.9L5.4 13.2l-3.2.9.9-3.2z"/></svg>Editar</button>
-              <button class="btn btn-warn" id="pcot-b-elim" style="display:none" onclick="pcotSelAccion('elim')" disabled title="Eliminar el pedido seleccionado"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.6 9.2c0 .5.4.8.9.8h5c.5 0 .9-.3.9-.8L12 4"/></svg>Eliminar</button>
-              <button class="btn btn-p" id="b-pcot" style="display:none" onclick="openPcot()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M8 3.3v9.4M3.3 8h9.4"/></svg>Nuevo pedido</button>
+            <div class="vh-acciones" id="pres-toolbar">
+              <button class="btn pres-solo-pres" id="pres-b-edit" style="display:none" onclick="presSelAccion('edit')" disabled title="Editar el presupuesto seleccionado"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11.1 2.2a1.3 1.3 0 0 1 1.9 0l.8.8a1.3 1.3 0 0 1 0 1.9L5.4 13.2l-3.2.9.9-3.2z"/></svg>Editar</button>
+              <button class="btn btn-p pres-solo-pres" id="b-pres" style="display:none" onclick="openPres()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M8 3.3v9.4M3.3 8h9.4"/></svg>Nuevo presupuesto</button>
+              <button class="btn pres-solo-pcot" id="pcot-b-edit" style="display:none" onclick="pcotSelAccion('edit')" disabled title="Editar el pedido seleccionado"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11.1 2.2a1.3 1.3 0 0 1 1.9 0l.8.8a1.3 1.3 0 0 1 0 1.9L5.4 13.2l-3.2.9.9-3.2z"/></svg>Editar</button>
+              <button class="btn btn-warn pres-solo-pcot" id="pcot-b-elim" style="display:none" onclick="pcotSelAccion('elim')" disabled title="Eliminar el pedido seleccionado"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.6 9.2c0 .5.4.8.9.8h5c.5 0 .9-.3.9-.8L12 4"/></svg>Eliminar</button>
+              <button class="btn btn-p pres-solo-pcot" id="b-pcot" style="display:none" onclick="openPcot()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M8 3.3v9.4M3.3 8h9.4"/></svg>Nuevo pedido</button>
             </div>
           </div>
-          <div class="vhead-row vhead-fil">
+          <div class="vhead-row vhead-fil pres-solo-pres">
+            <div class="vh-fil-cli">
+              <input type="text" id="pres-fil-cli-search" class="sel-fil" style="min-width:0" placeholder="🔍 Buscar cliente" autocomplete="off"
+                oninput="filtrarClienteBuscador('pres-fil-cli','Todos','renderPres');if(!this.value){$('pres-fil-cli').value='';renderPres();}" onfocus="filtrarClienteBuscador('pres-fil-cli','Todos','renderPres')"
+                onblur="setTimeout(function(){var c=$('pres-fil-cli-results');if(c)c.style.display='none';},150)">
+              <input type="hidden" id="pres-fil-cli">
+              <div id="pres-fil-cli-results" class="vh-pop"></div>
+            </div>
+            <select id="pres-fil-est" class="sel-fil" style="flex:0 1 140px" title="Estado" onchange="renderPres()"><option value="">Todos los estados</option><option>Borrador</option><option>Enviado</option><option>Aprobado</option><option>Rechazado</option><option>Facturado</option></select>
+            <span data-monetario style="display:contents">
+              <span class="vh-fil-lbl">Total:</span>
+              <input type="number" id="pres-fil-tmin" class="sel-fil vh-fil-num" style="flex-basis:100px;width:100px" placeholder="Desde $" min="0" oninput="renderPres()">
+              <input type="number" id="pres-fil-tmax" class="sel-fil vh-fil-num" style="flex-basis:100px;width:100px" placeholder="Hasta $" min="0" oninput="renderPres()">
+            </span>
+            <span class="vh-fil-lbl">Fecha:</span>
+            <input type="date" id="pres-fil-desde" class="sel-fil" title="Desde" onchange="renderPres()">
+            <span class="vh-fil-lbl">a</span>
+            <input type="date" id="pres-fil-hasta" class="sel-fil" title="Hasta" onchange="renderPres()">
+            <button class="vh-fil-clear" onclick="clearFiltrosPres()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.2 2.8h11.6L9.3 8.2v4.4l-2.6 1.3V8.2z"/><path d="M2 14 14 2"/></svg>Limpiar filtros</button>
+          </div>
+          <div class="vhead-row vhead-fil pres-solo-pcot">
             <input type="text" id="pcot-buscar" class="sel-fil vh-fil-wide" placeholder="🔍 Buscar por número, cliente o código" oninput="renderPcot()" autocomplete="off">
             <button class="vh-fil-clear" onclick="clearFiltrosPcot()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.2 2.8h11.6L9.3 8.2v4.4l-2.6 1.3V8.2z"/><path d="M2 14 14 2"/></svg>Limpiar filtros</button>
           </div>
         </div>
+        <div class="tabs" id="pres-tabs" style="margin:11px 0 0"><div class="tab active" data-t="pres">Presupuestos</div><div class="tab" data-t="pcot">Pedidos de cotización</div></div>
       </div>
+      <div id="pres-sec-pres">
+      <div class="card"><div id="pres-list"><div class="ld">Cargando...</div></div></div>
+      </div>
+      <div id="pres-sec-pcot" style="display:none">
       <div class="card"><div id="pcot-list" class="nowrap-tbl"><div class="ld">Cargando...</div></div></div>
       </div>
     </div>
@@ -1217,8 +1296,15 @@
     </div>
 
     <div class="page" id="p-configuracion">
-      <div class="pt">Configuración</div>
-      <div class="ps">Datos de la empresa y opciones del PDF de Orden de Trabajo</div>
+      <div class="vhead">
+        <div class="vhead-card">
+          <div class="vhead-row vhead-top">
+            <div class="vhead-tit">
+              <div class="pt" title="Datos de la empresa y opciones del PDF de Orden de Trabajo">Configuración</div>
+            </div>
+          </div>
+        </div>
+      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start;max-width:900px">
 
         <div class="card">
@@ -1993,7 +2079,8 @@
 
 <!-- PRESUPUESTO -->
 <div class="ov" id="mo-pres"><div class="mo">
-  <div class="mh">Nuevo presupuesto <span class="mx" onclick="closeMo('mo-pres')">×</span></div>
+  <div class="mh"><span id="pres-title">Nuevo presupuesto</span> <span class="mx" onclick="closeMo('mo-pres')">×</span></div>
+  <input type="hidden" id="pres-id">
   <div class="fg2">
     <div class="fg s2"><label>Descripción <span class="req">*</span></label><input id="pres-des"></div>
     <div class="fg" style="position:relative"><label>Cliente</label>
@@ -2821,6 +2908,134 @@ const fmtMD=n=>VER_MONETARIO?'$'+(n||0).toLocaleString('es-AR',{minimumFractionD
 const monOnly=html=>VER_MONETARIO?html:'';
 const thM=(txt,attrs)=>VER_MONETARIO?('<th'+(attrs?' '+attrs:'')+'>'+txt+'</th>'):'';
 const tdM=(txt,attrs)=>VER_MONETARIO?('<td'+(attrs?' '+attrs:'')+'>'+(txt==null?'':txt)+'</td>'):'';
+// Cantidades con formato argentino: 1.234,5 (hasta 2 decimales, sin ceros de más).
+const fN=(n,dec=2)=>{if(n===null||n===undefined||n==='')return'—';const v=Number(n);return isFinite(v)?v.toLocaleString('es-AR',{maximumFractionDigits:dec}):n;};
+// Vencimiento de una fecha de entrega: 'vencida' (ya pasó), 'por-vencer' (hoy o
+// en los próximos DIAS_POR_VENCER días) o ''. Solo cuenta si lo pendiente sigue abierto.
+const DIAS_POR_VENCER=3;
+function _isoLocal(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function venceEstado(fecha,abierta){
+  if(!abierta||!fecha) return '';
+  const f=String(fecha).slice(0,10), hoy=new Date();
+  if(f<_isoLocal(hoy)) return 'vencida';
+  const lim=new Date(hoy); lim.setDate(lim.getDate()+DIAS_POR_VENCER);
+  return f<=_isoLocal(lim)?'por-vencer':'';
+}
+// Clase para el <tr> y atributos (clase + aviso) para la celda de la fecha.
+function venceFila(fecha,abierta){const e=venceEstado(fecha,abierta);return e?' fila-'+e:'';}
+function venceCelda(fecha,abierta){
+  const e=venceEstado(fecha,abierta); if(!e) return '';
+  const dias=Math.round((new Date(String(fecha).slice(0,10)+'T00:00:00')-new Date(_isoLocal(new Date())+'T00:00:00'))/86400000);
+  const txt=e==='vencida'?('Atrasada '+(-dias)+' día'+(dias===-1?'':'s')):(dias===0?'Vence hoy':'Vence en '+dias+' día'+(dias===1?'':'s'));
+  return ' class="fecha-'+e+'" title="'+txt+'"';
+}
+
+// Confirmación con el estilo de la página. Devuelve una promesa: usar
+// "if(!await confirmar('¿…?')) return;". La primera línea es la pregunta y el
+// resto el detalle. Las acciones que borran o no se pueden deshacer van en rojo.
+let _cfmAbierto=null;
+function confirmar(msg){ return _dialogo(msg,null); }
+// Borrado con "Deshacer": la fila desaparece enseguida, pero el DELETE recién
+// se manda al servidor después de BORRAR_DEMORA_MS. Si en ese tiempo se toca
+// "Deshacer", no se borra nada y la fila vuelve. Uso: en lugar de
+// api(url,{method:'DELETE'}) llamar apiBorrar(url,'Categoría eliminada'); la
+// promesa devuelve la respuesta del servidor, y si se deshace no se resuelve
+// nunca (así el resto de la función, toast y recarga, no corre).
+const BORRAR_DEMORA_MS=6000;
+let _ultimoClicFila=null;
+const _borradosPendientes=new Set();
+document.addEventListener('click',function(e){
+  if(e.target.closest&&!e.target.closest('.cfm-ov,.undo-t')) _ultimoClicFila=e.target.closest('tr');
+},true);
+function apiBorrar(url,texto){
+  return new Promise(function(resolve){
+    const fila=_ultimoClicFila; _ultimoClicFila=null;
+    const dispPrev=fila?fila.style.display:'';
+    if(fila) fila.style.display='none';
+    let wrap=document.getElementById('undo-wrap');
+    if(!wrap){ wrap=document.createElement('div'); wrap.id='undo-wrap'; document.body.appendChild(wrap); }
+    const t=document.createElement('div');
+    t.className='undo-t';
+    t.innerHTML='<span></span><button type="button">Deshacer</button><i style="animation-duration:'+BORRAR_DEMORA_MS+'ms"></i>';
+    t.querySelector('span').textContent=(texto||'Eliminado')+'.';
+    wrap.appendChild(t);
+    const pend={url:url,enviar:null};
+    function enviar(){
+      clearTimeout(tid); _borradosPendientes.delete(pend); t.remove();
+      api(url,{method:'DELETE'}).then(function(res){
+        if(!(res&&res.ok)&&fila&&fila.isConnected) fila.style.display=dispPrev;
+        resolve(res);
+      }).catch(function(){
+        if(fila&&fila.isConnected) fila.style.display=dispPrev;
+        resolve({ok:false,error:'No se pudo eliminar (error de conexión)'});
+      });
+    }
+    pend.enviar=enviar;
+    const tid=setTimeout(enviar,BORRAR_DEMORA_MS);
+    _borradosPendientes.add(pend);
+    t.querySelector('button').addEventListener('click',function(){
+      clearTimeout(tid); _borradosPendientes.delete(pend); t.remove();
+      if(fila) fila.style.display=dispPrev;
+      toast('No se eliminó nada');
+    });
+  });
+}
+// Si se cierra o recarga la página con borrados en espera, se mandan ya.
+window.addEventListener('pagehide',function(){
+  _borradosPendientes.forEach(function(p){
+    try{ fetch(p.url,{method:'DELETE',keepalive:true,headers:{'Content-Type':'application/json'}}); }catch(e){}
+  });
+  _borradosPendientes.clear();
+});
+
+// Pregunta con un campo de texto (reemplaza al prompt() del navegador).
+// Devuelve el texto escrito, o null si se cancela.
+function pedirTexto(msg,valor){ return _dialogo(msg,valor==null?'':String(valor)); }
+function _dialogo(msg,texto){
+  const conTexto=texto!==null;
+  return new Promise(function(resolve){
+    if(_cfmAbierto){ resolve(conTexto?null:false); return; }
+    msg=String(msg||'');
+    // Corta después del primer salto de línea o, si no hay, después de la primera pregunta.
+    let corte=msg.indexOf('\n');
+    if(corte<0){const q=msg.indexOf('? ');if(q>=0)corte=q+1;}
+    const pregunta=corte<0?msg:msg.slice(0,corte), detalle=corte<0?'':msg.slice(corte).trim();
+    const peligro=/eliminar|quitar|borrar|cancelar|desvincular|anular|no se puede deshacer/i.test(msg);
+    const borra=(pregunta.match(/^\s*¿?\s*(eliminar|quitar|borrar)/i)||[])[1];
+    const ov=document.createElement('div');
+    ov.className='ov open cfm-ov';
+    ov.innerHTML='<div class="mo cfm-mo'+(peligro?' cfm-peligro':'')+'" role="alertdialog" aria-modal="true">'
+      +'<div class="cfm-tit"><span class="cfm-ic">'+(peligro?'!':'?')+'</span><span class="cfm-preg"></span></div>'
+      +(detalle?'<div class="cfm-det"></div>':'')
+      +(conTexto?'<div class="fg cfm-txt"><input type="text" autocomplete="off"></div>':'')
+      +'<div class="ma"><button class="btn" data-r="0">Cancelar</button><button class="btn btn-p" data-r="1">'+(borra?'Sí, '+borra.toLowerCase():'Aceptar')+'</button></div></div>';
+    ov.querySelector('.cfm-preg').textContent=pregunta;
+    if(detalle) ov.querySelector('.cfm-det').textContent=detalle;
+    const inp=conTexto?ov.querySelector('.cfm-txt input'):null;
+    if(inp) inp.value=texto;
+    const previo=document.activeElement;
+    function cerrar(r){
+      document.removeEventListener('keydown',tecla,true);
+      const val=inp?inp.value:null;
+      ov.remove(); _cfmAbierto=null;
+      if(previo&&previo.focus) try{previo.focus();}catch(e){}
+      resolve(conTexto?(r?val:null):r);
+    }
+    function tecla(e){
+      if(e.key==='Escape'){e.preventDefault();e.stopPropagation();cerrar(false);}
+      else if(e.key==='Enter'){e.preventDefault();e.stopPropagation();cerrar(document.activeElement===ov.querySelector('[data-r="0"]')?false:true);}
+    }
+    ov.addEventListener('click',function(e){
+      if(e.target===ov){cerrar(false);return;}
+      const b=e.target.closest('[data-r]'); if(b) cerrar(b.dataset.r==='1');
+    });
+    document.addEventListener('keydown',tecla,true);
+    document.body.appendChild(ov); _cfmAbierto=ov;
+    // En lo que borra, el foco arranca en Cancelar para que un Enter apurado no borre.
+    if(inp){ inp.focus(); inp.select(); }
+    else ov.querySelector(peligro?'[data-r="0"]':'[data-r="1"]').focus();
+  });
+}
 const fmtD=s=>s?s.slice(0,10).split('-').reverse().join('/'):'—';
 const fmtDH=s=>{if(!s)return'—';const f=s.slice(0,10).split('-').reverse().join('/');const h=s.slice(11,16);return h?f+' '+h:f;};
 const stars=n=>'★'.repeat(n)+'☆'.repeat(5-n);
@@ -2924,8 +3139,8 @@ async function loadIndicadoresCompras(){
     h+='<div class="nowrap-tbl"><table><tr><th>Proveedor</th><th>Entregados</th><th>A tiempo</th><th>Aprobados</th><th>Incidentes</th><th>Pend. calidad</th><th>CE</th><th>IC</th><th>IPP</th></tr>';
     cat.proveedores.forEach(p=>{
       const t=p.total;
-      h+='<tr><td><b>'+p.proveedor+'</b></td><td>'+t.entregados+'</td><td>'+t.a_tiempo+'</td><td>'+t.aprobados+'</td><td>'+t.incidentes+'</td>'
-        +'<td>'+(t.pendientes?'<span style="color:var(--color-text-secondary)">'+t.pendientes+'</span>':'0')+'</td>'
+      h+='<tr><td><b>'+p.proveedor+'</b></td><td>'+fN(t.entregados)+'</td><td>'+t.a_tiempo+'</td><td>'+fN(t.aprobados)+'</td><td>'+t.incidentes+'</td>'
+        +'<td>'+(t.pendientes?'<span style="color:var(--color-text-secondary)">'+fN(t.pendientes)+'</span>':'0')+'</td>'
         +'<td>'+pct(t.ce)+'</td><td>'+pct(t.ic)+'</td><td>'+pct(t.ipp)+'</td></tr>';
     });
     h+='</table></div></div>';
@@ -3032,7 +3247,7 @@ function setupRoles(){
    ['b-maq',['admin','operario']],['b-mant',['admin','operario']],['b-tkt',['admin','operario']],
    ['b-mat',['admin','almacen','operario','logistica']],['b-prov',['admin','almacen','vendedor']],
    ['b-ott-nueva',['admin','operario']],['b-recepcion',['admin','almacen']],['b-rec-oc',['admin','almacen','vendedor']],
-   ['b-pres',['admin','vendedor']],['b-cli',['admin','vendedor']],
+   ['b-pres',['admin','vendedor']],['pres-b-edit',['admin','vendedor']],['b-cli',['admin','vendedor']],
    ['b-pcot',['admin','vendedor']],['pcot-b-edit',['admin','vendedor']],['pcot-b-elim',['admin','vendedor']]].forEach(([id,roles])=>{
     const el=$(id);if(el&&roles.includes(ROL))el.style.display='';
   });
@@ -3124,7 +3339,7 @@ async function loadOpsSector(){
     h+='<tr><td><b>'+r.ot_numero+'</b></td><td>'+(r.producto_codigo?r.producto_codigo+' — ':'')+(r.producto_nombre||'—')+'</td><td>'+(r.cliente_nombre||'—')+'</td>'
       +'<td>'+r.orden+'</td><td>'+r.operacion+(r.es_tercerizada?' <span class="b bp">Tercero'+(r.proveedor_nombre?': '+r.proveedor_nombre:'')+'</span>':'')+'</td>'
       +'<td>'+(r.es_tercerizada?'Tercerizada':(r.sector||'—'))+'</td><td>'+(r.maquina_nombre||'—')+'</td><td>'+sb(r.estado)+'</td>'
-      +'<td>'+(r.qty_producida||0)+' / '+(r.qty_requerida||0)+' <span style="font-size:10px;color:var(--color-text-secondary)">(faltan '+pend+')</span></td>'
+      +'<td>'+fN(r.qty_producida||0)+' / '+fN(r.qty_requerida||0)+' <span style="font-size:10px;color:var(--color-text-secondary)">(faltan '+fN(pend)+')</span></td>'
       +'<td>'+pb(r.prioridad||'Normal')+'</td><td>'+fmtD(r.fecha_entrega)+'</td></tr>';
   });
   $('os-tbl').innerHTML=h;
@@ -3241,7 +3456,7 @@ function schRender(){
           +'\nOperario: '+(b.empleado_nombre||'sin asignar')+'\nJornada: '+b.jornada_horas+' h  ('+b.inicio.slice(5,16).replace('-','/')+' → '+b.fin.slice(5,16).replace('-','/')+')\nCantidad plan: '+(b.cantidad_plan||0)
           +(b.fecha_entrega?'\nEntrega OT: '+schDM(b.fecha_entrega):'')+(late?'\n⚠ Termina después de la entrega':'')
           +(cerr?'\n'+(['Completada','Cancelada'].indexOf(b.ot_estado)>=0?'OT '+b.ot_estado.toLowerCase():'Operación '+b.op_estado.toLowerCase())+': ya no ocupa la máquina':'');
-        var l2=(b.empleado_nombre?schCorto(b.empleado_nombre):'sin operario')+' · '+b.jornada_horas+'h'+(b.cantidad_plan?' · '+b.cantidad_plan+' u':'');
+        var l2=(b.empleado_nombre?schCorto(b.empleado_nombre):'sin operario')+' · '+b.jornada_horas+'h'+(b.cantidad_plan?' · '+fN(b.cantidad_plan)+' u':'');
         bars+='<div class="'+cls+'" data-b="'+b.id+'" title="'+schEsc(tip)+'" style="left:'+left+'px;width:'+w+'px;background:'+SCH_PAL[(b.orden_id||0)%SCH_PAL.length]+'">'
           +(w>46?'<span class="t">'+(late?'⚠ ':'')+schEsc(b.ot_numero)+' · '+schEsc(b.operacion)+'</span>'+(w>70?'<span class="o">'+schEsc(l2)+'</span>':''):'')+'</div>';
       });
@@ -3288,7 +3503,7 @@ function schRenderPend(){
     h+='<div class="sch-card'+(p.estado==='En proceso'?' proc':'')+(sin<=0?' full':'')+(SCH.sel===p.id?' sel':'')+'" data-oo="'+p.id+'"'+(edit?' draggable="true"':'')+'>'
       +'<div><b>'+schEsc(p.ot_numero)+'</b> · Op '+schEsc(p.orden)+' <b>'+schEsc(p.operacion)+'</b></div>'
       +'<div class="l2">'+schEsc((p.producto_codigo?p.producto_codigo+' — ':'')+(p.producto_nombre||'—'))+(p.cliente_nombre?' · '+schEsc(p.cliente_nombre):'')+'</div>'
-      +'<div class="l3">'+schEsc(p.sector||'Sin sector')+' · faltan <b>'+falta+'</b> · '+(sin<=0?'<span style="color:#3B6D11">✓ planificada</span>':'sin planificar <b>'+sin+'</b>')+'</div>'
+      +'<div class="l3">'+schEsc(p.sector||'Sin sector')+' · faltan <b>'+fN(falta)+'</b> · '+(sin<=0?'<span style="color:#3B6D11">✓ planificada</span>':'sin planificar <b>'+sin+'</b>')+'</div>'
       +'<div class="l4"><span'+(late?' class="late"':'')+'>Entrega '+(p.fecha_entrega?schDM(p.fecha_entrega):'—')+'</span>'+(edit?'<button class="btn" data-act="asig">Asignar</button>':'')+'</div></div>';
   });
   $('sch-plist').innerHTML=h||'<div class="em">Sin operaciones para planificar</div>';
@@ -3476,7 +3691,7 @@ function schInfoOp(p){
   var falta=Math.max(0,(p.qty_requerida||0)-(p.qty_producida||0));
   return '<b>'+schEsc(p.ot_numero)+'</b> · Op '+schEsc(p.orden)+' <b>'+schEsc(p.operacion)+'</b> '+(p.estado?sb(p.estado):'')+'<br>'
     +schEsc((p.producto_codigo?p.producto_codigo+' — ':'')+(p.producto_nombre||'—'))+(p.cliente_nombre?' · '+schEsc(p.cliente_nombre):'')+'<br>'
-    +'<span style="color:#555">Sector: '+schEsc(p.sector||'—')+' · faltan '+falta+' u · planificadas a futuro '+(p.qty_planificada||0)+' u'
+    +'<span style="color:#555">Sector: '+schEsc(p.sector||'—')+' · faltan '+fN(falta)+' u · planificadas a futuro '+fN(p.qty_planificada||0)+' u'
     +(p.fecha_entrega?' · entrega '+schDM(p.fecha_entrega):'')+'</span>';
 }
 function schAbrirNuevo(p,maqId,inicio){
@@ -3569,8 +3784,8 @@ async function schGuardar(){
 }
 async function schBorrar(){
   var id=$('sch-id').value;if(!id)return;
-  if(!confirm('¿Eliminar este bloque de la planificación?'))return;
-  var r=await api('/api/scheduling/'+id,{method:'DELETE'});
+  if(!await confirmar('¿Eliminar este bloque de la planificación?'))return;
+  var r=await apiBorrar('/api/scheduling/'+id,'Bloque quitado de la planificación');
   if(r&&r.error){toast(r.error,'e');return;}
   closeMo('mo-sch');toast('Bloque eliminado');schRefrescar();
 }
@@ -3783,9 +3998,9 @@ async function loadDashOperativo(){
   $('dop-metrics').innerHTML=
     '<div class="metric"><div class="ml">OTs activas</div><div class="mv">'+d.ot_activas+'</div></div>'
    +'<div class="metric"><div class="ml">Completadas este mes</div><div class="mv" style="color:var(--color-text-success)">'+d.ot_completadas_mes+'</div></div>'
-   +'<div class="metric"><div class="ml">Stock crítico</div><div class="mv"'+(d.stock_critico>0?' style="color:#A32D2D"':'')+'>'+d.stock_critico+'</div>'
+   +'<div class="metric"><div class="ml">Stock crítico</div><div class="mv"'+(d.stock_critico>0?' style="color:#A32D2D"':'')+'>'+fN(d.stock_critico)+'</div>'
    +(d.stock_critico>0?'<div class="md e">materiales bajo mínimo</div>':'<div class="md">Sin alertas</div>')+'</div>'
-   +'<div class="metric"><div class="ml">Lotes sin liberar</div><div class="mv"'+(d.lotes_pendientes>0?' style="color:#854F0B"':'')+'>'+d.lotes_pendientes+'</div></div>'
+   +'<div class="metric"><div class="ml">Lotes sin liberar</div><div class="mv"'+(d.lotes_pendientes>0?' style="color:#854F0B"':'')+'>'+fN(d.lotes_pendientes)+'</div></div>'
    +'<div class="metric"><div class="ml">Máquinas fuera</div><div class="mv"'+(d.maquinas_fuera>0?' style="color:#854F0B"':'')+'>'+d.maquinas_fuera+'</div></div>'
    +'<div class="metric"><div class="ml">Rendimiento promedio</div><div class="mv">'+rendVal+'</div>'
    +(rend&&rend.total_novedades?'<div class="md">'+rend.total_novedades+' novedades (30d)</div>':'')+'</div>';
@@ -3794,7 +4009,7 @@ async function loadDashOperativo(){
   if(!d.ots_por_estado.length){$('dop-estados').innerHTML='<div class="em">Sin órdenes.</div>';}
   else{
     let h='<table><tr><th>Estado</th><th>Cantidad</th></tr>';
-    d.ots_por_estado.forEach(function(r){h+='<tr><td>'+sb(r.estado)+'</td><td><b>'+r.cantidad+'</b></td></tr>';});
+    d.ots_por_estado.forEach(function(r){h+='<tr><td>'+sb(r.estado)+'</td><td><b>'+fN(r.cantidad)+'</b></td></tr>';});
     $('dop-estados').innerHTML=h+'</table>';
   }
 
@@ -3803,7 +4018,7 @@ async function loadDashOperativo(){
   else{
     let h='<table><tr><th>Lote</th><th>Material</th><th>Cant.</th><th>Ingreso</th></tr>';
     d.lotes_ingresados.forEach(function(r){
-      h+='<tr><td><b>'+r.numero+'</b></td><td>'+r.mat_desc+'</td><td>'+r.cantidad_disponible+' '+r.unidad+'</td><td>'+fmtD(r.fecha_ingreso)+'</td></tr>';
+      h+='<tr><td><b>'+r.numero+'</b></td><td>'+r.mat_desc+'</td><td>'+fN(r.cantidad_disponible)+' '+r.unidad+'</td><td>'+fmtD(r.fecha_ingreso)+'</td></tr>';
     });
     $('dop-lotes').innerHTML=h+'</table>';
   }
@@ -3832,7 +4047,7 @@ async function loadDashOperativo(){
   else{
     let html='';
     d.alertas_mat.forEach(function(a){
-      html+='<div class="al al-e"><b>'+a.codigo+'</b> '+a.descripcion+' — '+a.stock+'/'+a.stock_min+' '+a.unidad+'</div>';
+      html+='<div class="al al-e"><b>'+a.codigo+'</b> '+a.descripcion+' — '+fN(a.stock)+'/'+fN(a.stock_min)+' '+a.unidad+'</div>';
     });
     $('dop-stock').innerHTML=html;
   }
@@ -3927,7 +4142,7 @@ async function loadDashEconomico(){
     let h='<table><tr><th>Tipo</th><th>Cantidad</th><th>%</th></tr>';
     emps.forEach(function(e){
       const pct=Math.round(e.cantidad/total*100);
-      h+='<tr><td>'+e.tipo+'</td><td><b>'+e.cantidad+'</b></td>'
+      h+='<tr><td>'+e.tipo+'</td><td><b>'+fN(e.cantidad)+'</b></td>'
         +'<td><div style="display:flex;align-items:center;gap:6px">'
         +'<div style="flex:1;background:var(--color-border-tertiary);border-radius:3px;height:8px">'
         +'<div style="background:var(--color-primary);height:8px;border-radius:3px;width:'+pct+'%"></div></div>'
@@ -3961,7 +4176,7 @@ async function loadDashEconomico(){
   else{
     let h='<table><tr><th>Estado</th><th>Cantidad</th><th>Total</th></tr>';
     d.presupuestos_estado.forEach(function(r){
-      h+='<tr><td>'+sb(r.estado)+'</td><td>'+r.cantidad+'</td><td>'+fmtM(r.total)+'</td></tr>';
+      h+='<tr><td>'+sb(r.estado)+'</td><td>'+fN(r.cantidad)+'</td><td>'+fmtM(r.total)+'</td></tr>';
     });
     $('dec-pres-estado').innerHTML=h+'</table>';
   }
@@ -4099,16 +4314,16 @@ function renderOT(){
   });
   h+='</tr>';
   const estadoColoresOT={'Pendiente':{bg:'#FAEEDA',fg:'#633806'},'En proceso':{bg:'#E6F1FB',fg:'#0C447C'},'Completada':{bg:'#EAF3DE',fg:'#27500A'},'Cancelada':{bg:'#F1F1F1',fg:'#555'}};
-  const _hoyOT=(function(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})(new Date());
   rows.forEach(r=>{
     const estadoCol=['admin','operario','vendedor'].includes(ROL)
       ?'<select onchange="cambiarEstadoOT('+r.id+',this)" style="font-family:inherit;font-size:11px;font-weight:500;padding:3px 9px;border-radius:7px;border:1px solid transparent;background:'+(estadoColoresOT[r.estado]?estadoColoresOT[r.estado].bg:'#fff')+';color:'+(estadoColoresOT[r.estado]?estadoColoresOT[r.estado].fg:'#1a1a1a')+';cursor:pointer">'
         +['Pendiente','En proceso','Completada','Cancelada'].map(function(e){return '<option value="'+e+'" style="background:#fff"'+(r.estado===e?' selected':'')+'>'+e+'</option>';}).join('')
         +'</select>'
       :sb(r.estado);
-    h+=`<tr id="ot-row-${r.id}" class="${_otSel===r.id?'ot-sel':''}" style="cursor:pointer" title="Doble clic: ver el avance de las operaciones" onclick="selOT(${r.id})"><td><input type="radio" name="ot-sel" ${_otSel===r.id?'checked':''} onclick="event.stopPropagation();selOT(${r.id})"></td><td>${r.lista_para_completar?`<span title="Todas las operaciones al 100% — lista para marcar como Completada" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#2E9E44;color:#fff;font-size:11px;font-weight:700;margin-right:6px;vertical-align:middle">!</span>`:''}<b>${r.numero}</b></td><td>${r.producto_codigo||'—'}</td><td>${r.producto_nombre||r.descripcion}</td><td>${r.cliente_nombre||'—'}</td>
-    <td>${r.cantidad}</td><td${(r.cantidad>0&&(r.total_realizado||0)>=r.cantidad)?' style="color:#2e7d32;font-weight:600" title="Ya se realizó toda la cantidad pedida"':''}>${r.total_realizado||0}</td><td title="${VER_MONETARIO?('Materiales: '+fmtM(r.costo_mat||0)+(r.costo_terciarizado?' + Terciarizado: '+fmtM(r.costo_terciarizado):'')):''}">${fmtM(r.costo_total!==undefined?r.costo_total:r.costo_mat)}</td><td>${r.costo_mo||0}</td>
-    <td onclick="event.stopPropagation()">${estadoCol}</td><td${(r.fecha_entrega&&String(r.fecha_entrega).slice(0,10)<_hoyOT&&!['Completada','Cancelada'].includes(r.estado))?' style="color:#A32D2D;font-weight:600" title="Fecha de entrega vencida"':''}>${fmtD(r.fecha_entrega)}</td>
+    const _otAbierta=!['Completada','Cancelada'].includes(r.estado);
+    h+=`<tr id="ot-row-${r.id}" class="${_otSel===r.id?'ot-sel':''}${venceFila(r.fecha_entrega,_otAbierta)}" style="cursor:pointer" title="Doble clic: ver el avance de las operaciones" onclick="selOT(${r.id})"><td><input type="radio" name="ot-sel" ${_otSel===r.id?'checked':''} onclick="event.stopPropagation();selOT(${r.id})"></td><td>${r.lista_para_completar?`<span title="Todas las operaciones al 100% — lista para marcar como Completada" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#2E9E44;color:#fff;font-size:11px;font-weight:700;margin-right:6px;vertical-align:middle">!</span>`:''}<b>${r.numero}</b></td><td>${r.producto_codigo||'—'}</td><td>${r.producto_nombre||r.descripcion}</td><td>${r.cliente_nombre||'—'}</td>
+    <td>${fN(r.cantidad)}</td><td${(r.cantidad>0&&(r.total_realizado||0)>=r.cantidad)?' style="color:#2e7d32;font-weight:600" title="Ya se realizó toda la cantidad pedida"':''}>${r.total_realizado||0}</td><td title="${VER_MONETARIO?('Materiales: '+fmtM(r.costo_mat||0)+(r.costo_terciarizado?' + Terciarizado: '+fmtM(r.costo_terciarizado):'')):''}">${fmtM(r.costo_total!==undefined?r.costo_total:r.costo_mat)}</td><td>${r.costo_mo||0}</td>
+    <td onclick="event.stopPropagation()">${estadoCol}</td><td${venceCelda(r.fecha_entrega,_otAbierta)}>${fmtD(r.fecha_entrega)}</td>
     <td>${r.oc_numero?`<span style="cursor:pointer;color:var(--color-accent);text-decoration:underline dotted" onclick="verAvanceOC(${r.oc_id},'${r.oc_numero}')" title="Ver avance de entrega">${r.oc_numero}</span>`:'—'}</td>`;
     h+='</tr>';
     if(_otAvanceAbierto===r.id) h+='<tr id="ot-avance-row"><td colspan="'+(cols.length+1)+'" style="background:#fafaf8;padding:8px 14px"><div id="ot-avance-box"><div class="ld">Cargando operaciones...</div></div></td></tr>';
@@ -4168,7 +4383,7 @@ async function cargarAvanceOT(oid){
     const pct=op.qty_requerida>0?Math.min(100,Math.round(op.qty_producida/op.qty_requerida*100)):0;
     const col=pct>=100?'#2E9E44':pct>=50?'#E0A100':'#C0392B';
     const sector=op.es_tercerizada?('<span class="b br" style="font-size:10px">TERC</span> '+(op.proveedor_nombre||'—')):(op.cat_maquina_nombre||'—');
-    h+='<tr><td>'+op.orden+'</td><td>'+op.nombre+'</td><td>'+sector+'</td><td>'+op.qty_requerida+'</td><td>'+op.qty_producida+'</td>'
+    h+='<tr><td>'+op.orden+'</td><td>'+op.nombre+'</td><td>'+sector+'</td><td>'+fN(op.qty_requerida)+'</td><td>'+fN(op.qty_producida)+'</td>'
       +'<td style="min-width:130px"><div style="background:#e6e6e0;border-radius:6px;height:10px;overflow:hidden;display:inline-block;width:90px;vertical-align:middle"><div style="height:10px;width:'+pct+'%;background:'+col+'"></div></div> <b style="font-size:11px">'+pct+'%</b></td>'
       +'<td>'+sb(op.estado)+'</td></tr>';
   });
@@ -4254,7 +4469,7 @@ async function abrirAsignLote(oid, mid, faltante, desc){
   lotes.forEach(function(l){
     h += '<tr id="al-row-'+l.id+'">'
       + '<td><b>'+l.numero+'</b></td>'
-      + '<td><b>'+l.disponible_libre+'</b></td>'
+      + '<td><b>'+fN(l.disponible_libre)+'</b></td>'
       + '<td>'+(l.certificado||'—')+'</td>'
       + '<td>'+fmtD(l.fecha_ingreso)+'</td>'
       + '<td><button class="btn btn-s" onclick="seleccionarLote('+l.id+','+l.disponible_libre+')" id="al-btn-'+l.id+'">Seleccionar</button></td>'
@@ -4291,7 +4506,7 @@ async function abrirAsignLoteParaModificar(oid, mid, desc){
   lotes.forEach(function(l){
     h += '<tr id="al-row-'+l.id+'">'
       + '<td><b>'+l.numero+'</b></td>'
-      + '<td><b>'+l.disponible_libre+'</b></td>'
+      + '<td><b>'+fN(l.disponible_libre)+'</b></td>'
       + '<td>'+(l.certificado||'—')+'</td>'
       + '<td>'+fmtD(l.fecha_ingreso)+'</td>'
       + '<td><button class="btn btn-s" onclick="seleccionarLote('+l.id+','+l.disponible_libre+')" id="al-btn-'+l.id+'">Seleccionar</button></td>'
@@ -4349,7 +4564,7 @@ async function confirmarAsignLote(){
   const res = await api('/api/ordenes/'+oid+'/materiales/'+mid+'/asignar_lote',
     {method:'POST', body:JSON.stringify({lote_id:_alLoteSelected, cantidad:qty})});
   if(res.ok){
-    toast('Lote asignado: '+qty+' u. de lote '+res.lote);
+    toast('Lote asignado: '+fN(qty)+' u. de lote '+res.lote);
     closeMo('mo-asign-lote');
     if(_alReturnCtx){
       const ctx = _alReturnCtx; _alReturnCtx = null;
@@ -4412,21 +4627,21 @@ async function guardarCantidadLote(loteId){
     {method:'PUT', body:JSON.stringify({cantidad:qty})});
   if(res.ok){
     toast(res.recortado
-      ? 'Solo se pudo bajar hasta '+res.cantidad_nueva+' (lo demás ya está consumido)'
-      : 'Cantidad actualizada: '+res.cantidad_anterior+' → '+res.cantidad_nueva, res.recortado?'w':'g');
+      ? 'Solo se pudo bajar hasta '+fN(res.cantidad_nueva)+' (lo demás ya está consumido)'
+      : 'Cantidad actualizada: '+fN(res.cantidad_anterior)+' → '+fN(res.cantidad_nueva), res.recortado?'w':'g');
     await refrescarModLotes(oid, mid);
   } else toast(res.error||'Error','e');
 }
 
 async function eliminarLoteAsignado(loteId){
-  if(!confirm('¿Quitar este lote de la OT? Se liberará lo que todavía no se haya consumido; si ya se usó parte en producción, esa parte queda registrada.')) return;
+  if(!await confirmar('¿Quitar este lote de la OT? Se liberará lo que todavía no se haya consumido; si ya se usó parte en producción, esa parte queda registrada.')) return;
   const oid = parseInt($('ml-oid').value);
   const mid = parseInt($('ml-mid').value);
   const res = await api('/api/ordenes/'+oid+'/materiales/'+mid+'/lotes/'+loteId,
     {method:'PUT', body:JSON.stringify({cantidad:0})});
   if(res.ok){
     toast(res.recortado
-      ? 'Lote '+res.lote+': se liberó lo no consumido, quedan '+res.cantidad_nueva+' ya usados en producción'
+      ? 'Lote '+res.lote+': se liberó lo no consumido, quedan '+fN(res.cantidad_nueva)+' ya usados en producción'
       : 'Lote '+res.lote+' quitado de la OT', res.recortado?'w':'g');
     await refrescarModLotes(oid, mid);
   } else toast(res.error||'Error','e');
@@ -4478,13 +4693,13 @@ async function loadHerramientas(){
             ? '<td><input type="number" min="1" step="1" id="herr-vida-'+r.id+'" value="'+(r.vida_util_herramienta||'')+'" placeholder="—" style="width:90px"></td>'
               + '<td><input type="number" min="0.01" step="0.01" id="herr-cant-'+r.id+'" value="'+r.cantidad+'" style="width:70px"> '+(r.unidad||'')+'</td>'
               + '<td style="white-space:nowrap"><button class="btn btn-s" onclick="updateHerramientaInv('+r.id+')">Guardar</button> <button class="btn btn-s btn-d" onclick="deleteHerramientaInv('+r.id+')">✕</button></td>'
-            : '<td>'+(r.vida_util_herramienta||'—')+'</td><td>'+r.cantidad+' '+(r.unidad||'')+'</td>')
+            : '<td>'+(r.vida_util_herramienta||'—')+'</td><td>'+fN(r.cantidad)+' '+(r.unidad||'')+'</td>')
         + '</tr>';
     });
     previas.forEach(function(r){
       hList += '<tr>'
         + '<td><b>'+r.nombre+'</b>'+(r.descripcion?' — '+r.descripcion:'')+'</td>'
-        + '<td>—</td><td>'+r.cantidad+' '+r.unidad+'</td>'
+        + '<td>—</td><td>'+fN(r.cantidad)+' '+r.unidad+'</td>'
         + (canEdit?'<td><button class="btn btn-s btn-d" onclick="deleteHerramienta('+r.id+')">✕</button></td>':'')
         + '</tr>';
     });
@@ -4540,15 +4755,15 @@ async function updateHerramientaInv(rid){
 }
 
 async function deleteHerramientaInv(rid){
-  if(!confirm('¿Quitar herramienta de la operación?')) return;
-  const res = await api('/api/operaciones/'+_herrOpId+'/herramientas_inv/'+rid,{method:'DELETE'});
+  if(!await confirmar('¿Quitar herramienta de la operación?')) return;
+  const res = await apiBorrar('/api/operaciones/'+_herrOpId+'/herramientas_inv/'+rid,'Herramienta quitada');
   if(res.ok) await _herrRefrescar('Quitada');
   else toast(res.error||'Error','e');
 }
 
 async function deleteHerramienta(hid){
-  if(!confirm('¿Eliminar herramienta?')) return;
-  const res = await api('/api/operaciones/'+_herrOpId+'/herramientas/'+hid,{method:'DELETE'});
+  if(!await confirmar('¿Eliminar herramienta?')) return;
+  const res = await apiBorrar('/api/operaciones/'+_herrOpId+'/herramientas/'+hid,'Herramienta eliminada');
   if(res.ok){ await loadHerramientas(); toast('Eliminada'); }
   else toast(res.error||'Error','e');
 }
@@ -4565,7 +4780,7 @@ async function verAvanceOC(ocId, ocNumero){
   let h = '<div style="margin-bottom:10px;font-size:13px">'
     + '<b>Avance general:</b> '
     + '<span style="color:'+pctColor+';font-size:16px;font-weight:700">'+pct+'%</span>'
-    + ' &nbsp; Entregado: '+data.total_entregado+' / '+data.total_requerido
+    + ' &nbsp; Entregado: '+fN(data.total_entregado)+' / '+fN(data.total_requerido)
     + '</div>';
   h += '<div style="background:var(--color-border-tertiary);border-radius:4px;height:10px;margin-bottom:10px">'
     + '<div style="background:'+pctColor+';height:10px;border-radius:4px;width:'+Math.min(pct,100)+'%;transition:width .4s"></div></div>';
@@ -4589,7 +4804,7 @@ async function verAvanceOC(ocId, ocNumero){
     h += '<div style="background:var(--color-border-tertiary);border-radius:3px;height:6px;margin-bottom:6px">'
       +'<div style="background:'+ic+';height:6px;border-radius:3px;width:'+Math.min(ipct,100)+'%"></div></div>';
     h += '<div style="font-size:11px;color:var(--color-text-secondary)">'
-      +'Pedido: '+item.cantidad+' '+item.unidad
+      +'Pedido: '+fN(item.cantidad)+' '+item.unidad
       +' &nbsp;|&nbsp; Entregado: '+item.entregado
       +(tieneExceso?' &nbsp;|&nbsp; <span style="color:#E65100;font-weight:600">Exceso: '+item.exceso+'</span>':'')
       +(item.fecha_deseada?' &nbsp;|&nbsp; F. deseada: '+fmtD(item.fecha_deseada):'')
@@ -4602,7 +4817,7 @@ async function verAvanceOC(ocId, ocNumero){
       h += '<div style="margin-top:6px;font-size:11px">';
       h += '<b style="color:var(--color-text-secondary)">Remitos vinculados:</b> ';
       h += item.remitos.map(function(r){
-        return r.numero+' ('+fmtD(r.fecha)+') — '+r.cantidad+' u.';
+        return r.numero+' ('+fmtD(r.fecha)+') — '+fN(r.cantidad)+' u.';
       }).join(', ');
       h += '</div>';
     }
@@ -4951,7 +5166,7 @@ function renderOTT(){
       +'<td>'+fmtM(r.precio_acordado||0)+'</td>'
       +'<td>'+(!r.operacion_id&&!r.proceso_op_id?'<span class="b bk" style="font-size:10px">Manual</span>':(r.es_ultimo_nivel?'<span class="b bg" style="font-size:10px">PT</span>':'<span class="b ba" style="font-size:10px">Semi</span>'))+'</td>'
       +'<td><span class="b '+(estCol[r.estado]||'bk')+'">'+r.estado+'</span></td>'
-      +'<td>'+(enEspera>0?'<b>'+enEspera+'</b>':'<span style="color:var(--color-text-secondary)">—</span>')+'</td>'
+      +'<td>'+(enEspera>0?'<b>'+fN(enEspera)+'</b>':'<span style="color:var(--color-text-secondary)">—</span>')+'</td>'
       +'<td style="font-size:11px">'+(r.sc_numeros||'—')+'</td>'
       +'</tr>';
   });
@@ -4996,7 +5211,7 @@ async function openOTTDetalle(ottId){
   h+='<div class="fg"><b>Operación:</b> '+(r.op_orden||'')+(r.op_nombre?' — '+r.op_nombre:'—')+'</div>';
   h+='<div class="fg"><b>Proveedor:</b> '+(r.proveedor_nombre||'Sin asignar')+'</div>';
   if(r.material_codigo) h+='<div class="fg"><b>Material (insumo / retorno):</b> '+r.material_codigo+' — '+(r.material_descripcion||'')+'</div>';
-  if(!r.operacion_id&&!r.proceso_op_id) h+='<div class="fg"><b>Tipo:</b> OTT manual — cantidad indicada: '+(r.cantidad_plan||0)+'</div>';
+  if(!r.operacion_id&&!r.proceso_op_id) h+='<div class="fg"><b>Tipo:</b> OTT manual — cantidad indicada: '+fN(r.cantidad_plan||0)+'</div>';
   h+=monOnly('<div class="fg"><b>Precio acordado:</b> '+fmtM(r.precio_acordado||0)+'</div>');
   h+='<div class="fg"><b>Nivel:</b> '+(r.es_ultimo_nivel?'Último nivel (PT → cliente)':'Paso intermedio (semielaborado → OT)')+'</div>';
   h+='<div class="fg"><b>Estado:</b> '+r.estado+'</div>';
@@ -5054,10 +5269,10 @@ async function confirmarEnvioOTT(){
       abrirEtiquetas({origen:'OTT',referencia:res.remito_numero,cantidad:qty});
     }
     (res.solicitudes_compra_insumo||[]).forEach(function(s){
-      toast((s.actualizada?'SC ampliada':'SC '+s.numero+' generada')+' por faltante de '+s.material+' ('+s.cantidad+')','w');
+      toast((s.actualizada?'SC ampliada':'SC '+s.numero+' generada')+' por faltante de '+s.material+' ('+fN(s.cantidad)+')','w');
     });
     (res.ots_auxiliares_insumo||[]).forEach(function(o){
-      toast((o.actualizada?'OT '+o.numero+' ampliada':'OT auxiliar '+o.numero+' generada')+' por faltante de '+o.producto+' ('+o.cantidad+')','w');
+      toast((o.actualizada?'OT '+o.numero+' ampliada':'OT auxiliar '+o.numero+' generada')+' por faltante de '+o.producto+' ('+fN(o.cantidad)+')','w');
     });
     closeMo('mo-ott-envio');
     loadOTT();
@@ -5100,16 +5315,16 @@ async function abrirDevolucionOTT(ottId){
   if(!r||r.error){toast(r&&r.error||'Error','e');return;}
   const cant=r.rechazado_pendiente_devolver||0;
   if(cant<=0.0001){toast('No hay piezas rechazadas pendientes de devolver','w');return;}
-  if(!confirm('Se van a devolver '+cant+' pieza(s) rechazada(s) al proveedor '+(r.proveedor_nombre||'')+'.\n\nSe generará un remito de devolución y esa cantidad vuelve a quedar pendiente de recibir (reemplazo) en el mismo lote.\n\n¿Confirmar devolución?')) return;
+  if(!await confirmar('Se van a devolver '+fN(cant)+' pieza(s) rechazada(s) al proveedor '+(r.proveedor_nombre||'')+'.\n\nSe generará un remito de devolución y esa cantidad vuelve a quedar pendiente de recibir (reemplazo) en el mismo lote.\n\n¿Confirmar devolución?')) return;
   const res=await api('/api/ott/'+ottId+'/devolver_rechazo',{method:'POST',body:JSON.stringify({})});
   if(res.ok){
-    toast('Remito '+res.remito_numero+' emitido — '+res.cantidad_devuelta+' pieza(s) devuelta(s) al proveedor');
+    toast('Remito '+res.remito_numero+' emitido — '+fN(res.cantidad_devuelta)+' pieza(s) devuelta(s) al proveedor');
     loadOTT();
   } else toast(res.error||'Error','e');
 }
 
 async function completarOTT(ottId){
-  if(!confirm('¿Confirmar que la OTT fue completada? Esta acción no se puede deshacer.'))return;
+  if(!await confirmar('¿Confirmar que la OTT fue completada? Esta acción no se puede deshacer.'))return;
   const res=await api('/api/ott/'+ottId+'/completar',{method:'POST',body:JSON.stringify({})});
   if(res.ok){toast('OTT completada');loadOTT();}
   else toast(res.error||'Error','e');
@@ -5410,7 +5625,7 @@ async function saveOT(){
       const otsNuevas=otsAux.filter(function(o){return !o.actualizada;});
       if(otsNuevas.length){
         toast('Insumo(s) sin stock suficiente: se generó OT auxiliar de fabricación — '
-          +otsNuevas.map(function(o){return o.numero+' ('+o.producto+' x'+o.cantidad+')';}).join(', '), 'w');
+          +otsNuevas.map(function(o){return o.numero+' ('+o.producto+' x'+fN(o.cantidad)+')';}).join(', '), 'w');
       }
     }
     _prod=[];loadOT();
@@ -5525,7 +5740,7 @@ async function verProc(pid,nom){
         ?op.materiales.map(function(m){return '<span class="tag tag-g">'+m.descripcion+': '+(m.vida_util_herramienta>0?'1 c/ '+m.vida_util_herramienta+' pz (vida útil)':m.cantidad+' '+m.unidad)+'</span>';})
         :[];
       const prodsInsumoArr=op.productos_insumo&&op.productos_insumo.length
-        ?op.productos_insumo.map(function(pi){return '<span class="tag tag-g" title="Producto usado como insumo"> '+pi.descripcion+': '+pi.cantidad+' '+pi.unidad+'</span>';})
+        ?op.productos_insumo.map(function(pi){return '<span class="tag tag-g" title="Producto usado como insumo"> '+pi.descripcion+': '+fN(pi.cantidad)+' '+pi.unidad+'</span>';})
         :[];
       html+='<div class="opc"><div class="oph"><div>';
       const tercBadge=op.es_tercerizada?'<span class="b br" style="font-size:10px;margin-left:6px">TERCERIZADO</span>':'';
@@ -5640,8 +5855,8 @@ async function saveOp(){
 }
 
 async function delOp(oid){
-  if(!confirm('¿Eliminar esta operación?'))return;
-  const res=await api('/api/operaciones/'+oid,{method:'DELETE'});
+  if(!await confirmar('¿Eliminar esta operación?'))return;
+  const res=await apiBorrar('/api/operaciones/'+oid,'Operación eliminada');
   if(res.ok){toast('Operación eliminada');verProc(curProdId,curProdNom);}
   else toast(res.error||'Error','e');
 }
@@ -5826,7 +6041,7 @@ async function verVersion(productId, versionId) {
     // Mostrar modal
     openMo('mo-version');
   } catch (err) {
-    alert('Error al cargar la versión');
+    toast('Error al cargar la versión','e');
   }
 }
 
@@ -5845,7 +6060,7 @@ function verVersionProcesoCompleto() {
   let html = '';
   sortOpsNumeric(operaciones).forEach(op => {
     const matsArr = (op.materiales && op.materiales.length)
-      ? op.materiales.map(m => `<span class="tag tag-g">${m.mat_descripcion || m.mat_codigo || '—'}: ${m.cantidad} ${m.unidad || m.mat_unidad || ''}</span>`)
+      ? op.materiales.map(m => `<span class="tag tag-g">${m.mat_descripcion || m.mat_codigo || '—'}: ${fN(m.cantidad)} ${m.unidad || m.mat_unidad || ''}</span>`)
       : [];
     const tercBadge = op.es_tercerizada ? '<span class="b br" style="font-size:10px;margin-left:6px">TERCERIZADO</span>' : '';
 
@@ -5875,20 +6090,18 @@ function verVersionProcesoCompleto() {
 
 // Eliminar versión
 async function eliminarVersion(productId, versionId) {
-  if (!confirm('¿Eliminar esta versión?')) return;
+  if (!await confirmar('¿Eliminar esta versión?')) return;
 
   try {
-    const res = await fetch(`/api/productos/${productId}/versiones/${versionId}`, {
-      method: 'DELETE'
-    });
+    const res = await apiBorrar(`/api/productos/${productId}/versiones/${versionId}`, 'Versión eliminada');
 
     if (res.ok) {
       cargarVersiones(productId);
     } else {
-      alert('Error al eliminar la versión');
+      toast('Error al eliminar la versión','e');
     }
   } catch (err) {
-    alert('Error al eliminar la versión');
+    toast('Error al eliminar la versión','e');
   }
 }
 
@@ -5966,15 +6179,15 @@ async function loadArchivosProd(pid){
 }
 
 async function nuevaCarpetaProd(pid){
-  const nombre=prompt('Nombre de la nueva carpeta'+((_archSub[pid]||'')?' (dentro de '+_archSub[pid]+')':'')+':');
+  const nombre=await pedirTexto('Nombre de la nueva carpeta'+((_archSub[pid]||'')?' (dentro de '+_archSub[pid]+')':'')+':');
   if(!nombre||!nombre.trim()) return;
   const res=await api('/api/productos/'+pid+'/carpetas',{method:'POST',body:JSON.stringify({nombre:nombre.trim(),sub:_archSub[pid]||''})});
   if(res.ok){ toast('Carpeta creada'); loadArchivosProd(pid); } else toast(res.error||'Error','e');
 }
 async function eliminarCarpetaProd(pid){
   const sub=_archSub[pid]||''; if(!sub) return;
-  if(!confirm('¿Eliminar la carpeta "'+sub+'"?')) return;
-  const res=await api('/api/productos/'+pid+'/carpetas?sub='+encodeURIComponent(sub),{method:'DELETE'});
+  if(!await confirmar('¿Eliminar la carpeta "'+sub+'"?')) return;
+  const res=await apiBorrar('/api/productos/'+pid+'/carpetas?sub='+encodeURIComponent(sub),'Carpeta eliminada');
   if(res.ok){ toast('Carpeta eliminada'); _archSub[pid]=sub.split('/').slice(0,-1).join('/'); loadArchivosProd(pid); }
   else toast(res.error||'Error','e');
 }
@@ -5999,8 +6212,8 @@ async function uploadArchivosProd(pid, input){
 }
 
 async function deleteArchivoProd(pid, ruta){
-  if(!confirm('¿Eliminar "'+ruta+'"?')) return;
-  const res=await api('/api/productos/'+pid+'/archivos/'+_encPath(ruta),{method:'DELETE'});
+  if(!await confirmar('¿Eliminar "'+ruta+'"?')) return;
+  const res=await apiBorrar('/api/productos/'+pid+'/archivos/'+_encPath(ruta),'Archivo eliminado');
   if(res.ok){ toast('Archivo eliminado'); loadArchivosProd(pid); }
   else toast(res.error||'Error','e');
 }
@@ -6481,8 +6694,8 @@ function renderInvFiltered(){
         +'<td>'+_cod+'</td>'
         +'<td>'+(r.producto_nombre||r.descripcion)+'</td>'
         +'<td>'+_cli+'</td>'
-        +'<td><b>'+r.stock+'</b> '+r.unidad+'</td>'
-        +'<td>'+r.stock_min+'</td>'
+        +'<td><b>'+fN(r.stock)+'</b> '+r.unidad+'</td>'
+        +'<td>'+fN(r.stock_min)+'</td>'
         +'<td>'+(r.stock_max||'—')+'</td>'
         +'<td>'+fmtM(r.precio_unit)+'</td>'
         +'<td>'+stBadge(r.stock,r.stock_min)+'</td>'
@@ -6503,9 +6716,9 @@ function renderInvFiltered(){
       +'<td>'+r.descripcion+'</td>'
       +'<td><span class="b bk">'+r.categoria+'</span></td>'
       +'<td>'+_cp+'</td>'
-      +'<td>'+r.stock+' '+r.unidad+'</td>'
+      +'<td>'+fN(r.stock)+' '+r.unidad+'</td>'
       +'<td>'+stBar(r.stock,r.stock_min,r.stock_max)+'</td>'
-      +'<td>'+r.stock_min+'</td>'
+      +'<td>'+fN(r.stock_min)+'</td>'
       +'<td>'+(r.stock_max||'—')+'</td>'
       +'<td>'+fmtM(r.precio_unit)+'</td>'
       +'<td>'+(r.proveedor_nombre||'—')+'</td>'
@@ -6604,7 +6817,7 @@ async function loadRecOCPend(){
   pend.forEach(function(r){
     const pendCant=(r.items||[]).reduce(function(a,i){return a+(i.sc_ott_id?0:Math.max(0,i.cantidad-i.cantidad_recibida));},0);
     h+='<tr><td><b>'+r.numero+'</b></td><td>'+r.proveedor_nombre+'</td><td>'+sb(r.estado)+'</td>'
-      +'<td><b>'+pendCant+'</b></td>'
+      +'<td><b>'+fN(pendCant)+'</b></td>'
       +'<td><button class="btn btn-s btn-p" onclick="openRecOC('+r.id+')">Recibir</button></td></tr>';
   });
   $('rec-oc-pend-list').innerHTML=h+'</table>';
@@ -6620,7 +6833,7 @@ function openRecOC(id){
   (r.items||[]).forEach(function(i){
     const pend=Math.max(0,i.cantidad-i.cantidad_recibida);
     if(pend<=0.0001 || i.sc_ott_id) return;
-    h+='<tr><td>'+i.descripcion+'</td><td>'+i.cantidad+'</td><td>'+i.cantidad_recibida+'</td>'
+    h+='<tr><td>'+i.descripcion+'</td><td>'+fN(i.cantidad)+'</td><td>'+fN(i.cantidad_recibida)+'</td>'
       +'<td><input type="number" data-iid="'+i.id+'" value="'+pend+'" min="0" max="'+pend+'" step="0.01" style="width:80px;font-size:12px;padding:3px 6px;border:1px solid var(--color-border-tertiary);border-radius:5px;background:var(--color-background-primary);color:var(--color-text-primary)"></td></tr>';
   });
   $('recoc-items').innerHTML=h+'</table>';
@@ -6656,7 +6869,7 @@ async function loadRecOTTPend(){
     h+='<tr><td><b>'+r.numero+'</b></td><td>'+(r.ot_numero||'—')+'</td><td style="font-size:11px">'+(r.producto_codigo||'—')+'</td>'
       +'<td>'+(r.proveedor_nombre||'—')+'</td>'
       +'<td>'+(r.es_ultimo_nivel?'<span class="b bg" style="font-size:10px">PT</span>':'<span class="b ba" style="font-size:10px">Semi</span>')+'</td>'
-      +'<td>'+(enEspera>0?'<b>'+enEspera+'</b>':'<span style="color:var(--color-text-secondary)">—</span>')+'</td>'
+      +'<td>'+(enEspera>0?'<b>'+fN(enEspera)+'</b>':'<span style="color:var(--color-text-secondary)">—</span>')+'</td>'
       +'<td><button class="btn btn-s btn-p" onclick="abrirRetornoOTT('+r.id+','+r.es_ultimo_nivel+')">Registrar retorno</button></td></tr>';
   });
   $('rec-ott-pend-list').innerHTML=h+'</table>';
@@ -6963,9 +7176,18 @@ async function saveProv(){
 // ── Presupuestos ──────────────────────────────────────────────────────────────
 function calcT(){const s=parseFloat($('pres-sub').value)||0;const i=parseFloat($('pres-iva').value)||0;$('pres-tot').value=fmtM(s*(1+i/100));}
 
-async function openPres(){
+async function openPres(r){
   if(!_cli.length)_cli=await api('/api/clientes');
-  cliBuscadorClear('pres-cli');calcT();openMo('mo-pres');
+  $('pres-id').value=r?r.id:'';
+  $('pres-title').textContent=r?'Editar presupuesto '+r.numero:'Nuevo presupuesto';
+  $('pres-des').value=r?(r.descripcion||''):'';
+  if(r&&r.cliente_id) cliBuscadorSet('pres-cli',r.cliente_id); else cliBuscadorClear('pres-cli');
+  $('pres-est').value=r?r.estado:'Borrador';
+  $('pres-sub').value=r&&r.subtotal!=null?r.subtotal:'';
+  $('pres-iva').value=r&&r.iva_pct!=null?r.iva_pct:21;
+  $('pres-val').value=r&&r.validez_dias!=null?r.validez_dias:30;
+  $('pres-obs').value=r?(r.obs||''):'';
+  calcT();openMo('mo-pres');
 }
 
 async function editCli(r){
@@ -6991,6 +7213,7 @@ let _presTab='pres';
 document.querySelectorAll('#pres-tabs .tab').forEach(t=>t.addEventListener('click',()=>{
   document.querySelectorAll('#pres-tabs .tab').forEach(x=>x.classList.remove('active'));
   t.classList.add('active');_presTab=t.dataset.t;
+  $('p-presupuestos').dataset.pt=_presTab;
   $('pres-sec-pres').style.display=_presTab==='pres'?'':'none';
   $('pres-sec-pcot').style.display=_presTab==='pcot'?'':'none';
   if(_presTab==='pcot') loadPcot();
@@ -7076,8 +7299,8 @@ async function pcotSelAccion(a){
   if(!['admin','vendedor'].includes(ROL)) return;
   if(a==='edit') openPcot(r);
   else if(a==='elim'){
-    if(!confirm('¿Eliminar el pedido de cotización '+r.numero+'?')) return;
-    const res=await api('/api/pedidos_cotizacion/'+r.id,{method:'DELETE'});
+    if(!await confirmar('¿Eliminar el pedido de cotización '+r.numero+'?')) return;
+    const res=await apiBorrar('/api/pedidos_cotizacion/'+r.id,'Pedido de cotización '+r.numero+' eliminado');
     if(res.ok){toast('Pedido '+r.numero+' eliminado');_pcotSel=null;loadPcot();}
     else toast(res.error||'Error','e');
   }
@@ -7135,22 +7358,107 @@ async function savePcot(){
   else toast(res.error||'Error','e');
 }
 
+let _pres=[];
+let _presSel=null;
+const PRES_ESTADOS=['Borrador','Enviado','Aprobado','Rechazado','Facturado'];
 async function loadPres(){
   if(_presTab==='pcot') loadPcot();
   const rows=await api('/api/presupuestos');
-  if(!rows.length){$('pres-list').innerHTML='<div class="em">No hay presupuestos. Usá «+ Nuevo» para crear el primero.</div>';return;}
-  let h='<table><tr><th>N°</th><th>Cliente</th><th>Descripción</th><th>Total</th><th>Validez</th><th>Fecha</th><th>Estado</th></tr>';
-  rows.forEach(r=>{h+=`<tr><td><b>${r.numero}</b></td><td>${r.cliente_nombre||'—'}</td><td>${r.descripcion}</td><td><b>${fmtM(r.total)}</b></td><td>${r.validez_dias}d</td><td>${fmtD(r.creado)}</td><td>${sb(r.estado)}</td></tr>`;});
-  $('pres-list').innerHTML=h+'</table>';
+  _pres=Array.isArray(rows)?rows:[];
+  if(_presSel!==null&&!_pres.some(x=>x.id===_presSel)) _presSel=null;
+  renderPres();
+}
+function clearFiltrosPres(){
+  ['pres-fil-cli','pres-fil-cli-search','pres-fil-est','pres-fil-tmin','pres-fil-tmax','pres-fil-desde','pres-fil-hasta'].forEach(function(id){if($(id))$(id).value='';});
+  renderPres();
+}
+function _presFiltrados(){
+  const v=function(id){return $(id)?$(id).value:'';};
+  const cli=v('pres-fil-cli-search')?v('pres-fil-cli'):'';
+  const tmin=v('pres-fil-tmin')===''?null:parseFloat(v('pres-fil-tmin'));
+  const tmax=v('pres-fil-tmax')===''?null:parseFloat(v('pres-fil-tmax'));
+  const desde=v('pres-fil-desde'), hasta=v('pres-fil-hasta'), est=v('pres-fil-est');
+  return _pres.filter(function(r){
+    if(cli&&String(r.cliente_id)!==String(cli)) return false;
+    if(est&&r.estado!==est) return false;
+    if(tmin!==null&&!((+r.total||0)>=tmin)) return false;
+    if(tmax!==null&&!((+r.total||0)<=tmax)) return false;
+    const f=(r.creado||'').slice(0,10);
+    if(desde&&f<desde) return false;
+    if(hasta&&f>hasta) return false;
+    return true;
+  });
+}
+function renderPres(){
+  if(!_pres.length){$('pres-list').innerHTML='<div class="em">No hay presupuestos.'+(['admin','vendedor'].includes(ROL)?' Usá "Nuevo presupuesto" para crear el primero.':'')+'</div>';actualizarToolbarPres();return;}
+  const lista=_presFiltrados();
+  if(!lista.length){$('pres-list').innerHTML='<div class="em">Sin resultados para los filtros seleccionados.</div>';actualizarToolbarPres();return;}
+  const puede=['admin','vendedor'].includes(ROL);
+  let h='<table><tr><th style="width:24px"></th><th>N°</th><th>Cliente</th><th>Descripción</th><th>Total</th><th>Validez</th><th>Fecha</th><th>Estado</th></tr>';
+  lista.forEach(r=>{
+    const sel=_presSel===r.id;
+    // Facturado = presupuesto cerrado: ya no cambia de estado ni se edita.
+    const est=(puede&&r.estado!=='Facturado')
+      ?'<select class="pres-est-sel" onclick="event.stopPropagation()" onchange="presCambiarEstado('+r.id+',this)">'
+        +PRES_ESTADOS.concat(PRES_ESTADOS.includes(r.estado)?[]:[r.estado]).map(e=>'<option'+(e===r.estado?' selected':'')+'>'+e+'</option>').join('')+'</select>'
+      :sb(r.estado)+(r.estado==='Facturado'?' <span title="Presupuesto cerrado" style="font-size:11px">🔒</span>':'');
+    h+='<tr id="pres-row-'+r.id+'" class="'+(sel?'ot-sel':'')+'" style="cursor:pointer" onclick="selPres('+r.id+')" ondblclick="selPres('+r.id+');presSelAccion(\'edit\')">'
+      +'<td><input type="radio" name="pres-sel" '+(sel?'checked':'')+' onclick="event.stopPropagation();selPres('+r.id+')"></td>'
+      +'<td><b>'+r.numero+'</b></td><td>'+(r.cliente_nombre||'—')+'</td><td>'+(r.descripcion||'')+'</td><td><b>'+fmtM(r.total)+'</b></td>'
+      +'<td>'+r.validez_dias+'d</td><td>'+fmtD(r.creado)+'</td><td>'+est+'</td></tr>';
+  });
+  $('pres-list').innerHTML=h+'</table>'
+    +'<div style="font-size:11px;color:var(--color-text-secondary);margin-top:4px">'+lista.length+' presupuesto'+(lista.length!==1?'s':'')+(lista.length!==_pres.length?' (de '+_pres.length+' total)':'')+'</div>';
+  actualizarToolbarPres();
+}
+function selPres(id){
+  _presSel=id;
+  document.querySelectorAll('#pres-list tr.ot-sel').forEach(tr=>tr.classList.remove('ot-sel'));
+  const tr=$('pres-row-'+id);
+  if(tr){ tr.classList.add('ot-sel'); const rd=tr.querySelector('input[type=radio]'); if(rd) rd.checked=true; }
+  actualizarToolbarPres();
+}
+function actualizarToolbarPres(){
+  const r=_presSel!==null?_pres.find(x=>x.id===_presSel):null;
+  const lbl=$('pres-sel-label'); if(lbl) lbl.textContent=r?r.numero:'–';
+  const b=$('pres-b-edit');
+  if(b){
+    b.disabled=!r||r.estado==='Facturado';
+    b.title=!r?'Editar el presupuesto seleccionado':(r.estado==='Facturado'?'El presupuesto está facturado (cerrado): no se puede editar':'Editar el presupuesto '+r.numero);
+  }
+}
+function presSelAccion(a){
+  const r=_presSel!==null?_pres.find(x=>x.id===_presSel):null;
+  if(!r){toast('Seleccioná un presupuesto de la lista','w');return;}
+  if(!['admin','vendedor'].includes(ROL)) return;
+  if(a==='edit'){
+    if(r.estado==='Facturado'){toast('El presupuesto '+r.numero+' está facturado (cerrado): no se puede editar','w');return;}
+    openPres(r);
+  }
+}
+function _presConfirmaFacturar(numero){
+  return confirmar('¿Marcar '+(numero?'el presupuesto '+numero:'el presupuesto')+' como Facturado?\n\nEl presupuesto queda cerrado: ya no se podrá editar ni cambiar de estado.');
+}
+async function presCambiarEstado(id,sel){
+  const r=_pres.find(x=>x.id===id); if(!r) return;
+  const nuevo=sel.value;
+  if(nuevo===r.estado) return;
+  if(nuevo==='Facturado'&&!await _presConfirmaFacturar(r.numero)){sel.value=r.estado;return;}
+  const res=await api('/api/presupuestos/'+id,{method:'PUT',body:JSON.stringify({estado:nuevo})});
+  if(res.ok){toast(nuevo==='Facturado'?'Presupuesto '+r.numero+' facturado y cerrado':'Presupuesto '+r.numero+': '+nuevo);loadPres();}
+  else{toast(res.error||'Error','e');sel.value=r.estado;}
 }
 
 async function savePres(){
+  const id=$('pres-id').value;
   const body={descripcion:$('pres-des').value,cliente_id:$('pres-cli').value||null,
     estado:$('pres-est').value,subtotal:$('pres-sub').value||0,
     iva_pct:$('pres-iva').value||21,validez_dias:$('pres-val').value||30,obs:$('pres-obs').value};
   if(!body.descripcion){toast('Descripción requerida','w');return;}
-  const res=await api('/api/presupuestos',{method:'POST',body:JSON.stringify(body)});
-  if(res.ok){toast('Presupuesto '+res.numero+' creado');closeMo('mo-pres');loadPres();}
+  const ant=id?_pres.find(x=>String(x.id)===String(id)):null;
+  if(body.estado==='Facturado'&&(!ant||ant.estado!=='Facturado')&&!await _presConfirmaFacturar(ant&&ant.numero)) return;
+  const res=await api('/api/presupuestos'+(id?'/'+id:''),{method:id?'PUT':'POST',body:JSON.stringify(body)});
+  if(res.ok){toast(id?'Presupuesto actualizado':'Presupuesto '+res.numero+' creado');closeMo('mo-pres');if(!id)_presSel=res.id;loadPres();}
   else toast(res.error||'Error','e');
 }
 
@@ -7314,8 +7622,8 @@ async function togglePronosticoVentasEstado(id,estadoActual){
 }
 
 async function eliminarPronosticoVenta(id,codigo){
-  if(!confirm('¿Eliminar el pronóstico "'+codigo+'"? Esta acción no se puede deshacer.')) return;
-  const res=await api('/api/pronosticos_venta/'+id,{method:'DELETE'});
+  if(!await confirmar('¿Eliminar el pronóstico "'+codigo+'"? Esta acción no se puede deshacer.')) return;
+  const res=await apiBorrar('/api/pronosticos_venta/'+id,'Pronóstico eliminado');
   if(res.ok){
     toast('Pronóstico eliminado');
     if(_pvActualId===id){_pvActualId=null;}
@@ -7420,7 +7728,7 @@ async function consolidarPronostico(){
   if(!meses.length){toast('No hay renglones pendientes de convertir en los pronósticos seleccionados','w');return;}
   _pronMesIds=ids;
   const sel=$('pron-mes-select');
-  sel.innerHTML=meses.map(m=>`<option value="${m.mes}">${fmtMesLabel(m.mes)} — ${m.items_pendientes} renglón(es), ${Math.round(m.total_qty||0)} u.</option>`).join('');
+  sel.innerHTML=meses.map(m=>`<option value="${m.mes}">${fmtMesLabel(m.mes)} — ${fN(m.items_pendientes)} renglón(es), ${Math.round(m.total_qty||0)} u.</option>`).join('');
   const ocIds=[...document.querySelectorAll('.oc-chk:checked')].map(c=>parseInt(c.value));
   if(ocIds.length){
     $('pron-oc-count').textContent=ocIds.length;
@@ -7440,12 +7748,12 @@ async function confirmarConsolidarPronostico(){
   const msgConfirm=ocIds.length
     ? `¿Consolidar hasta el mes ${fmtMesLabel(mes)} (incluye meses anteriores pendientes) junto con ${ocIds.length} pedido(s) de cliente, y generar OTs automáticamente?`
     : `¿Consolidar hasta el mes ${fmtMesLabel(mes)} (incluye meses anteriores pendientes) y generar OTs automáticamente?`;
-  if(!confirm(msgConfirm))return;
+  if(!await confirmar(msgConfirm))return;
   let msgs=[];
   if(ocIds.length){
     const resOc=await api('/api/mrp/consolidar',{method:'POST',body:JSON.stringify({oc_ids:ocIds})});
     if(resOc.ok){
-      const numsOc=resOc.ots.map(o=>o.numero+' ('+o.producto+' x'+o.cantidad+')').join(', ');
+      const numsOc=resOc.ots.map(o=>o.numero+' ('+o.producto+' x'+fN(o.cantidad)+')').join(', ');
       let m='OTs de pedidos: '+numsOc;
       if(resOc.solicitudes_compra&&resOc.solicitudes_compra.length) m+=' · '+resOc.solicitudes_compra.length+' SC generada'+(resOc.solicitudes_compra.length!==1?'s':'');
       msgs.push(m);
@@ -7457,7 +7765,7 @@ async function confirmarConsolidarPronostico(){
   if(res.ok){
     closeMo('mo-pron-mes');
     const mesesInc=[...new Set(res.ots.map(o=>o.mes))].sort();
-    const nums=res.ots.map(o=>o.numero+' ('+o.producto+' x'+o.cantidad+', '+fmtMesLabel(o.mes)+')').join(', ');
+    const nums=res.ots.map(o=>o.numero+' ('+o.producto+' x'+fN(o.cantidad)+', '+fmtMesLabel(o.mes)+')').join(', ');
     let msg='OTs de pronóstico — meses '+mesesInc.map(fmtMesLabel).join(', ')+': '+nums;
     if(res.solicitudes_compra&&res.solicitudes_compra.length) msg+=' · '+res.solicitudes_compra.length+' SC de compra generada'+(res.solicitudes_compra.length!==1?'s':'');
     if(res.ots_auxiliares&&res.ots_auxiliares.length) msg+=' · '+res.ots_auxiliares.length+' OT auxiliar'+(res.ots_auxiliares.length!==1?'es':'')+' por faltante de insumo';
@@ -7757,8 +8065,8 @@ async function saveRol(){
 }
 async function delRol(id){
   const r=_roles.find(function(x){return x.id===id;});
-  if(!confirm('¿Eliminar el rol "'+(r?r.nombre:id)+'"?')) return;
-  const res=await api('/api/roles/'+id,{method:'DELETE'});
+  if(!await confirmar('¿Eliminar el rol "'+(r?r.nombre:id)+'"?')) return;
+  const res=await apiBorrar('/api/roles/'+id,'Rol eliminado');
   if(res.ok){toast('Rol eliminado');loadRoles();} else toast(res.error||'Error','e');
 }
 
@@ -7807,8 +8115,8 @@ async function saveUsr(){
 }
 
 async function delUsr(id,u){
-  if(!confirm(`¿Eliminar usuario "${u}"?`))return;
-  const res=await api('/api/usuarios/'+id,{method:'DELETE'});
+  if(!await confirmar(`¿Eliminar usuario "${u}"?`))return;
+  const res=await apiBorrar('/api/usuarios/'+id,'Usuario eliminado');
   if(res.ok){toast('Usuario eliminado');loadUsr();}
   else toast(res.error||'Error','e');
 }
@@ -7886,8 +8194,8 @@ async function saveCatMaq(){
   else toast(res.error||'Error','e');
 }
 async function deleteCatMaq(id){
-  if(!confirm('¿Eliminar esta categoría?')) return;
-  const res=await api('/api/categorias_maquina/'+id,{method:'DELETE'});
+  if(!await confirmar('¿Eliminar esta categoría?')) return;
+  const res=await apiBorrar('/api/categorias_maquina/'+id,'Categoría eliminada');
   if(res.ok){toast('Categoría eliminada');_catM=[];loadCatMaq();}
   else toast(res.error||'Error','e');
 }
@@ -7914,8 +8222,8 @@ async function saveCatProd(){
   else toast(res.error||'Error','e');
 }
 async function deleteCatProd(id){
-  if(!confirm('¿Eliminar esta categoría?')) return;
-  const res=await api('/api/categorias_producto/'+id,{method:'DELETE'});
+  if(!await confirmar('¿Eliminar esta categoría?')) return;
+  const res=await apiBorrar('/api/categorias_producto/'+id,'Categoría eliminada');
   if(res.ok){toast('Categoría eliminada');_catP=[];loadCatProd();}
   else toast(res.error||'Error','e');
 }
@@ -8504,7 +8812,7 @@ function _renderCtrlOtList(){
     div.innerHTML=
       '<div class="ctrl-ot-num" style="font-weight:600;color:var(--color-text-primary)">'+r.numero+'</div>'
       +'<div class="ctrl-ot-sub" style="color:var(--color-text-secondary);margin-top:2px">'+(r.producto_codigo?(r.producto_codigo+' -- '+(r.producto_nombre||'—')):(r.producto_nombre||r.descripcion||'—'))+'</div>'
-      +'<div style="margin-top:3px">'+sb(r.estado)+' <span class="ctrl-ot-sub" style="color:var(--color-text-secondary);font-size:11px">× '+r.cantidad+'</span></div>';
+      +'<div style="margin-top:3px">'+sb(r.estado)+' <span class="ctrl-ot-sub" style="color:var(--color-text-secondary);font-size:11px">× '+fN(r.cantidad)+'</span></div>';
     div.onclick=function(){
       if(String(_ctrlOid)!==String(r.id)) _ctrlOpSel=null;
       _ctrlOid=r.id;
@@ -8619,7 +8927,7 @@ async function loadCtrlOps(oid){
       +'<td>'+op.orden+'</td>'
       +'<td>'+nombreCol+warnTerc+'</td>'
       +'<td>'+sector+'</td>'
-      +'<td>'+op.qty_requerida+'</td>'
+      +'<td>'+fN(op.qty_requerida)+'</td>'
       +'<td>'+producidoTotal+(alternativasConProduccion.length>1?' <span style="font-size:10px;color:var(--color-text-secondary)">('+alternativasConProduccion.map(function(o){return o.nombre+': '+o.qty_producida;}).join(' + ')+')</span>':'')+'</td>'
       +'<td><span class="b '+pctCol+'">'+pct+'%</span></td>'
       +'<td>'+estadoCol+'</td>'
@@ -8859,7 +9167,7 @@ async function loadNovCajones(oid, opId, propiasLista){
   if(r.primer_paso){
     const ab=r.abierto;
     body.innerHTML='<div style="'+nota+'">'+(ab
-      ? 'Las piezas OK van al cajón <b>'+schEsc(ab.numero)+'</b> ('+ab.cantidad+' de '+ab.capacidad+'); si no entran se abre otro.'
+      ? 'Las piezas OK van al cajón <b>'+schEsc(ab.numero)+'</b> ('+fN(ab.cantidad)+' de '+ab.capacidad+'); si no entran se abre otro.'
       : 'Las piezas OK abren un cajón nuevo de '+(r.capacidad||'—')+' piezas.')+'</div>';
     return;
   }
@@ -8872,7 +9180,7 @@ async function loadNovCajones(oid, opId, propiasLista){
   }
   body.innerHTML='<table><tr><th>Cajón</th><th>Disponible</th><th>Cantidad</th></tr>'+lista.map(function(c){
     const disp=(c.disponible||0)+(propias[c.id]||0);
-    return '<tr><td><b>'+schEsc(c.numero)+'</b></td><td>'+disp+'</td><td><input type="number" class="nov-caj-q" data-id="'+c.id+'" data-disp="'+disp
+    return '<tr><td><b>'+schEsc(c.numero)+'</b></td><td>'+fN(disp)+'</td><td><input type="number" class="nov-caj-q" data-id="'+c.id+'" data-disp="'+disp
       +'" min="0" max="'+disp+'" step="1" value="'+(propias[c.id]||'')+'" oninput="_novCajTocado=true;novCajSuma()" style="width:90px"></td></tr>';
   }).join('')+'</table><div id="nov-caj-suma" style="'+nota+';margin-top:4px">La suma tiene que ser igual a la cantidad OK.</div>';
   autoNovCajones();
@@ -9187,8 +9495,8 @@ async function saveTNP(){
 }
 
 async function deleteTNPRow(id){
-  if(!confirm('¿Eliminar este registro de trabajo no productivo?')) return;
-  const res=await api('/api/trabajo-no-productivo/'+id,{method:'DELETE'}).catch(function(){return null;});
+  if(!await confirmar('¿Eliminar este registro de trabajo no productivo?')) return;
+  const res=await apiBorrar('/api/trabajo-no-productivo/'+id,'Registro eliminado').catch(function(){return null;});
   if(res&&res.ok){ toast('Registro eliminado','g'); loadTNPList(); }
   else { toast((res&&res.error)||'Error al eliminar','e'); }
 }
@@ -9319,7 +9627,7 @@ async function loadNovEliminadas(){
 async function restaurarNovElim(id){
   const n=_novElimData[id];
   if(!n){toast('No se encontró el registro','e');return;}
-  if(!confirm('¿Restaurar la novedad '+(n.novedad_numero||'')+'?\nSe volverá a crear la novedad y se rehará todo lo que se había revertido: consumo de materia prima, stock de producto terminado e ítems de remito.')) return;
+  if(!await confirmar('¿Restaurar la novedad '+(n.novedad_numero||'')+'?\nSe volverá a crear la novedad y se rehará todo lo que se había revertido: consumo de materia prima, stock de producto terminado e ítems de remito.')) return;
   const res=await api('/api/novedades-eliminadas/'+id+'/restaurar',{method:'POST'});
   if(res.ok){
     toast('Novedad '+res.numero+' restaurada','g');
@@ -9351,7 +9659,7 @@ function verDetalleNovElim(id){
     det.lotes_mp.forEach(function(l){
       h+='<div class="opc">'
         +'<div class="oph"><span class="opn">'+(l.material||'—')+'</span>'
-        +'<span class="b bg">+'+l.cantidad_devuelta+'</span></div>'
+        +'<span class="b bg">+'+fN(l.cantidad_devuelta)+'</span></div>'
         +'<div class="opm">Lote '+(l.lote_numero||'—')+' — estado '+(l.estado_lote||'—')
         +' — disponible actual: '+(l.cantidad_disponible_actual!=null?l.cantidad_disponible_actual:'—')+'</div>'
         +(l.nota?'<div class="opm" style="color:#854F0B">'+l.nota+'</div>':'')
@@ -9366,7 +9674,7 @@ function verDetalleNovElim(id){
   if(det.pt){
     h+='<div class="opc">'
       +'<div class="oph"><span class="opn">'+(det.pt.material||'—')+'</span>'
-      +'<span class="b br">-'+det.pt.cantidad_revertida_stock+'</span></div>';
+      +'<span class="b br">-'+fN(det.pt.cantidad_revertida_stock)+'</span></div>';
     if(det.pt.lotes_ot && det.pt.lotes_ot.length){
       h+='<div class="opm">Lote(s) de esta OT:</div>';
       det.pt.lotes_ot.forEach(function(l){
@@ -9506,15 +9814,18 @@ function renderOCC(){
     // ya calculado sobre remito_items, no sobre si hay OT generada o no).
     const avancePct=(typeof r.pct_entrega==='number')?r.pct_entrega:0;
     const avanceColor=avancePct===100?'bg':avancePct>0?'ba':'br';
-    const detalle=r.items.map(function(i){return i.producto_codigo+' ('+i.producto_nombre+') ×'+i.cantidad+' '+(i.unidad||'unid');}).join('\n');
+    const detalle=r.items.map(function(i){return i.producto_codigo+' ('+i.producto_nombre+') ×'+fN(i.cantidad)+' '+(i.unidad||'unid');}).join('\n');
     const sel=_occSel===r.id;
-    h+='<tr id="occ-row-'+r.id+'" class="'+(sel?'ot-sel':'')+'" style="cursor:pointer" title="Doble clic: ver el detalle de renglones" onclick="selOCC('+r.id+')">'
+    const occAbierta=!['Completada','Cancelada'].includes(r.estado)&&avancePct<100;
+    const occVence=(r.items||[]).filter(function(i){return i.fecha_deseada&&(+i.cantidad_entregada||0)<(+i.cantidad||0);})
+      .map(function(i){return String(i.fecha_deseada).slice(0,10);}).sort()[0]||r.fecha_entrega;
+    h+='<tr id="occ-row-'+r.id+'" class="'+(sel?'ot-sel':'')+venceFila(occVence,occAbierta)+'" style="cursor:pointer" title="Doble clic: ver el detalle de renglones" onclick="selOCC('+r.id+')">'
       +'<td><input type="radio" name="occ-sel" '+(sel?'checked':'')+' onclick="event.stopPropagation();selOCC('+r.id+')"></td>'
       +'<td><b>'+r.numero+'</b></td>'
       +'<td>'+r.cliente_nombre+'</td>'
       +'<td title="'+detalle.replace(/"/g,'&quot;')+'">Total pedido: <b>'+r._total+'</b> ('+r.items.length+' artículo'+(r.items.length!==1?'s':'')+')</td>'
       +'<td>'+fmtD(r.creado)+'</td>'
-      +'<td>'+(r.fecha_entrega?fmtD(r.fecha_entrega):'—')+'</td>'
+      +'<td'+venceCelda(occVence,occAbierta)+'>'+(r.fecha_entrega?fmtD(r.fecha_entrega):'—')+'</td>'
       +'<td>'+sb(r.estado)+'</td>'
       +'<td><span class="b '+avanceColor+'">'+avancePct+'%</span></td>'
       +'</tr>';
@@ -9560,7 +9871,7 @@ function occDetalleHTML(r,avancePct){
     h+='<tr style="font-size:11px">'
       +'<td>'+i.producto_codigo+'</td>'
       +'<td>'+i.producto_nombre+'</td>'
-      +'<td>'+i.cantidad+' '+(i.unidad||'unid')+'</td>'
+      +'<td>'+fN(i.cantidad)+' '+(i.unidad||'unid')+'</td>'
       +'<td>'+fmtM(i.precio_unit)+'</td>'
       +'<td><b>'+fmtM((parseFloat(i.precio_unit)||0)*(parseFloat(i.cantidad)||0))+'</b></td>'
       +'<td>'+(i.fecha_deseada?fmtD(i.fecha_deseada):'—')+'</td>'
@@ -9614,7 +9925,7 @@ function openVincularOT(itemId,productoId,productoLabel,cantidad,cubierto){
   $('vot-item-id').value=itemId;
   $('vot-producto-id').value=productoId||'';
   $('vot-item-info').innerHTML='Pieza requerida: <b>'+(productoLabel||'—')+'</b> — pedido: <b>'+cantidad+'</b>'
-    +(cubierto>0?' — ya cubierto: <b>'+cubierto+'</b> — falta: <b>'+restante+'</b>':'')
+    +(cubierto>0?' — ya cubierto: <b>'+fN(cubierto)+'</b> — falta: <b>'+fN(restante)+'</b>':'')
     +'<br><span style="font-size:11px;color:var(--color-text-secondary)">Solo se muestran OTs del mismo material/producto. La opción se bloqueará apenas se cubra el total pedido.</span>';
   $('vot-results').innerHTML='<div class="em">Buscando OTs disponibles...</div>';
   openMo('mo-vincular-ot');
@@ -9635,7 +9946,7 @@ async function buscarOTsVincular(){
     h+='<tr>'
       +'<td><b>'+r.numero+'</b></td>'
       +'<td>'+(r.prod_codigo||'')+' '+(r.prod_nombre||r.descripcion||'')+'</td>'
-      +'<td>'+r.cantidad+'</td>'
+      +'<td>'+fN(r.cantidad)+'</td>'
       +'<td>'+sb(r.estado)+'</td>'
       +'<td>'+(r.fecha_entrega?fmtD(r.fecha_entrega):'—')+'</td>'
       +'<td><button class="btn btn-s btn-p" onclick="vincularOT('+r.id+')">Vincular</button></td>'
@@ -9645,7 +9956,7 @@ async function buscarOTsVincular(){
 }
 
 async function desvincularOTItem(itemId,otId){
-  if(!confirm('¿Desvincular esta OT del pedido? Esta acción no se puede deshacer.'))return;
+  if(!await confirmar('¿Desvincular esta OT del pedido? Esta acción no se puede deshacer.'))return;
   const res=await api('/api/ordenes_cliente_items/'+itemId+'/desvincular_ot/'+otId,{method:'DELETE'});
   if(!res.ok){toast(res.error||'Error','e');return;}
   toast('OT desvinculada del pedido');
@@ -9717,7 +10028,7 @@ async function loadOCCProductos(existingItems){
   }
   grid.innerHTML='<div class="ld">Cargando productos...</div>';
   _occProd=await api('/api/productos?cliente_id='+cid);
-  if(!_occProd.length){
+  if(!_occProd.length && !(existingItems&&existingItems.length)){
     grid.innerHTML='<div class="em">Este cliente no tiene productos asignados. Asigná productos desde Procesos/Productos.</div>';
     return;
   }
@@ -9734,7 +10045,11 @@ async function loadOCCProductos(existingItems){
         return;
       }
       if(!_occItems[it.producto_id]) _occItems[it.producto_id]=[];
-      _occItems[it.producto_id].push({qty:it.cantidad,precio:it.precio_unit,fecha:it.fecha_deseada||'',obs:it.obs||''});
+      _occItems[it.producto_id].push({id:it.id,qty:it.cantidad,precio:it.precio_unit,fecha:it.fecha_deseada||'',obs:it.obs||''});
+      // Producto que ya no está asignado al cliente: igual se muestra, si no
+      // el renglón quedaba fuera de la grilla y se borraba al guardar.
+      if(!_occProd.some(function(p){return String(p.id)===String(it.producto_id);}))
+        _occProd.push({id:it.producto_id,codigo:it.producto_codigo||it.producto_id,nombre:it.producto_nombre||''});
     });
   }
   renderOCCGrid();
@@ -9758,7 +10073,7 @@ function renderOCCGrid(){
   h+='<thead><tr style="background:#f7f7f4">';
   h+='<th style="padding:6px 8px;text-align:left;font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.04em">Producto</th>';
   h+='<th style="padding:6px 4px;width:80px;text-align:left;font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.04em">Cantidad</th>';
-  h+='<th style="padding:6px 4px;width:100px;text-align:left;font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.04em">Precio unit. $</th>';
+  h+=thM('Precio unit. $','style="padding:6px 4px;width:100px;text-align:left;font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.04em"');
   h+='<th style="padding:6px 4px;width:130px;text-align:left;font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.04em">Fecha entrega</th>';
   h+='<th style="padding:6px 4px;width:140px;text-align:left;font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.04em">Observaciones</th>';
   h+='<th style="width:70px;padding:6px 4px"></th>';
@@ -9773,7 +10088,7 @@ function renderOCCGrid(){
     rows.forEach(function(row,ri){
       const isFirst=ri===0;
       const rowId='occr_'+p.id+'_'+ri;
-      h+='<tr id="'+rowId+'" data-prod="'+p.id+'" data-ri="'+ri+'" style="border-bottom:1px solid #f0f0ec">';
+      h+='<tr id="'+rowId+'" data-prod="'+p.id+'" data-ri="'+ri+'"'+(row.id?' data-item-id="'+row.id+'"':'')+' style="border-bottom:1px solid #f0f0ec">';
       if(isFirst){
         h+='<td rowspan="'+rows.length+'" style="padding:8px;vertical-align:top;border-right:1px solid #e8e8e3;background:#fafaf8">';
         h+='<div style="font-weight:600;color:#1a1a1a">'+p.codigo+'</div>';
@@ -9781,7 +10096,7 @@ function renderOCCGrid(){
         h+='</td>';
       }
       h+='<td style="padding:5px 4px"><input data-f="qty" type="number" value="'+row.qty+'" min="0" step="1" style="'+st+';width:100%;max-width:74px" placeholder="0"></td>';
-      h+='<td style="padding:5px 4px"><input data-f="precio" type="number" value="'+row.precio+'" min="0" step="0.01" style="'+st+';width:100%;max-width:94px" placeholder="0.00"></td>';
+      h+=tdM('<input data-f="precio" type="number" value="'+row.precio+'" min="0" step="0.01" style="'+st+';width:100%;max-width:94px" placeholder="0.00">','style="padding:5px 4px"');
       h+='<td style="padding:5px 4px"><input data-f="fecha" type="date" value="'+row.fecha+'" style="'+st+';width:100%;max-width:128px"></td>';
       h+='<td style="padding:5px 4px"><input data-f="obs" type="text" value="'+row.obs+'" style="'+st+';width:100%;max-width:136px" placeholder="Obs..."></td>';
       h+='<td style="padding:5px 4px;white-space:nowrap">';
@@ -9797,7 +10112,7 @@ function renderOCCGrid(){
     h+='<table style="width:100%;border-collapse:collapse;font-size:12px;opacity:.7">';
     _occItemsBloqueados.forEach(function(it){
       h+='<tr><td style="padding:3px 8px">'+(it.producto_codigo||it.producto_id)+'</td>'
-        +'<td style="padding:3px 8px">'+it.cantidad+'</td>'
+        +'<td style="padding:3px 8px">'+fN(it.cantidad)+'</td>'
         +'<td style="padding:3px 8px">'+(it.fecha_deseada||'—')+'</td>'
         +'<td style="padding:3px 8px">OT '+(it.ot_numero||it.ot_id)+'</td></tr>';
     });
@@ -9835,9 +10150,12 @@ function readOCCGrid(){
     if(!rows.length) return; // not currently rendered (filtered out) — keep previous state
     result[p.id]=[];
     rows.forEach(function(row){
+      // Sin permiso monetario la columna de precio no existe (se borra del DOM).
+      const pr=row.querySelector('[data-f="precio"]');
       result[p.id].push({
+        id:row.dataset.itemId?parseInt(row.dataset.itemId):null,
         qty:row.querySelector('[data-f="qty"]').value,
-        precio:row.querySelector('[data-f="precio"]').value,
+        precio:pr?pr.value:'',
         fecha:row.querySelector('[data-f="fecha"]').value,
         obs:row.querySelector('[data-f="obs"]').value,
       });
@@ -9878,14 +10196,18 @@ async function saveOCC(){
     rows.forEach(function(row){
       const qty=Math.max(0,Math.round(parseFloat(row.qty)||0));
       if(!qty) return;  // skip rows with qty=0
-      items.push({
+      const it={
+        id:row.id||null,
         producto_id:p.id,
         cantidad:qty,
-        precio_unit:parseFloat(row.precio)||0,
         fecha_deseada:row.fecha||null,
         obs:row.obs||null,
         unidad:'unid',
-      });
+      };
+      // Sin permiso monetario el precio no se manda: el servidor conserva el
+      // guardado (o usa el de venta del producto en un renglón nuevo).
+      if(VER_MONETARIO) it.precio_unit=parseFloat(row.precio)||0;
+      items.push(it);
       // El precio de venta del producto se sincroniza en el propio backend
       // (ver _sync_precio_venta_producto en /api/ordenes_cliente) cuando el
       // precio unitario cargado acá difiere del precio_venta actual. Antes
@@ -9915,7 +10237,7 @@ async function saveOCC(){
   if(eid){
     const prev=_occ_cache.get(eid)||_occ_cache.get(parseInt(eid));
     if(body.estado==='Completada' && (!prev || prev.estado!=='Completada')
-       && !confirm('Al completar la OC se completan también todas sus OTs vinculadas, aunque no estén terminadas.\n\nSe genera el PT solo por lo producido, se libera la reserva de lotes no consumida, se cancelan las OTT pendientes sin envíos y se quitan del Scheduling los bloques futuros.\n\n¿Continuar?')) return;
+       && !await confirmar('Al completar la OC se completan también todas sus OTs vinculadas, aunque no estén terminadas.\n\nSe genera el PT solo por lo producido, se libera la reserva de lotes no consumida, se cancelan las OTT pendientes sin envíos y se quitan del Scheduling los bloques futuros.\n\n¿Continuar?')) return;
     res=await api('/api/ordenes_cliente/'+eid,{method:'PUT',body:JSON.stringify(body)});
   } else {
     res=await api('/api/ordenes_cliente',{method:'POST',body:JSON.stringify(body)});
@@ -10074,14 +10396,14 @@ function clearFiltrosOC(){
 }
 
 async function cancelSC(id,numero,obs){
-  if(!confirm('¿Estás seguro que quieres cancelar la '+numero+'?'))return;
+  if(!await confirmar('¿Estás seguro que quieres cancelar la '+numero+'?'))return;
   const res=await api('/api/solicitudes_compra/'+id,{method:'PUT',body:JSON.stringify({estado:'Cancelada',obs:obs||''})});
   if(res&&res.ok){toast('Solicitud cancelada');loadSC();updateSCBadge();}
   else toast((res&&res.error)||'Error al cancelar','e');
 }
 
 async function reabrirSC(id,numero){
-  if(!confirm('¿Estás seguro que quieres reabrir la '+numero+'?'))return;
+  if(!await confirmar('¿Estás seguro que quieres reabrir la '+numero+'?'))return;
   const res=await api('/api/solicitudes_compra/'+id,{method:'PUT',body:JSON.stringify({estado:'Pendiente'})});
   if(res&&res.ok){toast('Solicitud reabierta');loadSC();updateSCBadge();}
   else toast((res&&res.error)||'Error al reabrir','e');
@@ -10140,7 +10462,7 @@ function renderSC(){
     h+='<td><b>'+r.numero+'</b></td>';
     h+='<td><span class="b '+( r.tipo==='Productiva'?'bb':'bp')+'">'+r.tipo+'</span></td>';
     h+='<td>'+r.descripcion+(r.mat_nombre?'<br><span style="font-size:10px;color:var(--color-text-secondary)">'+(r.mat_codigo?'['+r.mat_codigo+'] ':'')+r.mat_nombre+'</span>':'')+(r.centro_costo?' <span class="b bp" style="font-size:12px;font-weight:600" title="Centro de costo">'+r.centro_costo+'</span>':'')+(r.obs&&r.obs.indexOf('Generada automáticamente')===0?' <span class="b bk" style="font-size:9px" title="'+r.obs.replace(/"/g,"&quot;")+'">⚙ Auto</span>':'')+'</td>';
-    h+='<td>'+r.cantidad+' '+(r.mat_unidad||r.unidad||'')+'</td>';
+    h+='<td>'+fN(r.cantidad)+' '+(r.mat_unidad||r.unidad||'')+'</td>';
     h+='<td>'+(r.ot_numero||'—')+'</td>';
     h+='<td><span class="b '+(r.urgencia==='Crítica'?'br':r.urgencia==='Alta'?'ba':'bk')+'">'+r.urgencia+'</span></td>';
     h+='<td>'+(r.estado==='OC Emitida'?'<span class="b bg">Emitida</span>':sb(r.estado))+'</td>';
@@ -10217,7 +10539,7 @@ function filtrarSCMat(){
     const full=((m.codigo||'')+' '+(m.descripcion||'')).toLowerCase();
     return full.includes(q);
   }) : base;
-  _novotResultsRender(cont,lista,function(m){return m.codigo+' — '+m.descripcion+(m.stock!==undefined?' (stock:'+m.stock+')':'');},function(m){
+  _novotResultsRender(cont,lista,function(m){return m.codigo+' — '+m.descripcion+(m.stock!==undefined?' (stock:'+fN(m.stock)+')':'');},function(m){
     $('sc-mat').value=m.id;
     $('sc-mat-search').value=m.codigo+' — '+m.descripcion;
     cont.style.display='none';cont.innerHTML='';
@@ -10316,7 +10638,7 @@ async function loadCot(){
   Object.entries(grouped).forEach(([sid,g])=>{
     const minPrecio=Math.min(...g.items.map(i=>i.precio_unit));
     const circuitoCerrado = ESTADOS_CERRADOS.indexOf(g.estado)!==-1;
-    h+=`<div style="margin-bottom:20px;padding:12px;border:1px solid var(--color-border,#e5e5e0);border-radius:8px;background:var(--color-background,#fff)"><div style="font-size:12px;font-weight:600;color:var(--color-text-secondary);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--color-border,#e5e5e0)">${g.desc} — ${g.qty} ${g.uni||''}${circuitoCerrado?' <span class="b bk" style="font-size:9px" title="La solicitud ya cerró su circuito de compra: no se puede modificar la cotización seleccionada">🔒 Circuito cerrado</span>':''}</div>`;
+    h+=`<div style="margin-bottom:20px;padding:12px;border:1px solid var(--color-border,#e5e5e0);border-radius:8px;background:var(--color-background,#fff)"><div style="font-size:12px;font-weight:600;color:var(--color-text-secondary);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--color-border,#e5e5e0)">${g.desc} — ${fN(g.qty)} ${g.uni||''}${circuitoCerrado?' <span class="b bk" style="font-size:9px" title="La solicitud ya cerró su circuito de compra: no se puede modificar la cotización seleccionada">🔒 Circuito cerrado</span>':''}</div>`;
     h+='<div class="nowrap-tbl"><table><tr><th style="width:24px"></th><th>Proveedor</th><th>Precio unit.</th><th>Plazo</th><th>Condición</th><th>Total</th><th>Elegida</th></tr>';
     g.items.forEach(c=>{
       const esMenor=c.precio_unit===minPrecio;
@@ -10493,11 +10815,12 @@ async function loadOCs(){
     const prods=[...new Set((r.items||[]).map(i=>(i.mat_codigo?i.mat_codigo+' — ':'')+(i.mat_desc||i.descripcion||'')).filter(Boolean))];
     const prodCell=prods.length?(prods.length>1?prods.map(p=>`<div>${p}</div>`).join(''):prods[0]):'—';
     const sel=_ocSel===r.id;
-    h+=`<tr id="oc-row-${r.id}" data-oc="${r.id}" class="${sel?'ot-sel':''}" style="cursor:pointer" onclick="selOC(${r.id})"${(r.items||[]).length?` ondblclick="toggleOCDetail(${r.id})"`:''}>
+    const ocAbierta=!['Recibida','Completada','Anulada','Cancelada','Rechazada'].includes(r.estado);
+    h+=`<tr id="oc-row-${r.id}" data-oc="${r.id}" class="${sel?'ot-sel':''}${venceFila(r.fecha_entrega_est,ocAbierta)}" style="cursor:pointer" onclick="selOC(${r.id})"${(r.items||[]).length?` ondblclick="toggleOCDetail(${r.id})"`:''}>
     <td><input type="radio" name="oc-sel" ${sel?'checked':''} onclick="event.stopPropagation();selOC(${r.id})"></td>
     <td>${(r.items||[]).length?`<button class="btn btn-s" style="padding:2px 8px" onclick="event.stopPropagation();toggleOCDetail(${r.id})">▶</button>`:''}</td>
     <td><b>${r.numero}</b></td><td>${fmtD(r.creado)}</td><td>${r.proveedor_nombre}</td><td>${prodCell}</td><td>${scCell}</td>
-    <td><b>${fmtM(r.monto_total)}</b></td><td>${fmtD(r.fecha_entrega_est)}</td>
+    <td><b>${fmtM(r.monto_total)}</b></td><td${venceCelda(r.fecha_entrega_est,ocAbierta)}>${fmtD(r.fecha_entrega_est)}</td>
     <td>${sb(r.estado)}</td><td>${r.aprobado_por_nombre||'—'}</td></tr>
     <tr id="oc-det-${r.id}" style="display:none"><td colspan="11" style="background:var(--color-background-secondary);padding:10px 14px">
     ${ocDetailTable(r.items||[])}
@@ -10522,10 +10845,10 @@ async function devolverRechazoOC(ocId){
   if(!r){toast('OC no encontrada','e');return;}
   const cant=r.rechazado_pendiente_devolver||0;
   if(cant<=0.0001){toast('No hay piezas rechazadas pendientes de devolver','w');return;}
-  if(!confirm('Se van a devolver '+cant+' pieza(s) rechazada(s) al proveedor '+(r.proveedor_nombre||'')+'.\n\nSe generará un remito de devolución y esa cantidad vuelve a quedar pendiente de recibir (reemplazo) en el mismo lote.\n\n¿Confirmar devolución?')) return;
+  if(!await confirmar('Se van a devolver '+fN(cant)+' pieza(s) rechazada(s) al proveedor '+(r.proveedor_nombre||'')+'.\n\nSe generará un remito de devolución y esa cantidad vuelve a quedar pendiente de recibir (reemplazo) en el mismo lote.\n\n¿Confirmar devolución?')) return;
   const res=await api('/api/ordenes_compra/'+ocId+'/devolver_rechazo',{method:'POST',body:JSON.stringify({})});
   if(res.ok){
-    toast('Remito '+res.remito_numero+' emitido — '+res.cantidad_devuelta+' pieza(s) devuelta(s) al proveedor');
+    toast('Remito '+res.remito_numero+' emitido — '+fN(res.cantidad_devuelta)+' pieza(s) devuelta(s) al proveedor');
     loadOCs();
   } else toast(res.error||'Error','e');
 }
@@ -10542,9 +10865,9 @@ async function cerrarOC(ocId){
   const items=r.items||[];
   const pendiente=items.reduce((a,i)=>a+Math.max(0,(i.cantidad||0)-(i.cantidad_recibida||0)),0);
   const msg=pendiente>0.0001?
-    'Vas a cerrar la OC '+r.numero+' con '+pendiente.toFixed(2)+' unidad(es) todavía pendientes de recibir.\n\nEsto asume que el proveedor NO va a entregar el resto. Lo ya recibido no se modifica.\n\nSi más adelante llega igual, podés volver a "Recibir" y la OC se reabre sola.\n\n¿Confirmar cierre?':
+    'Vas a cerrar la OC '+r.numero+' con '+fN(pendiente)+' unidad(es) todavía pendientes de recibir.\n\nEsto asume que el proveedor NO va a entregar el resto. Lo ya recibido no se modifica.\n\nSi más adelante llega igual, podés volver a "Recibir" y la OC se reabre sola.\n\n¿Confirmar cierre?':
     '¿Cerrar la OC '+r.numero+'?';
-  if(!confirm(msg)) return;
+  if(!await confirmar(msg)) return;
   const res=await api('/api/ordenes_compra/'+ocId+'/cerrar',{method:'POST',body:JSON.stringify({})});
   if(res.ok){toast('OC '+r.numero+' cerrada');loadOCs();}
   else toast(res.error||'Error','e');
@@ -10553,7 +10876,7 @@ async function cerrarOC(ocId){
 async function anularOC(ocId){
   const r=_oc_cache.get(parseInt(ocId));
   if(!r){toast('OC no encontrada','e');return;}
-  const motivo=prompt('Anular la OC '+r.numero+' ('+(r.proveedor_nombre||'')+').\nLas solicitudes de compra vuelven a quedar disponibles.\n\nMotivo de la anulación (opcional):');
+  const motivo=await pedirTexto('¿Anular la OC '+r.numero+' ('+(r.proveedor_nombre||'')+')?\nLas solicitudes de compra vuelven a quedar disponibles.\n\nMotivo de la anulación (opcional):');
   if(motivo===null) return;
   const res=await api('/api/ordenes_compra/'+ocId+'/anular',{method:'POST',body:JSON.stringify({motivo:motivo})});
   if(res.ok){toast('OC '+r.numero+' anulada');loadOCs();}
@@ -10576,7 +10899,7 @@ async function completarOC(ocId){
   $('compoc-remito').value=(info&&info.remito_numero)||((info&&info.remitos&&info.remitos.length)?info.remitos[info.remitos.length-1]:'');
   $('compoc-remito-req').style.display=directa?'':'none';
   const pend=(r.items||[]).reduce(function(a,i){return a+Math.max(0,(i.cantidad||0)-(i.cantidad_recibida||0));},0);
-  $('compoc-pend').textContent=pend>0.0001?('Atención: quedan '+pend.toFixed(2)+' unidad(es) sin recibir; se dan por no entregadas.'):'';
+  $('compoc-pend').textContent=pend>0.0001?('Atención: quedan '+fN(pend)+' unidad(es) sin recibir; se dan por no entregadas.'):'';
   openMo('mo-comp-oc');
 }
 async function confirmarCompletarOC(){
@@ -10594,7 +10917,7 @@ function ocDetailTable(items){
       +'<td>'+(i.sc_numero||'—')+'</td>'
       +'<td>'+(i.sc_tipo||'—')+'</td>'
       +'<td>'+((i.mat_codigo?i.mat_codigo+' — ':'')+(i.mat_desc||i.descripcion||''))+'</td>'
-      +'<td>'+i.cantidad+' '+(i.unidad||'')+'</td>'
+      +'<td>'+fN(i.cantidad)+' '+(i.unidad||'')+'</td>'
       +'<td>'+fmtMD(i.precio_unit)+'</td>'
       +'<td><b>'+fmtM(total)+'</b></td>'
       +'</tr>';
@@ -10650,7 +10973,7 @@ function renderOCScList(){
       +'<td><b>'+s.numero+'</b></td>'
       +'<td>'+(s.tipo||'—')+'</td>'
       +'<td>'+s.descripcion+'</td>'
-      +'<td>'+s.cantidad+' '+(s.mat_unidad||s.unidad||'')+'</td>'
+      +'<td>'+fN(s.cantidad)+' '+(s.mat_unidad||s.unidad||'')+'</td>'
       +'<td>'+(cot?cot.proveedor_nombre:'<span style="color:#A32D2D">sin cotización seleccionada</span>')+'</td>'
       +'<td>'+(cot?fmtMD(cot.precio_unit):'—')+'</td>'
       +'<td>'+(cot?fmtM(total):'—')+'</td>'
@@ -10704,13 +11027,13 @@ async function saveOC(){
 
 async function agregarSCDesdeMRP(matId,codigo,desc,cant,unidad){
   if(!cant||cant<=0){toast('No hay faltante para generar SC','w');return;}
-  if(!confirm('¿Generar Solicitud de Compra por '+cant+' '+unidad+' de "'+codigo+' — '+desc+'"?')) return;
+  if(!await confirmar('¿Generar Solicitud de Compra por '+fN(cant)+' '+unidad+' de "'+codigo+' — '+desc+'"?')) return;
   const btn=$('mrp-sc-'+matId);
   if(btn){btn.disabled=true;btn.textContent='...';}
   try{
     const body={material_id:matId,tipo:'Productiva',descripcion:codigo+' — '+desc,cantidad:cant,unidad:unidad,urgencia:'Alta'};
     const r=await api('/api/solicitudes_compra',{method:'POST',body:JSON.stringify(body)});
-    if(r&&r.ok){toast('SC '+r.numero+' generada por '+cant+' '+unidad,'g');}
+    if(r&&r.ok){toast('SC '+r.numero+' generada por '+fN(cant)+' '+unidad,'g');}
     loadMRP();
   }catch(e){
     toast(e.message||'Error al generar la SC','r');
@@ -10731,20 +11054,20 @@ async function loadMRP(){
       const btnHtml=(ROL==='operario')?'—':(r.sc_activa
         ? `<button class="btn btn-s" disabled title="Ya existe ${r.sc_activa} activa para este material">✓ ${r.sc_activa}</button>`
         : `<button class="btn btn-s" id="mrp-sc-${r.id}" onclick="agregarSCDesdeMRP(${r.id},'${r.codigo}','${(r.descripcion||'').replace(/'/g,"\\'")}',${cant},'${r.unidad}')">+ SC</button>`);
-      h+=`<tr><td>${r.codigo}</td><td>${r.descripcion}</td><td>${r.stock}</td><td>${r.stock_min}</td><td><b>${Math.round(r.faltante*100)/100}</b></td><td>${faltanteMax!=null?faltanteMax:'—'}</td><td>${btnHtml}</td><td>${r.unidad}</td><td>${r.proveedor||'—'}</td><td>${r.stock<=0?'<span class="b br">Sin stock</span>':'<span class="b ba">Bajo mínimo</span>'}</td></tr>`;
+      h+=`<tr><td>${r.codigo}</td><td>${r.descripcion}</td><td>${fN(r.stock)}</td><td>${fN(r.stock_min)}</td><td><b>${fN(r.faltante)}</b></td><td>${faltanteMax!=null?fN(faltanteMax):'—'}</td><td>${btnHtml}</td><td>${r.unidad}</td><td>${r.proveedor||'—'}</td><td>${r.stock<=0?'<span class="b br">Sin stock</span>':'<span class="b ba">Bajo mínimo</span>'}</td></tr>`;
     });
     $('mrp-mat').innerHTML=h+'</table>';
   }
   if(!d.ordenes_activas.length){$('mrp-ot').innerHTML='<div class="em">No hay órdenes activas. Acá aparecen las OT pendientes o en proceso.</div>';}
   else{
     let h='<table><tr><th>N° OT</th><th>Cliente</th><th>Producto</th><th>Cant.</th><th>Estado</th><th>Entrega</th></tr>';
-    d.ordenes_activas.forEach(r=>{h+=`<tr><td><b>${r.numero}</b></td><td>${r.cliente||'—'}</td><td>${r.producto||r.descripcion}</td><td>${r.cantidad}</td><td>${sb(r.estado)}</td><td>${fmtD(r.fecha_entrega)}</td></tr>`;});
+    d.ordenes_activas.forEach(r=>{h+=`<tr><td><b>${r.numero}</b></td><td>${r.cliente||'—'}</td><td>${r.producto||r.descripcion}</td><td>${fN(r.cantidad)}</td><td>${sb(r.estado)}</td><td>${fmtD(r.fecha_entrega)}</td></tr>`;});
     $('mrp-ot').innerHTML=h+'</table>';
   }
   // Carga por sector
   if(d.carga_por_sector&&d.carga_por_sector.length){
     let h2='<table><tr><th>Sector</th><th>Ops. pendientes</th><th>Piezas pendientes</th></tr>';
-    d.carga_por_sector.forEach(r=>{h2+=`<tr><td><b>${r.sector}</b></td><td>${r.ops_pendientes}</td><td>${Math.round(r.piezas_pendientes||0)}</td></tr>`;});
+    d.carga_por_sector.forEach(r=>{h2+=`<tr><td><b>${r.sector}</b></td><td>${fN(r.ops_pendientes)}</td><td>${Math.round(r.piezas_pendientes||0)}</td></tr>`;});
     $('mrp-carga-sector').innerHTML=h2+'</table>';
   } else {
     $('mrp-carga-sector').innerHTML='<div class="em">Sin carga de trabajo pendiente por sector.</div>';
@@ -10760,7 +11083,7 @@ async function loadMRP(){
   // Pronósticos de venta pendientes de consolidar
   if(d.pronosticos_pendientes&&d.pronosticos_pendientes.length){
     let h4='<table><tr><th><input type="checkbox" id="pron-all" onchange="toggleAllPron(this)"></th><th>Código</th><th>Cliente</th><th>Emisión</th><th>Períodos</th><th>Renglones pend.</th></tr>';
-    d.pronosticos_pendientes.forEach(r=>{h4+=`<tr><td><input type="checkbox" class="pron-chk" value="${r.id}"></td><td><b>${r.codigo}</b></td><td>${r.cliente_nombre||'—'}</td><td>${fmtD(r.fecha_emision)}</td><td>${r.periodos}</td><td>${r.items_pendientes}</td></tr>`;});
+    d.pronosticos_pendientes.forEach(r=>{h4+=`<tr><td><input type="checkbox" class="pron-chk" value="${r.id}"></td><td><b>${r.codigo}</b></td><td>${r.cliente_nombre||'—'}</td><td>${fmtD(r.fecha_emision)}</td><td>${r.periodos}</td><td>${fN(r.items_pendientes)}</td></tr>`;});
     $('mrp-pron-pend').innerHTML=h4+'</table>';
   } else {
     $('mrp-pron-pend').innerHTML='<div class="em">Sin pronósticos de venta pendientes de consolidar.</div>';
@@ -10785,10 +11108,10 @@ async function consolidarTodo(){
 async function consolidarOCs(){
   const ids=[...document.querySelectorAll('.oc-chk:checked')].map(c=>parseInt(c.value));
   if(!ids.length){toast('Seleccioná al menos un pedido','w');return;}
-  if(!confirm(`¿Consolidar ${ids.length} pedido(s) y generar OTs automáticamente?`))return;
+  if(!await confirmar(`¿Consolidar ${ids.length} pedido(s) y generar OTs automáticamente?`))return;
   const res=await api('/api/mrp/consolidar',{method:'POST',body:JSON.stringify({oc_ids:ids})});
   if(res.ok){
-    const nums=res.ots.map(o=>o.numero+' ('+o.producto+' x'+o.cantidad+')').join(', ');
+    const nums=res.ots.map(o=>o.numero+' ('+o.producto+' x'+fN(o.cantidad)+')').join(', ');
     let msg='OTs generadas: '+nums;
     if(res.solicitudes_compra&&res.solicitudes_compra.length) msg+=' · '+res.solicitudes_compra.length+' SC de compra generada'+(res.solicitudes_compra.length!==1?'s':'');
     toast(msg);loadMRP();
@@ -10815,11 +11138,11 @@ async function loadDashRequerimientos(){
     '<div class="metric"><div class="ml">Vencidos</div><div class="mv"'+(d.vencidos>0?' style="color:#A32D2D"':'')+'>'+d.vencidos+'</div></div>'
    +'<div class="metric"><div class="ml">Próximos (7 días)</div><div class="mv"'+(d.proximos_7d>0?' style="color:#854F0B"':'')+'>'+d.proximos_7d+'</div></div>'
    +'<div class="metric"><div class="ml">Activos totales</div><div class="mv">'+d.activos+'</div></div>'
-   +'<div class="metric"><div class="ml">Entregados este mes</div><div class="mv" style="color:var(--color-text-success)">'+d.entregados_mes+'</div></div>'
+   +'<div class="metric"><div class="ml">Entregados este mes</div><div class="mv" style="color:var(--color-text-success)">'+fN(d.entregados_mes)+'</div></div>'
    +'<div class="metric"><div class="ml">Cumple fecha</div><div class="mv">'+pctStr(d.cumple_fecha_pct)+'</div></div>'
    +'<div class="metric"><div class="ml">Cumple cantidad</div><div class="mv">'+pctStr(d.cumple_cantidad_pct)+'</div></div>'
    +'<div class="metric"><div class="ml">Cumple calidad</div><div class="mv">'+pctStr(d.cumple_calidad_pct)+'</div></div>'
-   +'<div class="metric"><div class="ml">Pend. clasificación calidad</div><div class="mv"'+(d.pendientes_calidad>0?' style="color:#854F0B"':'')+'>'+(d.pendientes_calidad||0)+'</div></div>';
+   +'<div class="metric"><div class="ml">Pend. clasificación calidad</div><div class="mv"'+(d.pendientes_calidad>0?' style="color:#854F0B"':'')+'>'+fN(d.pendientes_calidad||0)+'</div></div>';
 
   if(!d.top_vencidos.length){$('dreq-vencidos').innerHTML='<div class="al al-g">Sin requerimientos vencidos ✓</div>';}
   else{
@@ -10843,7 +11166,7 @@ async function loadDashRequerimientos(){
   if(!d.por_proveedor.length){$('dreq-proveedor').innerHTML='<div class="em">Sin requerimientos pendientes.</div>';}
   else{
     let h='<table><tr><th>Proveedor</th><th>Pendientes</th></tr>';
-    d.por_proveedor.forEach(function(r){h+='<tr><td>'+r.proveedor+'</td><td><b>'+r.cantidad+'</b></td></tr>';});
+    d.por_proveedor.forEach(function(r){h+='<tr><td>'+r.proveedor+'</td><td><b>'+fN(r.cantidad)+'</b></td></tr>';});
     $('dreq-proveedor').innerHTML=h+'</table>';
   }
 
@@ -10986,7 +11309,7 @@ function renderReqProveedorPerfChart(containerId, data){
     const cx = padL + gi*groupW + groupW/2;
     const nombre = prov.proveedor.length>18 ? prov.proveedor.slice(0,17)+'…' : prov.proveedor;
     svg+='<text x="'+cx+'" y="'+(H-padB+14)+'" font-size="9" text-anchor="middle" fill="var(--color-text-primary)" font-weight="600">'+nombre+'</text>';
-    svg+='<text x="'+cx+'" y="'+(H-padB+26)+'" font-size="8" text-anchor="middle" fill="var(--color-text-secondary)">'+prov.entregados+' entreg.</text>';
+    svg+='<text x="'+cx+'" y="'+(H-padB+26)+'" font-size="8" text-anchor="middle" fill="var(--color-text-secondary)">'+fN(prov.entregados)+' entreg.</text>';
   });
 
   svg+='</svg>';
@@ -11084,7 +11407,7 @@ function renderReq(){
       +'<td><b>'+r.numero+'</b></td><td>'+(r.cliente_nombre||'—')+'</td><td>'+(r.codigo||'—')+'</td>'
       +'<td>'+(r.material_proceso||'—')+(r.provision?' <span style="color:var(--color-text-secondary)">— '+r.provision+'</span>':'')+'</td>'
       +'<td>'+(r.proveedor_nombre||'—')+'</td>'
-      +'<td>'+r.cantidad_pedida+' '+(r.unidad||'')+(r.cantidad_entregada!=null?' <span style="color:var(--color-text-secondary)">(ent. '+r.cantidad_entregada+(r.cantidad_aprobada!=null?' / apr. '+r.cantidad_aprobada:'')+')</span>':'')+'</td>'
+      +'<td>'+fN(r.cantidad_pedida)+' '+(r.unidad||'')+(r.cantidad_entregada!=null?' <span style="color:var(--color-text-secondary)">(ent. '+r.cantidad_entregada+(r.cantidad_aprobada!=null?' / apr. '+r.cantidad_aprobada:'')+')</span>':'')+'</td>'
       +'<td>'+fmtD(r.f_estimada)+'</td><td>'+fmtD(r.f_entrega)+'</td><td>'+sb(r.estado)+'</td>'
       +'<td>'+calidadBadge+'</td></tr>';
   });
@@ -11164,7 +11487,7 @@ function openEntregaReq(id){
   const r=_reqRows.find(x=>x.id===id);
   if(!r){toast('Requerimiento no encontrado','e');return;}
   $('reqent-id').value=r.id;
-  $('reqent-info').textContent=r.numero+' — '+(r.material_proceso||r.codigo||'')+' · Cant. pedida: '+r.cantidad_pedida+' '+(r.unidad||'');
+  $('reqent-info').textContent=r.numero+' — '+(r.material_proceso||r.codigo||'')+' · Cant. pedida: '+fN(r.cantidad_pedida)+' '+(r.unidad||'');
   $('reqent-cantidad').value=r.cantidad_entregada!=null?r.cantidad_entregada:r.cantidad_pedida;
   $('reqent-fecha').value='';$('reqent-remito').value=r.remito||'';
   $('reqent-factura').value=r.nro_factura||'';$('reqent-noconforme').value='';
@@ -11198,8 +11521,8 @@ async function saveEntregaReq(){
 }
 
 async function deleteReq(id){
-  if(!confirm('¿Eliminar este requerimiento? Esta acción no se puede deshacer.'))return;
-  const res=await api('/api/requerimientos_productivos/'+id,{method:'DELETE'});
+  if(!await confirmar('¿Eliminar este requerimiento? Esta acción no se puede deshacer.'))return;
+  const res=await apiBorrar('/api/requerimientos_productivos/'+id,'Requerimiento eliminado');
   if(res.ok){toast('Requerimiento eliminado');loadReq();}
   else toast(res.error||'Error','e');
 }
@@ -11320,7 +11643,7 @@ function filtrarMaterialesBuscador(){
     info.innerHTML = '<span style="font-weight:600;font-size:12px">'+m.codigo+'</span>'
       +' <span style="font-size:12px;color:var(--color-text-secondary)">'+m.descripcion+'</span>'
       +'<br><span style="font-size:10px;color:var(--color-text-secondary)">'+m.categoria
-      +' · Stock: '+m.stock+' '+m.unidad+'</span>';
+      +' · Stock: '+fN(m.stock)+' '+m.unidad+'</span>';
     const addBtn = document.createElement('button');
     addBtn.className = 'btn btn-s btn-p';
     addBtn.style.cssText = 'font-size:11px;padding:3px 8px;flex-shrink:0';
@@ -11504,8 +11827,8 @@ async function openOTDetail(oid,num){
           +(VER_MONETARIO
              ? ('<td colspan="2">'+(op.precio_tercerizado?fmtMD(op.precio_tercerizado):'—')+'</td>')
              : '<td>—</td>')
-          +'<td>'+op.qty_requerida+'</td>'
-          +'<td>'+op.qty_producida+' <span style="font-size:10px;color:var(--color-text-secondary)">(recibido)</span></td>'
+          +'<td>'+fN(op.qty_requerida)+'</td>'
+          +'<td>'+fN(op.qty_producida)+' <span style="font-size:10px;color:var(--color-text-secondary)">(recibido)</span></td>'
           +'<td>'+sb(op.estado)+' <span style="font-size:10px;color:var(--color-text-secondary)">'+pct+'%</span></td>'
           +'<td style="white-space:nowrap">'
             +(op.ott_id?'<button class="btn btn-s" onclick="abrirPrecioOTT('+op.ott_id+')">Editar</button>':'')
@@ -11520,8 +11843,8 @@ async function openOTDetail(oid,num){
         +'<td>'+sector+'</td>'
         +tdM(op.tiempo_setup_min+' min')
         +'<td>'+(op.tiempo_ciclo_seg||0)+' seg</td>'
-        +'<td>'+op.qty_requerida+'</td>'
-        +'<td>'+op.qty_producida+'</td>'
+        +'<td>'+fN(op.qty_requerida)+'</td>'
+        +'<td>'+fN(op.qty_producida)+'</td>'
         +'<td>'+sb(op.estado)+' <span style="font-size:10px;color:var(--color-text-secondary)">'+pct+'%</span></td>'
         +'<td style="white-space:nowrap">'
           +'<button class="btn btn-s" onclick="emitirOP('+oid+','+op.id+')" title="Imprimir OP">&#128438; Emitir OP</button>'
@@ -11544,7 +11867,7 @@ async function openOTDetail(oid,num){
     const otsNuevas=((popRes&&popRes.ots_auxiliares)||[]).filter(function(o){return !o.actualizada;});
     if(otsNuevas.length){
       toast('Insumo(s) sin stock suficiente: se generó OT auxiliar de fabricación — '
-        +otsNuevas.map(function(o){return o.numero+' ('+o.producto+' x'+o.cantidad+')';}).join(', '), 'w');
+        +otsNuevas.map(function(o){return o.numero+' ('+o.producto+' x'+fN(o.cantidad)+')';}).join(', '), 'w');
     }
   }
   // Check alert for uncovered materials
@@ -11568,7 +11891,7 @@ async function openOTDetail(oid,num){
       const cobCol=cob>=100?'bg':cob>=50?'ba':'br';
       const faltante=Math.max(0,m.cantidad_requerida-m.cantidad_asignada);
       const lotesTxt=(m.lotes_asignados&&m.lotes_asignados.length)
-        ?m.lotes_asignados.map(function(l){return '<b>'+l.numero+'</b> ('+l.cantidad_usada+')';}).join(', ')
+        ?m.lotes_asignados.map(function(l){return '<b>'+l.numero+'</b> ('+fN(l.cantidad_usada)+')';}).join(', ')
         :'<span style="color:#999">— sin lote —</span>';
       const opsTxt=(m.operaciones&&m.operaciones.length)
         ?m.operaciones.join('<br>')
@@ -11577,8 +11900,8 @@ async function openOTDetail(oid,num){
         +'<td>'+m.codigo+'</td>'
         +'<td>'+m.descripcion+'</td>'
         +'<td style="font-size:12px">'+opsTxt+'</td>'
-        +'<td>'+m.cantidad_requerida+'</td>'
-        +'<td>'+m.cantidad_asignada+'</td>'
+        +'<td>'+fN(m.cantidad_requerida)+'</td>'
+        +'<td>'+fN(m.cantidad_asignada)+'</td>'
         +'<td>'+m.unidad+'</td>'
         +'<td>'+lotesTxt+'</td>'
         +'<td><span class="b '+cobCol+'">'+cob+'%</span></td>'
@@ -11716,8 +12039,8 @@ async function saveOTOp(){
 }
 
 async function deleteOTOp(opId, oid){
-  if(!confirm('¿Eliminar esta operación de la OT?'))return;
-  const res = await api('/api/ordenes/'+oid+'/operaciones/'+opId, {method:'DELETE'});
+  if(!await confirmar('¿Eliminar esta operación de la OT?'))return;
+  const res = await apiBorrar('/api/ordenes/'+oid+'/operaciones/'+opId,'Operación quitada de la OT');
   if(res.ok){toast('Operación eliminada');closeMo('mo-otop');openOTDetail(oid);}
   else toast(res.error||'Error','e');
 }
@@ -11767,7 +12090,7 @@ function delUsrById(id){
 }
 async function aprobarOC(id){
   const r=_oc_cache.get(parseInt(id));
-  if(!confirm('¿Aprobar OC '+(r?r.numero:'#'+id)+'?'))return;
+  if(!await confirmar('¿Aprobar OC '+(r?r.numero:'#'+id)+'?'))return;
   const res=await api('/api/ordenes_compra/'+id+'/aprobar',{method:'POST',body:JSON.stringify({})});
   if(res.ok){toast('OC aprobada');loadOCs();}
   else toast(res.error||'Error','e');
@@ -11880,7 +12203,7 @@ async function loadMovimientos(){
     h+='<tr><td>'+fmtD(r.fecha)+'</td>'
       +'<td>'+matLabel+'</td>'
       +'<td><span class="b '+tipCol+'">'+r.tipo+'</span></td>'
-      +'<td><b>'+r.cantidad+'</b></td>'
+      +'<td><b>'+fN(r.cantidad)+'</b></td>'
       +'<td>'+(r.lote_numero?'<span class="b ba">'+r.lote_numero+'</span>':'—')+'</td>'
       +'<td>'+(r.origen||'—')+'</td>'
       +'<td>'+(r.referencia||'—')+'</td>'
@@ -12097,10 +12420,10 @@ function renderCajones(){
       +'<td><b>'+schEsc(c.numero)+'</b></td>'
       +'<td>'+schEsc(c.ot_numero||'—')+(c.ot_origen_numero&&c.ot_origen_numero!==c.ot_numero?' <span style="font-size:11px;color:var(--color-text-secondary)">(de '+schEsc(c.ot_origen_numero)+')</span>':'')+'</td>'
       +'<td>'+schEsc(c.producto_codigo||'')+'</td><td>'+schEsc(c.lote_numero||'—')+'</td>'
-      +'<td>'+c.cantidad+' / '+c.capacidad+'</td><td>'+(c.terminadas||0)+'</td>'
-      +'<td style="color:#2e7d32;font-weight:600">'+(c.cantidad_liberada||0)+'</td>'
-      +'<td style="color:#c62828;font-weight:600">'+(c.cantidad_rechazada||0)+'</td>'
-      +'<td'+(_cajPend(c)>0?' style="color:#E65100;font-weight:600" title="Piezas terminadas esperando decisión de Calidad"':'')+'>'+_cajPend(c)+'</td><td>'+(c.cantidad_remitida||0)+'</td><td>'+fmtD(c.creado)+'</td></tr>';
+      +'<td>'+fN(c.cantidad)+' / '+c.capacidad+'</td><td>'+fN(c.terminadas||0)+'</td>'
+      +'<td style="color:#2e7d32;font-weight:600">'+fN(c.cantidad_liberada||0)+'</td>'
+      +'<td style="color:#c62828;font-weight:600">'+fN(c.cantidad_rechazada||0)+'</td>'
+      +'<td'+(_cajPend(c)>0?' style="color:#E65100;font-weight:600" title="Piezas terminadas esperando decisión de Calidad"':'')+'>'+_cajPend(c)+'</td><td>'+fN(c.cantidad_remitida||0)+'</td><td>'+fmtD(c.creado)+'</td></tr>';
   });
   $('caj-list').innerHTML=h+'</table>';
   actualizarToolbarCaj();
@@ -12194,9 +12517,9 @@ function openCajCal(c){
   $('cajcal-id').value=c.id; $('cajcal-term').value=c.terminadas||0;
   $('cajcal-title').textContent='Calidad — '+c.numero;
   $('cajcal-info').innerHTML='<b>'+schEsc(c.numero)+'</b> — '+schEsc(c.producto_nombre||'')
-    +' | Terminadas: <b>'+(c.terminadas||0)+'</b> de '+c.cantidad+' pz'
+    +' | Terminadas: <b>'+fN(c.terminadas||0)+'</b> de '+fN(c.cantidad)+' pz'
     +' | Estado actual: <b>'+schEsc(c.estado)+'</b>'
-    +(c.cantidad_remitida?' | Ya remitidas: <b>'+c.cantidad_remitida+'</b>':'');
+    +(c.cantidad_remitida?' | Ya remitidas: <b>'+fN(c.cantidad_remitida)+'</b>':'');
   $('cajcal-lib').value=c.cantidad_liberada||0; $('cajcal-rech').value=c.cantidad_rechazada||0;
   $('cajcal-obs').value=c.calidad_obs||'';
   $('cajcal-total-lbl').textContent=(c.terminadas||0)+' pz';
@@ -12224,7 +12547,7 @@ async function saveCajCal(){
   const res=await api('/api/cajones/'+id+'/calidad',{method:'POST',body:JSON.stringify({
     cantidad_liberada:parseFloat($('cajcal-lib').value)||0, cantidad_rechazada:parseFloat($('cajcal-rech').value)||0,
     obs:$('cajcal-obs').value})});
-  if(res&&res.ok){toast('Cajón '+res.estado.toLowerCase()+(res.pendiente>0?' — quedan '+res.pendiente+' pendientes':''));closeMo('mo-cajon-cal');loadCajones();}
+  if(res&&res.ok){toast('Cajón '+res.estado.toLowerCase()+(res.pendiente>0?' — quedan '+fN(res.pendiente)+' pendientes':''));closeMo('mo-cajon-cal');loadCajones();}
   else toast((res&&res.error)||'Error','e');
 }
 async function openCajTransf(c){
@@ -12232,7 +12555,7 @@ async function openCajTransf(c){
   const ots=await api('/api/cajones/'+c.id+'/destinos');
   const s=$('cajtr-ot'); s.innerHTML='';
   (Array.isArray(ots)?ots:[]).forEach(function(o){
-    const op=document.createElement('option'); op.value=o.id; op.textContent=o.numero+' — '+o.estado+' ('+o.cantidad+' pz)'; s.appendChild(op);
+    const op=document.createElement('option'); op.value=o.id; op.textContent=o.numero+' — '+o.estado+' ('+fN(o.cantidad)+' pz)'; s.appendChild(op);
   });
   if(!s.options.length){toast('No hay otra OT abierta de este producto','w');return;}
   openMo('mo-cajon-transf');
@@ -12243,7 +12566,7 @@ async function saveCajTransf(){
   else toast((res&&res.error)||'Error','e');
 }
 async function bajaCajon(c){
-  const obs=prompt('¿Dar de baja el cajón '+c.numero+'? Sus piezas no siguen. Motivo (opcional):','');
+  const obs=await pedirTexto('¿Dar de baja el cajón '+c.numero+'? Sus piezas no siguen. Motivo (opcional):','');
   if(obs===null) return;
   const res=await api('/api/cajones/'+c.id+'/baja',{method:'POST',body:JSON.stringify({obs:obs})});
   if(res&&res.ok){toast('Cajón dado de baja');loadCajones();}
@@ -12432,12 +12755,12 @@ function renderLotesTable(){
       +'<td><input type="radio" name="lote-sel"'+(_loteSel===r.id?' checked':'')+' onclick="event.stopPropagation();selLote('+r.id+')"></td>'
       +'<td><b>'+r.numero+'</b></td>'
       +'<td>'+(r.mat_codigo||'')+' — '+(r.mat_descripcion||'')+'</td>'
-      +'<td>'+(r.cantidad_original||0)+' '+r.unidad+'</td>'
-      +'<td style="color:#888">'+r._ingresado.toFixed(2)+' '+r.unidad+'</td>'
-      +'<td style="color:#2e7d32;font-weight:600">'+(r.cantidad_activa||0)+' '+r.unidad+'</td>'
+      +'<td>'+fN(r.cantidad_original||0)+' '+r.unidad+'</td>'
+      +'<td style="color:#888">'+fN(r._ingresado)+' '+r.unidad+'</td>'
+      +'<td style="color:#2e7d32;font-weight:600">'+fN(r.cantidad_activa||0)+' '+r.unidad+'</td>'
       +'<td style="color:#2e7d32;font-weight:600"><b>'+(r.disponible_libre!=null?r.disponible_libre:r.cantidad_activa||0)+'</b> '+r.unidad+'</td>'
-      +'<td style="color:#a36b00;font-weight:600">'+(r.cantidad_reservada||0)+' '+r.unidad+'</td>'
-      +'<td style="color:#c62828;font-weight:600">'+(r.cantidad_rechazada||0)+' '+r.unidad+'</td>'
+      +'<td style="color:#a36b00;font-weight:600">'+fN(r.cantidad_reservada||0)+' '+r.unidad+'</td>'
+      +'<td style="color:#c62828;font-weight:600">'+fN(r.cantidad_rechazada||0)+' '+r.unidad+'</td>'
       +'<td>'+(r.proveedor_nombre||'—')+'</td>'
       +'<td style="font-size:11px">'+(r.referencia_proveedor||'—')+(r.certificado?' | '+r.certificado:'')+'</td>'
       +'<td>'+fmtD(r.fecha_ingreso)+'</td>'
@@ -12489,8 +12812,8 @@ async function openTrazabilidad(loteId, loteNum){
   $('lote-traz-info').innerHTML=
     '<b>'+l.numero+'</b> — '+l.mat_descripcion+
     ' | Ingresado: '+fmtD(l.fecha_ingreso)+
-    ' | Cantidad original: <b>'+l.cantidad_original+'</b> '+l.unidad+
-    ' | Disponible: <b>'+l.cantidad_disponible+'</b>'+
+    ' | Cantidad original: <b>'+fN(l.cantidad_original)+'</b> '+l.unidad+
+    ' | Disponible: <b>'+fN(l.cantidad_disponible)+'</b>'+
     ' | Estado: '+l.estado+
     (l.referencia_proveedor?' | Ref: '+l.referencia_proveedor:'')+
     (l.certificado?' | Cert: '+l.certificado:'');
@@ -12503,7 +12826,7 @@ async function openTrazabilidad(loteId, loteNum){
     data.movimientos.forEach(function(m){
       const c=m.tipo==='entrada'?'bg':'br';
       h+='<tr><td>'+fmtD(m.fecha)+'</td><td><span class="b '+c+'">'+m.tipo+'</span></td>'
-        +'<td><b>'+m.cantidad+'</b></td><td>'+m.referencia+'</td><td>'+(m.usuario_nombre||'—')+'</td></tr>';
+        +'<td><b>'+fN(m.cantidad)+'</b></td><td>'+m.referencia+'</td><td>'+(m.usuario_nombre||'—')+'</td></tr>';
     });
     $('lote-traz-movs').innerHTML=h+'</table>';
   }
@@ -12516,7 +12839,7 @@ async function openTrazabilidad(loteId, loteNum){
     data.ordenes.forEach(function(o){
       h+='<tr><td><b>'+o.ot_numero+'</b></td><td>'+(o.producto_nombre||'—')+'</td>'
         +'<td>'+(o.cliente_nombre||'—')+'</td><td>'+o.mat_descripcion+'</td>'
-        +'<td>'+o.cantidad_usada+'</td><td>'+sb(o.ot_estado)+'</td>'
+        +'<td>'+fN(o.cantidad_usada)+'</td><td>'+sb(o.ot_estado)+'</td>'
         +'<td>'+fmtD(o.fecha_entrega)+'</td></tr>';
     });
     $('lote-traz-ots').innerHTML=h+'</table>';
@@ -12599,7 +12922,7 @@ async function openNovEdit(novId){
 async function deleteNovFromModal(){
   const editId = $('nov-oid').dataset&&$('nov-oid').dataset.editId;
   if(!editId){ toast('No hay una novedad para eliminar','e'); return; }
-  if(!confirm('¿Eliminar esta novedad? Se revertirán sus efectos en stock (materiales consumidos y producto terminado generado). Esta acción no se puede deshacer.')) return;
+  if(!await confirmar('¿Eliminar esta novedad? Se revertirán sus efectos en stock (materiales consumidos y producto terminado generado). Esta acción no se puede deshacer.')) return;
   try{
     await api('/api/novedades/'+editId,{method:'DELETE'});
     toast('Novedad eliminada','g');
@@ -12864,7 +13187,7 @@ async function loadNovOT(){
   if(oid){
     const ot=await api('/api/ordenes/'+oid).then(function(d){return d;}).catch(function(){return null;});
     if(ot&&ot.id){
-      $('novot-info').innerHTML='<b>'+ot.numero+'</b> — '+(ot.producto_nombre||'—')+' | Cliente: '+(ot.cliente_nombre||'—')+' | Cantidad: '+ot.cantidad+' | Estado: '+sb(ot.estado);
+      $('novot-info').innerHTML='<b>'+ot.numero+'</b> — '+(ot.producto_nombre||'—')+' | Cliente: '+(ot.cliente_nombre||'—')+' | Cantidad: '+fN(ot.cantidad)+' | Estado: '+sb(ot.estado);
     }
   } else {
     $('novot-info').innerHTML='';
@@ -12930,7 +13253,7 @@ function renderNovOTTable(){
       +'<td>'+(n.op_orden!=null?n.op_orden+'- ':'')+n.operacion_nombre+'</td>'
       +'<td>'+(n.empleado_nombre||'—')+'</td>'
       +'<td>'+(n.maquina_nombre||'—')+'</td>'
-      +'<td>'+n.cantidad_producida+'</td>'
+      +'<td>'+fN(n.cantidad_producida)+'</td>'
       +'<td>'+(nok>0?'<span class="b br">'+nok+'</span>':'<span style="color:var(--color-text-secondary)">0</span>')+'</td>'
       +'<td style="font-size:11px">'+(n.cajones_txt?schEsc(n.cajones_txt):'—')+'</td>'
       +'<td>'+(Math.round((parseFloat(n.tiempo_real_min||0)/60)*100)/100)+'h</td>'
@@ -12989,7 +13312,7 @@ async function abrirCorregirNovedades(){
 
 async function confirmarCorregirNovedades(){
   if(!_novCorrPreview||!_novCorrPreview.length) return;
-  if(!confirm('¿Confirmás la corrección de '+_novCorrPreview.length+' novedad(es)? Esta acción no se puede deshacer.')) return;
+  if(!await confirmar('¿Confirmás la corrección de '+_novCorrPreview.length+' novedad(es)? Esta acción no se puede deshacer.')) return;
   try{
     const res = await api('/api/novedades/corregir_rendimiento', {method:'POST'});
     toast(res.corregidas+' novedad(es) corregida(s) correctamente.','s');
@@ -13247,7 +13570,7 @@ async function loadRendimientoOperarioRango(empId,desde,hasta,targetId,sumId){
     }
     html+='<tr style="font-size:12px">'
       +'<td style="padding:3px 6px">'+dia.dia+'</td>'
-      +'<td style="padding:3px 6px">'+dia.total_producido+'</td>'
+      +'<td style="padding:3px 6px">'+fN(dia.total_producido)+'</td>'
       +'<td style="padding:3px 6px">'+(dia.total_no_ok||0)+'</td>'
       +'<td style="padding:3px 6px">'+dia.total_min_real+'min</td>'
       +'<td style="padding:3px 6px"><span class="b '+rc+'">'+dia.rend_promedio+'%</span></td>'
@@ -13311,7 +13634,7 @@ async function openLiberacion(loteId){
   $('lm-total').value=lote.cantidad_disponible;
   $('lm-title').childNodes[0].textContent='Gestionar lote '+lote.numero+' ';
   $('lm-info').innerHTML='<b>'+lote.numero+'</b> — '+lote.mat_descripcion
-    +' | Disponible: <b>'+lote.cantidad_disponible+'</b> '+lote.unidad
+    +' | Disponible: <b>'+fN(lote.cantidad_disponible)+'</b> '+lote.unidad
     +' | Estado actual: <b>'+lote.estado+'</b>'
     +(lote.referencia_proveedor?' | Ref: '+lote.referencia_proveedor:'')
     +(lote.certificado?' | Cert: '+lote.certificado:'');
@@ -13361,7 +13684,7 @@ async function saveLiberacion(){
   const rechazado=parseFloat($('lm-rechazado').value)||0;
   if(aprobado<0||rechazado<0){ toast('Las cantidades no pueden ser negativas','w'); return; }
   if(aprobado+rechazado>total+0.001){
-    $('lm-err').textContent='Aprobado + Rechazado ('+(aprobado+rechazado).toFixed(2)+') no puede superar el total disponible ('+total.toFixed(2)+')';
+    $('lm-err').textContent='Aprobado + Rechazado ('+fN(aprobado+rechazado)+') no puede superar el total disponible ('+fN(total)+')';
     $('lm-err').style.display='block';
     return;
   }
@@ -13372,7 +13695,7 @@ async function saveLiberacion(){
   };
   const res=await api('/api/lotes/'+id,{method:'PUT',body:JSON.stringify(body)});
   if(res.ok){
-    toast('Lote '+res.numero_lote+' → Aprobado: '+res.cantidad_aprobada+' | Rechazado: '+res.cantidad_rechazada+' | Pendiente: '+res.cantidad_pendiente+' | Estado: '+res.estado);
+    toast('Lote '+res.numero_lote+' → Aprobado: '+fN(res.cantidad_aprobada)+' | Rechazado: '+fN(res.cantidad_rechazada)+' | Pendiente: '+fN(res.cantidad_pendiente)+' | Estado: '+res.estado);
     closeMo('mo-lm');
     loadLotes();
   } else toast(res.error||'Error','e');
@@ -13392,7 +13715,7 @@ async function loadPTDisponible(){
     h+='<tr>'
       +'<td><b>'+(r.mat_codigo?r.mat_codigo+' — ':'')+(r.mat_descripcion||'—')+'</b><br><span style="font-size:11px;color:var(--color-text-secondary)">'+r.numero+'</span></td>'
       +'<td style="font-size:11px">'+(r.producto_cliente_nombre||'—')+'</td>'
-      +'<td><b>'+r.cantidad_activa+'</b> '+r.unidad+'<br><span style="font-size:10px;color:var(--color-text-secondary)">'+r.cantidad_disponible+' total</span></td>'
+      +'<td><b>'+fN(r.cantidad_activa)+'</b> '+r.unidad+'<br><span style="font-size:10px;color:var(--color-text-secondary)">'+fN(r.cantidad_disponible)+' total</span></td>'
       +'<td>'+(falta!==null?'<span style="cursor:pointer;color:var(--color-accent);text-decoration:underline dotted" onclick="verAvanceOC('+r.orden_cliente_id+',\''+(r.oc_numero||'')+'\')" title="Ver avance de entrega">Pendiente: '+Math.max(0,falta).toFixed(2)+'</span>':'—')+'</td>'
       +'<td><button class="btn btn-s" onclick="addRemItem('+r.id+','+r.material_id+','+JSON.stringify(r.mat_descripcion).replace(/"/g,'&quot;')+','+r.cantidad_activa+',' +(r.oc_item_id||'null')+','+(r.orden_cliente_id||'null')+','+(r.oc_cliente_id||'null')+')">+ Agregar</button></td>'
       +'</tr>';
@@ -13460,7 +13783,7 @@ function renderOCItems(oc){
     byDate[d].forEach(function(i){
       const restante=(i.cantidad_restante!==undefined)?i.cantidad_restante:i.cantidad;
       h+='<div style="margin-left:22px;font-size:11px;color:var(--color-text-secondary);margin-top:2px">';
-      h+=i.producto_codigo+' - '+i.producto_nombre+' - '+i.cantidad+' '+i.unidad+' - '+restante+' '+i.unidad+' restante';
+      h+=i.producto_codigo+' - '+i.producto_nombre+' - '+fN(i.cantidad)+' '+i.unidad+' - '+fN(restante)+' '+i.unidad+' restante';
       h+='</div>';
     });
     h+='</div>';
@@ -13505,7 +13828,7 @@ async function addRemItem(loteId,matId,desc,disp,ocItemId,ocId,ocCliId){
   const st='font-size:12px;padding:3px 6px;border:1px solid var(--color-border-tertiary);border-radius:5px;background:var(--color-background-primary);color:var(--color-text-primary);width:100%';
   const tr=document.createElement('tr');
   tr.innerHTML='<td>'+desc+'<br><span style="font-size:11px;color:var(--color-text-secondary)">Lote '+loteId+'</span></td>'
-    +'<td>'+disp+'</td>'
+    +'<td>'+fN(disp)+'</td>'
     +'<td><input type="number" value="1" min="1" max="'+disp+'" step="1" style="'+st+'"'
       +' data-lote="'+loteId+'" data-mat="'+matId+'" data-oci="'+(ocItemId||'')+'" data-disp="'+disp+'"'
       +' onchange="capRemQty(this)"></td>'
@@ -13765,13 +14088,137 @@ window.onunhandledrejection = function(e) {
 
 setupRoles();
 
-// Navegar al primer módulo visible del sidebar según el rol del usuario
+// Un ítem del menú está permitido si ni él ni su contenedor fueron ocultados por
+// permisos (no cuenta el plegado de secciones).
+function _niPermitido(ni){
+  for(let el=ni; el && !el.classList.contains('sidebar'); el=el.parentElement){
+    if(el.style.display==='none') return false;
+  }
+  return true;
+}
+
+// Menú lateral plegable: clic en el nombre de la sección la abre o la cierra.
+const _menuSec=[];
+(function iniciarMenuPlegable(){
+  let plegadas=[];
+  try{ plegadas=JSON.parse(localStorage.getItem('menu_plegado')||'[]'); }catch(e){}
+  document.querySelectorAll('.sidebar .sl').forEach(function(sl){
+    const nombre=sl.textContent.trim(), items=[];
+    for(let el=sl.nextElementSibling; el && !el.classList.contains('sl') && !el.classList.contains('sf'); el=el.nextElementSibling) items.push(el);
+    sl.classList.add('sl-pleg');
+    sl.insertAdjacentHTML('beforeend','<span class="sl-aviso" title="Hay avisos en esta sección"></span><span class="sl-chev">▼</span>');
+    const sec={sl:sl,nombre:nombre,items:items};
+    _menuSec.push(sec);
+    if(plegadas.includes(nombre)) _plegarSeccion(sec,true,false);
+    sl.addEventListener('click',function(){ _plegarSeccion(sec,!sl.classList.contains('plegada'),true); });
+  });
+  // Punto rojo en la sección plegada si adentro hay un contador visible (ej. Compras).
+  const actualizarAvisos=function(){
+    _menuSec.forEach(function(sec){
+      const hay=sec.items.some(function(el){
+        return [].some.call(el.querySelectorAll('.ni-badge'),function(b){return b.style.display!=='none' && b.textContent.trim()!=='0';});
+      });
+      sec.sl.classList.toggle('con-aviso',hay);
+    });
+  };
+  new MutationObserver(actualizarAvisos).observe(document.querySelector('.sidebar'),{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['style']});
+  actualizarAvisos();
+})();
+function _plegarSeccion(sec,plegar,guardar){
+  sec.sl.classList.toggle('plegada',plegar);
+  sec.items.forEach(function(el){ el.classList.toggle('ni-plegado',plegar); });
+  if(!guardar) return;
+  try{
+    localStorage.setItem('menu_plegado',JSON.stringify(_menuSec.filter(function(x){return x.sl.classList.contains('plegada');}).map(function(x){return x.nombre;})));
+  }catch(e){}
+}
+
+// La pantalla actual queda en la dirección (…/#ordenes): al recargar (F5) se vuelve
+// a ella, Atrás/Adelante del navegador recorren las pantallas visitadas y la
+// pestaña muestra su nombre.
+let _pantallaActual=null, _pantallaSinHistorial=null;
+function irAPantalla(p){
+  const ni=document.querySelector('.ni[data-p="'+p+'"]');
+  if(!ni || !_niPermitido(ni)) return false;
+  ni.click();
+  return true;
+}
+(function iniciarPantallaEnDireccion(){
+  function alActivar(p){
+    if(p===_pantallaActual) return;
+    const primera=_pantallaActual===null;
+    _pantallaActual=p;
+    const sp=document.querySelector('.ni[data-p="'+p+'"] span');
+    document.title=(sp?sp.textContent.trim()+' · ':'')+'MetalERP';
+    // Si la pantalla está en una sección plegada del menú, abrirla.
+    _menuSec.forEach(function(sec){
+      if(sec.sl.classList.contains('plegada') && sec.items.some(function(el){return el.matches('.ni[data-p="'+p+'"]')||el.querySelector('.ni[data-p="'+p+'"]');}))
+        _plegarSeccion(sec,false,true);
+    });
+    if(_pantallaSinHistorial===p){ _pantallaSinHistorial=null; return; }
+    if(location.hash.slice(1)===p) return;
+    if(primera) history.replaceState(null,'','#'+p);
+    else history.pushState(null,'','#'+p);
+  }
+  const obs=new MutationObserver(function(ms){
+    ms.forEach(function(m){ if(m.target.classList.contains('active')) alActivar(m.target.id.slice(2)); });
+  });
+  document.querySelectorAll('.page').forEach(function(pg){ obs.observe(pg,{attributes:true,attributeFilter:['class']}); });
+  window.addEventListener('popstate',function(){
+    const p=location.hash.slice(1);
+    if(!p || p===_pantallaActual) return;
+    _pantallaSinHistorial=p;
+    if(!irAPantalla(p)){ _pantallaSinHistorial=null; history.replaceState(null,'','#'+_pantallaActual); }
+  });
+})();
+
+// Atajos de teclado (fuera de campos de texto):
+//   /  va al primer buscador de la pantalla   N  botón "Nuevo/Agregar/+" de la pantalla
+//   Esc cierra la ventana abierta             ?  muestra esta ayuda
+function _visible(el){ return !!(el && el.getClientRects().length && getComputedStyle(el).visibility!=='hidden'); }
+function _ventanaAbierta(){
+  const abiertas=[].filter.call(document.querySelectorAll('.ov.open'),_visible);
+  return abiertas.length?abiertas[abiertas.length-1]:null;
+}
+document.addEventListener('keydown',function(e){
+  if(e.defaultPrevented||e.ctrlKey||e.metaKey||e.altKey||_cfmAbierto) return;
+  const pop=document.getElementById('ss-pop'); if(pop&&_visible(pop)) return;
+  const t=e.target, escribiendo=t&&(t.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+  if(e.key==='Escape'){
+    const ov=_ventanaAbierta(); if(!ov) { if(escribiendo&&t.blur) t.blur(); return; }
+    e.preventDefault();
+    if(ov.id) closeMo(ov.id); else ov.classList.remove('open');
+    return;
+  }
+  if(escribiendo||_ventanaAbierta()) return;
+  const pg=document.querySelector('.page.active'); if(!pg) return;
+  if(e.key==='/'){
+    const campos=[].filter.call(pg.querySelectorAll('input[type=text],input[type=search],input:not([type])'),function(i){
+      return _visible(i)&&!i.disabled&&!i.readOnly&&(i.classList.contains('sel-fil')||/buscar|🔍/i.test(i.placeholder||''));
+    });
+    if(campos.length){ e.preventDefault(); campos[0].focus(); campos[0].select&&campos[0].select(); }
+  } else if(e.key==='n'||e.key==='N'){
+    const btns=[].filter.call(pg.querySelectorAll('button'),function(b){
+      return _visible(b)&&!b.disabled&&/^\s*(\+|nuev[oa]\b|agregar\b)/i.test(b.textContent.replace(/\s+/g,' ').trim());
+    });
+    // Preferir el del encabezado de la pantalla.
+    const b=btns.find(function(x){return x.closest('.vhead');})||btns[0];
+    if(b){ e.preventDefault(); b.click(); }
+  } else if(e.key==='?'){
+    e.preventDefault();
+    toast('Atajos: / buscar · N nuevo · Esc cerrar ventana','b');
+  }
+});
+
+// Al entrar: la pantalla de la dirección (si el usuario tiene permiso) o el
+// primer módulo visible del menú según el rol.
 (function navigateToFirstVisibleModule() {
+  const pedida=location.hash.slice(1);
+  if(pedida && irAPantalla(pedida)) return;
   const allNi = document.querySelectorAll('.ni[data-p]');
   let firstVisible = null;
   for (const ni of allNi) {
-    // offsetParent es null cuando el elemento o algún ancestro tiene display:none
-    if (ni.offsetParent !== null && ni.style.display !== 'none') {
+    if (_niPermitido(ni)) {
       firstVisible = ni;
       break;
     }
