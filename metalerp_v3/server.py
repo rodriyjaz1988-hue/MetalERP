@@ -2334,7 +2334,7 @@ def _backfill_remitos_ott_cantidad(db):
 #      mismo cambio sobre una base existente (por ejemplo un ALTER TABLE).
 #   3. Subir ESQUEMA_VERSION a ese número.
 # Cada migración corre una sola vez por base.
-ESQUEMA_VERSION = 4
+ESQUEMA_VERSION = 5
 
 
 def _agregar_columna(db, tabla, columna, tipo):
@@ -2369,33 +2369,47 @@ def _migracion_4(db):
         _crear_tabla_de_schema(db, tabla)
 
 
+def _migracion_5(db):
+    # Cantidad de piezas que mueve cada remito de OTT (los viejos se completan
+    # al arrancar en _backfill_remitos_ott_cantidad).
+    _agregar_columna(db, "remitos", "ott_cantidad", "REAL")
+
+
 MIGRACIONES = {
     2: _migracion_2,
     3: lambda db: _crear_tabla_de_schema(db, "pedidos_cotizacion"),
     4: _migracion_4,
+    5: _migracion_5,
 }
 
 
 def _verificar_base_sin_version(db):
     """Base con datos pero sin versión (user_version=0): viene de antes de que
     existiera el versionado, cuando las migraciones corrían todas en cada
-    arranque. Si ya tiene todas las tablas y columnas del SCHEMA actual (el
-    caso normal: se venía actualizando), se la toma como versión 1. Si le falta
-    algo es una base más vieja que este server.py ya no sabe migrar, y se corta
-    el arranque sin tocarla."""
+    arranque. Las MIGRACIONES se prueban primero sobre una copia en memoria:
+    si con eso queda con todas las tablas y columnas del SCHEMA actual (el
+    caso normal: se venía actualizando), se la toma como versión 1 e init_db
+    corre las migraciones sobre la base real. Si igual le falta algo es una
+    base más vieja que este server.py ya no sabe migrar, y se corta el
+    arranque sin tocarla."""
+    copia = sqlite3.connect(":memory:")
+    db.backup(copia)
+    for v in range(2, ESQUEMA_VERSION + 1):
+        MIGRACIONES[v](copia)
     ref = sqlite3.connect(":memory:")
     ref.executescript(SCHEMA)
     faltan = []
     for nombre, tipo in ref.execute("""SELECT name, type FROM sqlite_master
             WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%'""").fetchall():
-        fila = db.execute("SELECT type FROM sqlite_master WHERE name=?", (nombre,)).fetchone()
+        fila = copia.execute("SELECT type FROM sqlite_master WHERE name=?", (nombre,)).fetchone()
         if not fila or fila[0] != tipo:
             faltan.append(f"{tipo} {nombre}")
         elif tipo == "table":
-            cols = {r[1] for r in db.execute(f"PRAGMA table_info({nombre})")}
+            cols = {r[1] for r in copia.execute(f"PRAGMA table_info({nombre})")}
             faltan += [f"{nombre}.{r[1]}" for r in ref.execute(f"PRAGMA table_info({nombre})")
                        if r[1] not in cols]
     ref.close()
+    copia.close()
     if faltan:
         db.close()
         raise SystemExit(
