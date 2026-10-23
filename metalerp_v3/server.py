@@ -15069,7 +15069,7 @@ IA_DEFAULTS = {
     "METALERP_IA_TOPE_USD_MES": "0",         # 0 = sin tope (plan gratuito de Groq)
     "METALERP_IA_PRECIO_ENTRADA": "0.15",    # USD por millón de tokens, para estimar
     "METALERP_IA_PRECIO_SALIDA": "0.60",     # el gasto si se pasa al plan pago
-    # Voz de Martín con Fish Audio (si falta fish_api_key.txt, habla el navegador)
+    # Voz de Mártin con Fish Audio (si falta fish_api_key.txt, habla el navegador)
     "METALERP_IA_VOZ": "1de64f4a855245e9b8d930beedb3c8e9",   # voz "Verity"
     "METALERP_IA_VOZ_MODELO": "s2.1-pro-free",               # modelo gratuito de Fish Audio
     "METALERP_IA_VOZ_HORA": "120",           # audios por usuario y hora; 0 = sin límite
@@ -15138,7 +15138,7 @@ IA_VOZ_MAX_LARGO = 700                # caracteres por audio (el navegador manda
 
 def _ia_clave_voz():
     """Clave de Fish Audio: la variable FISH_API_KEY o la primera línea de
-    fish_api_key.txt. Sin clave, Martín usa la voz del navegador."""
+    fish_api_key.txt. Sin clave, Mártin usa la voz del navegador."""
     clave = os.environ.get("FISH_API_KEY", "").strip()
     if not clave:
         try:
@@ -15598,7 +15598,7 @@ def _ia_ejecutar(nombre, args_json, usadas):
 
 
 # ── Conversación con el modelo ────────────────────────────────────────────────
-IA_SISTEMA = """Sos Martín, el asistente de MetalERP, el sistema de gestión de {empresa}, un taller metalúrgico. Ayudás al administrador a consultar y analizar los datos del sistema.
+IA_SISTEMA = """Sos Mártin, el asistente de MetalERP, el sistema de gestión de {empresa}, un taller metalúrgico. Ayudás al administrador a consultar y analizar los datos del sistema.
 
 Hoy es {hoy}.
 
@@ -15770,6 +15770,23 @@ def ia_conversacion(cid):
     return jsonify({**dict(c), "mensajes": msjs})
 
 
+@app.route("/api/ia/conversaciones/<int:cid>", methods=["DELETE"])
+@login_required(roles=["admin"])
+@ia_habilitada
+def ia_conversacion_borrar(cid):
+    """Borra un chat guardado del propio usuario. El registro de consultas
+    (ia_consultas) queda igual en la Bitácora."""
+    uid = session["user_id"]
+    if not query("SELECT 1 FROM ia_conversaciones WHERE id=? AND usuario_id=?", (cid, uid), one=True):
+        return jsonify({"error": "Conversación no encontrada"}), 404
+    with _ia_lock:
+        if uid in _ia_en_curso:
+            return jsonify({"error": "Esperá a que Mártin termine de responder y probá de nuevo."}), 409
+        execute("DELETE FROM ia_mensajes WHERE conversacion_id=?", (cid,))
+        execute("DELETE FROM ia_conversaciones WHERE id=? AND usuario_id=?", (cid, uid))
+    return jsonify({"ok": True})
+
+
 @app.route("/api/ia/chat", methods=["POST"])
 @login_required(roles=["admin"])
 @ia_habilitada
@@ -15839,7 +15856,7 @@ _ia_voz_uso = {}        # usuario_id -> marcas de tiempo de audios de la última
 @login_required(roles=["admin"])
 @ia_habilitada
 def ia_voz():
-    """Audio MP3 con la voz de Martín (Fish Audio). Solo convierte el texto
+    """Audio MP3 con la voz de Mártin (Fish Audio). Solo convierte el texto
     que ya está en pantalla; no consulta datos ni guarda nada."""
     clave = _ia_clave_voz()
     if not clave:
