@@ -15069,6 +15069,10 @@ IA_DEFAULTS = {
     "METALERP_IA_TOPE_USD_MES": "0",         # 0 = sin tope (plan gratuito de Groq)
     "METALERP_IA_PRECIO_ENTRADA": "0.15",    # USD por millón de tokens, para estimar
     "METALERP_IA_PRECIO_SALIDA": "0.60",     # el gasto si se pasa al plan pago
+    # Voz de Martín con Fish Audio (si falta fish_api_key.txt, habla el navegador)
+    "METALERP_IA_VOZ": "1de64f4a855245e9b8d930beedb3c8e9",   # voz "Verity"
+    "METALERP_IA_VOZ_MODELO": "s2.1-pro-free",               # modelo gratuito de Fish Audio
+    "METALERP_IA_VOZ_HORA": "120",           # audios por usuario y hora; 0 = sin límite
 }
 IA_ROLES = ("admin",)                 # roles que pueden usar el asistente
 IA_MAX_VUELTAS = 8                    # pedidos de herramientas por pregunta
@@ -15121,6 +15125,24 @@ def _ia_clave():
     if not clave:
         try:
             with open(IA_ARCHIVO_CLAVE, encoding="utf-8-sig") as f:
+                clave = f.readline().strip()
+        except OSError:
+            clave = ""
+    return clave
+
+
+IA_ARCHIVO_CLAVE_VOZ = os.path.join(BASE_DIR, "fish_api_key.txt")
+IA_FISH_URL = "https://api.fish.audio/v1/tts"
+IA_VOZ_MAX_LARGO = 700                # caracteres por audio (el navegador manda menos)
+
+
+def _ia_clave_voz():
+    """Clave de Fish Audio: la variable FISH_API_KEY o la primera línea de
+    fish_api_key.txt. Sin clave, Martín usa la voz del navegador."""
+    clave = os.environ.get("FISH_API_KEY", "").strip()
+    if not clave:
+        try:
+            with open(IA_ARCHIVO_CLAVE_VOZ, encoding="utf-8-sig") as f:
                 clave = f.readline().strip()
         except OSError:
             clave = ""
@@ -15708,7 +15730,8 @@ def ia_estado():
     return jsonify({"habilitado": motivo is None, "motivo": motivo,
                     "modelo": _ia_cfg("METALERP_IA_MODELO"),
                     "consultas_mes": mes["n"], "tokens_mes": mes["t"],
-                    "limite_hora": int(_ia_cfg_num("METALERP_IA_CONSULTAS_HORA"))})
+                    "limite_hora": int(_ia_cfg_num("METALERP_IA_CONSULTAS_HORA")),
+                    "voz_natural": bool(_ia_clave_voz())})
 
 
 @app.route("/api/ia/conversaciones")
@@ -15807,6 +15830,50 @@ def ia_chat():
         return jsonify({"error": error, "conversacion_id": cid}), 502
     return jsonify({"conversacion_id": cid, "respuesta": respuesta, "herramientas": herr,
                     "tokens": t_in + t_out})
+
+
+_ia_voz_uso = {}        # usuario_id -> marcas de tiempo de audios de la última hora
+
+
+@app.route("/api/ia/voz", methods=["POST"])
+@login_required(roles=["admin"])
+@ia_habilitada
+def ia_voz():
+    """Audio MP3 con la voz de Martín (Fish Audio). Solo convierte el texto
+    que ya está en pantalla; no consulta datos ni guarda nada."""
+    clave = _ia_clave_voz()
+    if not clave:
+        return jsonify({"error": "Falta la clave de Fish Audio (fish_api_key.txt)."}), 503
+    texto = str((request.get_json(silent=True) or {}).get("texto") or "").strip()[:IA_VOZ_MAX_LARGO]
+    if not texto:
+        return jsonify({"error": "Texto vacío."}), 400
+    uid, ahora, tope = session["user_id"], _ia_time.time(), int(_ia_cfg_num("METALERP_IA_VOZ_HORA"))
+    with _ia_lock:
+        marcas = [t for t in _ia_voz_uso.get(uid, []) if ahora - t < 3600]
+        if tope and len(marcas) >= tope:
+            return jsonify({"error": "Se alcanzó el límite de audios por hora."}), 429
+        _ia_voz_uso[uid] = marcas + [ahora]
+    import urllib.request, urllib.error
+    pedido = urllib.request.Request(IA_FISH_URL, method="POST",
+        data=_json.dumps({"text": texto, "reference_id": _ia_cfg("METALERP_IA_VOZ"), "format": "mp3",
+                          "mp3_bitrate": 64, "latency": "balanced", "language": "es"}).encode("utf-8"),
+        headers={"Authorization": "Bearer " + clave, "Content-Type": "application/json",
+                 "model": _ia_cfg("METALERP_IA_VOZ_MODELO")})
+    try:
+        with urllib.request.urlopen(pedido, timeout=40) as r:
+            audio = r.read(8 * 1024 * 1024)
+    except urllib.error.HTTPError as e:
+        motivo = {401: "Fish Audio rechazó la clave. Revisala en fish_api_key.txt.",
+                  402: "La cuenta de Fish Audio no tiene saldo para este modelo."}.get(
+                  e.code, f"Fish Audio no pudo generar la voz (HTTP {e.code}).")
+        print(f"[ia] voz: HTTP {e.code}")
+        return jsonify({"error": motivo}), 502
+    except Exception as e:
+        print(f"[ia] voz: {e!r}")
+        return jsonify({"error": "No se pudo conectar con Fish Audio."}), 502
+    if not audio:
+        return jsonify({"error": "Fish Audio devolvió un audio vacío."}), 502
+    return app.response_class(audio, mimetype="audio/mpeg", headers={"Cache-Control": "no-store"})
 
 
 if __name__ == "__main__":
