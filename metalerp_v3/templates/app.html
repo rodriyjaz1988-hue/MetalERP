@@ -5383,6 +5383,31 @@ async function openHerramientas(opId, opNombre){
   await loadHerramientas();
 }
 
+// Herramienta: se carga "piezas por herramienta" o "cant. por pieza", nunca
+// las dos. Con piezas por herramienta, la cantidad muestra "—" (se guarda 1,
+// que el cálculo no usa); sin ella, piezas muestra "—" y la cantidad es obligatoria.
+function herrExclusivo(vidaEl,cantEl){
+  if(!vidaEl||!cantEl) return;
+  vidaEl.placeholder='—';
+  const aplicar=function(){
+    if(vidaEl.value){
+      if(!cantEl.disabled&&cantEl.value) cantEl.dataset.prev=cantEl.value;
+      cantEl.value=''; cantEl.placeholder='—'; cantEl.disabled=true;
+      cantEl.title='No se usa: la herramienta se calcula por piezas por herramienta';
+    } else {
+      if(cantEl.disabled) cantEl.value=cantEl.dataset.prev||'1';
+      cantEl.placeholder='Cant.'; cantEl.disabled=false; cantEl.title='';
+    }
+  };
+  vidaEl.addEventListener('input',aplicar);
+  aplicar();
+}
+// Cantidad a guardar: con piezas por herramienta va 1 (no se usa en el cálculo).
+function herrCantidad(vidaEl,cantEl){
+  if(vidaEl&&vidaEl.value) return 1;
+  return cantEl?cantEl.value:1;
+}
+
 async function loadHerramientas(){
   const canEdit = ['admin','operario'].includes(ROL);
   // Herramientas del inventario de la operación (con piezas por herramienta),
@@ -5405,7 +5430,7 @@ async function loadHerramientas(){
             ? '<td><input type="number" min="1" step="1" id="herr-vida-'+r.id+'" value="'+(r.vida_util_herramienta||'')+'" placeholder="—" style="width:90px"></td>'
               + '<td><input type="number" min="0.01" step="0.01" id="herr-cant-'+r.id+'" value="'+r.cantidad+'" style="width:70px"> '+(r.unidad||'')+'</td>'
               + '<td style="white-space:nowrap"><button class="btn btn-s" onclick="updateHerramientaInv('+r.id+')">Guardar</button> <button class="btn btn-s btn-d" onclick="deleteHerramientaInv('+r.id+')">✕</button></td>'
-            : '<td>'+(r.vida_util_herramienta||'—')+'</td><td>'+fN(r.cantidad)+' '+(r.unidad||'')+'</td>')
+            : '<td>'+(r.vida_util_herramienta||'—')+'</td><td>'+(r.vida_util_herramienta?'—':fN(r.cantidad)+' '+(r.unidad||''))+'</td>')
         + '</tr>';
     });
     previas.forEach(function(r){
@@ -5418,6 +5443,8 @@ async function loadHerramientas(){
     hList += '</table>';
   }
   document.getElementById('herr-list').innerHTML = hList;
+  if(canEdit) asignadas.forEach(function(r){ herrExclusivo($('herr-vida-'+r.id),$('herr-cant-'+r.id)); });
+  herrExclusivo($('herr-vida'),$('herr-cant'));
 
   // Selector de inventario (solo si puede editar)
   const sel = document.getElementById('herr-inv-sel');
@@ -5440,25 +5467,29 @@ async function _herrRefrescar(msg){
 async function saveHerramienta(){
   const sel = document.getElementById('herr-inv-sel');
   if(!sel || !sel.value){ toast('Seleccioná una herramienta del inventario','w'); return; }
+  if(!$('herr-vida').value && !(parseFloat($('herr-cant').value)>0)){ toast('Cargá piezas por herramienta o la cantidad por pieza','w'); return; }
   const body = {
     material_id: parseInt(sel.value),
-    cantidad: parseFloat(document.getElementById('herr-cant').value)||1,
+    cantidad: parseFloat(herrCantidad($('herr-vida'),$('herr-cant'))),
     vida_util_herramienta: document.getElementById('herr-vida').value||null,
   };
   const res = await api('/api/operaciones/'+_herrOpId+'/herramientas_inv',
     {method:'POST', body:JSON.stringify(body)});
   if(res.ok){
     sel.value='';
-    document.getElementById('herr-cant').value='1';
     document.getElementById('herr-vida').value='';
+    document.getElementById('herr-cant').value='1';
+    $('herr-cant').disabled=false; $('herr-cant').placeholder='Cant.';
     await _herrRefrescar('Herramienta agregada');
   } else toast(res.error||'Error','e');
 }
 
 async function updateHerramientaInv(rid){
+  const vEl=$('herr-vida-'+rid), cEl=$('herr-cant-'+rid);
+  if(!vEl.value && !(parseFloat(cEl.value)>0)){ toast('Cargá piezas por herramienta o la cantidad por pieza','w'); return; }
   const body = {
-    cantidad: parseFloat(document.getElementById('herr-cant-'+rid).value)||0,
-    vida_util_herramienta: document.getElementById('herr-vida-'+rid).value||null,
+    cantidad: parseFloat(herrCantidad(vEl,cEl)),
+    vida_util_herramienta: vEl.value||null,
   };
   const res = await api('/api/operaciones/'+_herrOpId+'/herramientas_inv/'+rid,
     {method:'PUT', body:JSON.stringify(body)});
@@ -6532,9 +6563,9 @@ async function saveOp(){
     const hidId=row.querySelector('.mat-id-field');
     const numInputs=row.querySelectorAll('input[type="number"],input:not([type])');
     const mid=hidId?hidId.value:null;
-    const qty=numInputs[0]?numInputs[0].value:1;
-    const uni=numInputs[1]?numInputs[1].value:'unid';
     const vida=row.querySelector('.mat-vida-field');
+    const qty=herrCantidad(vida,numInputs[0]);
+    const uni=numInputs[1]?numInputs[1].value:'unid';
     return{tipo:'material',material_id:mid,cantidad:qty,unidad:uni,vida_util_herramienta:vida&&vida.value?parseInt(vida.value):null};
   }).filter(function(m){return m.material_id&&m.cantidad;}).concat(leerProductosInsumo('op'));
   // "Terciarizado" solo se guarda como tal si, además de tildar el check,
@@ -12658,6 +12689,7 @@ function _agregarMaterialRow(containerId, matId, desc, unid, qty, vida){
     lbl.textContent = 'Vida útil (pz)';
     row.appendChild(lbl);
     row.appendChild(vidaInput);
+    herrExclusivo(vidaInput,qtyInput);
   }
   row.appendChild(delBtn);
   el.appendChild(row);
@@ -12678,9 +12710,9 @@ async function saveOpEdit(){
     const hidId=row.querySelector('.mat-id-field');
     const numInputs=row.querySelectorAll('input[type="number"]');
     const mid=hidId?hidId.value:null;
-    const qty=numInputs[0]?numInputs[0].value:1;
-    const uni=row.querySelector('input:not([type="number"]):not([type="hidden"])')?row.querySelector('input:not([type="number"]):not([type="hidden"])').value:'unid';
     const vida=row.querySelector('.mat-vida-field');
+    const qty=herrCantidad(vida,numInputs[0]);
+    const uni=row.querySelector('input:not([type="number"]):not([type="hidden"])')?row.querySelector('input:not([type="number"]):not([type="hidden"])').value:'unid';
     return{tipo:'material',material_id:mid,cantidad:qty,unidad:uni,vida_util_herramienta:vida&&vida.value?parseInt(vida.value):null};
   }).filter(function(m){return m.material_id&&m.cantidad;}).concat(leerProductosInsumo('ope'));
   const volAgrupBtn=document.getElementById('ope-vol-agrup-btn');
@@ -15328,14 +15360,14 @@ document.addEventListener('keydown',function(e){
         <select id="herr-inv-sel" style="width:100%"></select>
       </div>
       <div class="fg" style="width:120px"><label title="Cuántas piezas hace una herramienta antes de reemplazarla">Piezas por herramienta</label>
-        <input type="number" id="herr-vida" min="1" step="1" placeholder="Ej: 500">
+        <input type="number" id="herr-vida" min="1" step="1" placeholder="—">
       </div>
       <div class="fg" style="width:90px"><label title="Se usa solo si no se carga piezas por herramienta">Cant. por pieza</label>
         <input type="number" id="herr-cant" value="1" min="0.01" step="0.01">
       </div>
       <button class="btn btn-p" onclick="saveHerramienta()" style="white-space:nowrap;margin-bottom:1px">+ Agregar</button>
     </div>
-    <div style="font-size:11px;color:var(--color-text-secondary);margin-top:6px">Con piezas por herramienta se necesita 1 herramienta cada esa cantidad de piezas (redondeando hacia arriba). Si queda vacío se usa la cantidad por pieza.</div>
+    <div style="font-size:11px;color:var(--color-text-secondary);margin-top:6px">Cargá una de las dos: con piezas por herramienta se necesita 1 herramienta cada esa cantidad de piezas (redondeando hacia arriba) y la cantidad por pieza queda en "—". Si piezas por herramienta queda en "—", se usa la cantidad por pieza.</div>
   </div>
   <div class="ma"><button class="btn" onclick="closeMo('mo-herramientas')">Cerrar</button></div>
 </div></div>
