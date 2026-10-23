@@ -1350,6 +1350,9 @@
             <div class="vh-acciones" id="pres-toolbar">
               <button class="btn pres-solo-pres" id="pres-b-edit" style="display:none" onclick="presSelAccion('edit')" disabled title="Editar el presupuesto seleccionado"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11.1 2.2a1.3 1.3 0 0 1 1.9 0l.8.8a1.3 1.3 0 0 1 0 1.9L5.4 13.2l-3.2.9.9-3.2z"/></svg>Editar</button>
               <button class="btn btn-p pres-solo-pres" id="b-pres" style="display:none" onclick="openPres()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M8 3.3v9.4M3.3 8h9.4"/></svg>Nuevo presupuesto</button>
+              <button class="btn pres-solo-pcot" id="pcot-b-aprob" style="display:none" onclick="pcotSelAccion('aprob')" disabled title="Aprobar el pedido seleccionado"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.2 3L13 4.5"/></svg>Aprobar</button>
+              <button class="btn pres-solo-pcot" id="pcot-b-rech" style="display:none" onclick="pcotSelAccion('rech')" disabled title="Rechazar el pedido seleccionado"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>Rechazar</button>
+              <button class="btn pres-solo-pcot" id="pcot-b-pend" style="display:none" onclick="pcotSelAccion('pend')" disabled title="Volver el pedido a Pendiente"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9"/><path d="M2.5 2.5v2.5H5"/></svg>Volver a pendiente</button>
               <button class="btn pres-solo-pcot" id="pcot-b-edit" style="display:none" onclick="pcotSelAccion('edit')" disabled title="Editar el pedido seleccionado"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11.1 2.2a1.3 1.3 0 0 1 1.9 0l.8.8a1.3 1.3 0 0 1 0 1.9L5.4 13.2l-3.2.9.9-3.2z"/></svg>Editar</button>
               <button class="btn btn-warn pres-solo-pcot" id="pcot-b-elim" style="display:none" onclick="pcotSelAccion('elim')" disabled title="Eliminar el pedido seleccionado"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.6 9.2c0 .5.4.8.9.8h5c.5 0 .9-.3.9-.8L12 4"/></svg>Eliminar</button>
               <button class="btn btn-p pres-solo-pcot" id="b-pcot" style="display:none" onclick="openPcot()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M8 3.3v9.4M3.3 8h9.4"/></svg>Nuevo pedido</button>
@@ -1377,6 +1380,7 @@
           </div>
           <div class="vhead-row vhead-fil pres-solo-pcot">
             <input type="text" id="pcot-buscar" class="sel-fil vh-fil-wide" placeholder="🔍 Buscar por número, cliente o código" oninput="renderPcot()" autocomplete="off">
+            <select id="pcot-fil-estado" class="sel-fil" onchange="renderPcot()" title="Estado"><option value="">Todos los estados</option><option>Pendiente</option><option>Aprobado</option><option>Rechazado</option></select>
             <button class="vh-fil-clear" onclick="clearFiltrosPcot()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.2 2.8h11.6L9.3 8.2v4.4l-2.6 1.3V8.2z"/><path d="M2 14 14 2"/></svg>Limpiar filtros</button>
           </div>
         </div>
@@ -3910,7 +3914,8 @@ function setupRoles(){
    ['b-mat',['admin','almacen','operario','logistica']],['b-prov',['admin','almacen','vendedor']],
    ['b-ott-nueva',['admin','operario']],['b-recepcion',['admin','almacen']],['b-rec-oc',['admin','almacen','vendedor']],
    ['b-pres',['admin','vendedor']],['pres-b-edit',['admin','vendedor']],['b-cli',['admin','vendedor']],
-   ['b-pcot',['admin','vendedor']],['pcot-b-edit',['admin','vendedor']],['pcot-b-elim',['admin','vendedor']]].forEach(([id,roles])=>{
+   ['b-pcot',['admin','vendedor']],['pcot-b-edit',['admin','vendedor']],['pcot-b-elim',['admin','vendedor']],
+   ['pcot-b-aprob',['admin','vendedor']],['pcot-b-rech',['admin','vendedor']],['pcot-b-pend',['admin','vendedor']]].forEach(([id,roles])=>{
     const el=$(id);if(el&&roles.includes(ROL))el.style.display='';
   });
   if(ROL==='admin'){const be=$('b-emp');if(be)be.style.display='';}
@@ -8018,7 +8023,15 @@ async function loadPcot(){
   _pcot=Array.isArray(rows)?rows:[];
   renderPcot();
 }
-function clearFiltrosPcot(){ if($('pcot-buscar'))$('pcot-buscar').value=''; renderPcot(); }
+function clearFiltrosPcot(){ if($('pcot-buscar'))$('pcot-buscar').value=''; if($('pcot-fil-estado'))$('pcot-fil-estado').value=''; renderPcot(); }
+// Estado del pedido: badge con quién y cuándo lo decidió (y el motivo del rechazo).
+function pcotEstadoBadge(r){
+  const e=r.estado||'Pendiente', cls={Pendiente:'ba',Aprobado:'bg',Rechazado:'br'}[e]||'bk';
+  let tip=e;
+  if(e!=='Pendiente') tip+=(r.estado_por_nombre?' por '+r.estado_por_nombre:'')+(r.estado_fecha?' el '+fmtD(r.estado_fecha)+' '+String(r.estado_fecha).slice(11,16):'');
+  if(r.estado_motivo) tip+=' · Motivo: '+r.estado_motivo;
+  return '<span class="b '+cls+'" title="'+schEsc(tip)+'">'+e+'</span>'+(r.estado_motivo?' <span title="'+schEsc(r.estado_motivo)+'" style="cursor:help">💬</span>':'');
+}
 function sortPcot(col){
   if(_pcotSortCol===col){ _pcotSortAsc=!_pcotSortAsc; }
   else { _pcotSortCol=col; _pcotSortAsc=true; }
@@ -8031,6 +8044,8 @@ function renderPcot(){
   let lista=_pcot;
   if(q) lista=lista.filter(r=>(r.numero||'').toLowerCase().includes(q)||(r.cliente_nombre||'').toLowerCase().includes(q)
     ||(r.producto_codigo||'').toLowerCase().includes(q)||(r.producto_nombre||'').toLowerCase().includes(q));
+  const fe=$('pcot-fil-estado')?$('pcot-fil-estado').value:'';
+  if(fe) lista=lista.filter(r=>(r.estado||'Pendiente')===fe);
   if(!lista.length){$('pcot-list').innerHTML='<div class="em">Sin resultados para los filtros seleccionados.</div>';actualizarToolbarPcot();return;}
   lista=lista.slice();
   if(_pcotSortCol){
@@ -8054,7 +8069,7 @@ function renderPcot(){
   };
   let h='<table><tr><th style="width:24px"></th>'+th('numero','N°')+th('fecha','Fecha')+th('cliente_nombre','Cliente')
     +th('producto_codigo','Código')+th('producto_nombre','Producto')+th('cantidad','Cantidad')
-    +monOnly(th('precio_total','Precio total')+th('precio_unitario','Precio unitario'))+'</tr>';
+    +monOnly(th('precio_total','Precio total')+th('precio_unitario','Precio unitario'))+th('estado','Estado')+'</tr>';
   lista.forEach(function(r){
     const sel=_pcotSel===r.id;
     h+='<tr id="pcot-row-'+r.id+'" class="'+(sel?'ot-sel':'')+'" style="cursor:pointer" onclick="selPcot('+r.id+')" ondblclick="selPcot('+r.id+');pcotSelAccion(\'edit\')">'
@@ -8064,6 +8079,7 @@ function renderPcot(){
       +'<td>'+(+r.cantidad).toLocaleString('es-AR')+' '+(r.producto_unidad||'')+'</td>'
       +tdM(r.precio_total!=null?fmtMD(r.precio_total,r.moneda):'—')
       +tdM(_pcotUnit(r)!=null?fmtMD(_pcotUnit(r)):'—')
+      +'<td style="white-space:nowrap">'+pcotEstadoBadge(r)+'</td>'
       +'</tr>';
   });
   $('pcot-list').innerHTML=h+'</table>'
@@ -8080,13 +8096,33 @@ function selPcot(id){
 function actualizarToolbarPcot(){
   const r=_pcotSel!==null?_pcot.find(x=>x.id===_pcotSel):null;
   const lbl=$('pcot-sel-label'); if(lbl) lbl.textContent=r?r.numero:'–';
-  ['edit','elim'].forEach(k=>{const b=$('pcot-b-'+k);if(b)b.disabled=!r;});
+  const pend=!!r&&(r.estado||'Pendiente')==='Pendiente';
+  ['elim'].forEach(k=>{const b=$('pcot-b-'+k);if(b)b.disabled=!r;});
+  ['edit','aprob','rech'].forEach(k=>{const b=$('pcot-b-'+k);if(b)b.disabled=!pend;});
+  const bp=$('pcot-b-pend'); if(bp) bp.disabled=!r||pend;
 }
 async function pcotSelAccion(a){
   const r=_pcotSel!==null?_pcot.find(x=>x.id===_pcotSel):null;
   if(!r){toast('Seleccioná un pedido de la lista','w');return;}
   if(!['admin','vendedor'].includes(ROL)) return;
-  if(a==='edit') openPcot(r);
+  const pend=(r.estado||'Pendiente')==='Pendiente';
+  if(a==='edit'){
+    if(!pend){toast('El pedido está '+r.estado.toLowerCase()+': volvelo a Pendiente para editarlo','w');return;}
+    openPcot(r);
+  }
+  else if(a==='aprob'||a==='rech'||a==='pend'){
+    const body={estado:{aprob:'Aprobado',rech:'Rechazado',pend:'Pendiente'}[a]};
+    if(a==='aprob'&&!await confirmar('¿Aprobar el pedido de cotización '+r.numero+'?\n'+(r.cliente_nombre||'')+' · '+(r.producto_codigo||'')+' × '+(+r.cantidad).toLocaleString('es-AR'))) return;
+    if(a==='rech'){
+      const m=await pedirTexto('¿Rechazar el pedido de cotización '+r.numero+'?\nMotivo (opcional)','');
+      if(m===null) return;
+      body.motivo=m;
+    }
+    if(a==='pend'&&!await confirmar('¿Volver el pedido '+r.numero+' a Pendiente?\nAhora está '+r.estado.toLowerCase()+'.')) return;
+    const res=await api('/api/pedidos_cotizacion/'+r.id+'/estado',{method:'POST',body:JSON.stringify(body)});
+    if(res&&res.ok){toast('Pedido '+r.numero+': '+body.estado.toLowerCase());loadPcot();}
+    else toast((res&&res.error)||'Error','e');
+  }
   else if(a==='elim'){
     if(!await confirmar('¿Eliminar el pedido de cotización '+r.numero+'?')) return;
     const res=await apiBorrar('/api/pedidos_cotizacion/'+r.id,'Pedido de cotización '+r.numero+' eliminado');

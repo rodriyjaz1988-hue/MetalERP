@@ -1761,7 +1761,11 @@ CREATE TABLE IF NOT EXISTS pedidos_cotizacion (
     precio_total REAL,
     creado_por INTEGER REFERENCES usuarios(id),
     creado TEXT DEFAULT (datetime('now','localtime')),
-    moneda TEXT
+    moneda TEXT,
+    estado TEXT NOT NULL DEFAULT 'Pendiente' CHECK(estado IN ('Pendiente','Aprobado','Rechazado')),
+    estado_motivo TEXT,
+    estado_por INTEGER REFERENCES usuarios(id),
+    estado_fecha TEXT
 );
 
 -- Cajones: piezas físicas de una OT agrupadas desde la 1ª operación hasta que
@@ -2460,7 +2464,7 @@ def _backfill_remitos_ott_cantidad(db):
 #      mismo cambio sobre una base existente (por ejemplo un ALTER TABLE).
 #   3. Subir ESQUEMA_VERSION a ese número.
 # Cada migración corre una sola vez por base.
-ESQUEMA_VERSION = 8
+ESQUEMA_VERSION = 9
 
 
 def _agregar_columna(db, tabla, columna, tipo):
@@ -2555,6 +2559,16 @@ def _migracion_8(db):
         _crear_tabla_de_schema(db, tabla)
 
 
+def _migracion_9(db):
+    # Pedidos de cotización: se aprueban o rechazan (los que ya había quedan
+    # Pendiente).
+    _agregar_columna(db, "pedidos_cotizacion", "estado",
+                     "TEXT NOT NULL DEFAULT 'Pendiente' CHECK(estado IN ('Pendiente','Aprobado','Rechazado'))")
+    _agregar_columna(db, "pedidos_cotizacion", "estado_motivo", "TEXT")
+    _agregar_columna(db, "pedidos_cotizacion", "estado_por", "INTEGER REFERENCES usuarios(id)")
+    _agregar_columna(db, "pedidos_cotizacion", "estado_fecha", "TEXT")
+
+
 MIGRACIONES = {
     2: _migracion_2,
     3: lambda db: _crear_tabla_de_schema(db, "pedidos_cotizacion"),
@@ -2563,6 +2577,7 @@ MIGRACIONES = {
     6: _migracion_6,
     7: _migracion_7,
     8: _migracion_8,
+    9: _migracion_9,
 }
 
 
@@ -6716,10 +6731,12 @@ def _validar_pedido_cotizacion(d, actual=None):
 @login_required()
 def get_pedidos_cotizacion():
     return jsonify([dict(r) for r in query("""SELECT pc.*, c.razon cliente_nombre,
-            m.codigo producto_codigo, m.descripcion producto_nombre, m.unidad producto_unidad
+            m.codigo producto_codigo, m.descripcion producto_nombre, m.unidad producto_unidad,
+            u.nombre estado_por_nombre
         FROM pedidos_cotizacion pc
         LEFT JOIN clientes c ON c.id=pc.cliente_id
         LEFT JOIN materiales m ON m.id=pc.producto_id
+        LEFT JOIN usuarios u ON u.id=pc.estado_por
         ORDER BY pc.id DESC""")])
 
 
@@ -6742,11 +6759,36 @@ def create_pedido_cotizacion():
 def update_pedido_cotizacion(pid):
     actual = query("SELECT * FROM pedidos_cotizacion WHERE id=?", (pid,), one=True)
     if not actual: return jsonify({"error": "Pedido de cotización no encontrado"}), 404
+    if actual["estado"] != "Pendiente":
+        return jsonify({"error": f"El pedido está {actual['estado'].lower()}: volvelo a Pendiente para editarlo."}), 409
     v, err = _validar_pedido_cotizacion(request.json or {}, actual)
     if err: return jsonify({"error": err}), 400
     execute("""UPDATE pedidos_cotizacion SET fecha=?,cliente_id=?,producto_id=?,
         cantidad=?,precio_total=? WHERE id=?""",
         (v["fecha"], v["cliente_id"], v["producto_id"], v["cantidad"], v["precio_total"], pid))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/pedidos_cotizacion/<int:pid>/estado", methods=["POST"])
+@login_required(roles=["admin","vendedor"])
+def estado_pedido_cotizacion(pid):
+    """Aprobar, rechazar (con motivo opcional) o volver a Pendiente."""
+    d = request.json or {}
+    estado = d.get("estado")
+    if estado not in ("Pendiente", "Aprobado", "Rechazado"):
+        return jsonify({"error": "Estado inválido"}), 400
+    actual = query("SELECT estado FROM pedidos_cotizacion WHERE id=?", (pid,), one=True)
+    if not actual: return jsonify({"error": "Pedido de cotización no encontrado"}), 404
+    if estado != "Pendiente" and actual["estado"] != "Pendiente":
+        return jsonify({"error": f"El pedido ya está {actual['estado'].lower()}."}), 409
+    motivo = str(d.get("motivo") or "").strip()[:300] or None
+    if estado == "Pendiente":
+        execute("""UPDATE pedidos_cotizacion SET estado='Pendiente', estado_motivo=NULL,
+            estado_por=NULL, estado_fecha=NULL WHERE id=?""", (pid,))
+    else:
+        execute("""UPDATE pedidos_cotizacion SET estado=?, estado_motivo=?, estado_por=?,
+            estado_fecha=datetime('now','localtime') WHERE id=?""",
+            (estado, motivo if estado == "Rechazado" else None, session.get("user_id"), pid))
     return jsonify({"ok": True})
 
 
