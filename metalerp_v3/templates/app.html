@@ -1097,7 +1097,6 @@
     </div>
 
     <div class="page" id="p-lotes">
-      <div class="tabs" id="lote-tabs" style="margin-bottom:10px"><div class="tab active" data-t="lotes">Lotes</div><div class="tab" data-t="cajones">Cajones</div></div>
       <div id="lote-sec-lotes">
       <div class="vhead">
         <div class="vhead-card">
@@ -1134,6 +1133,7 @@
             <button class="vh-fil-clear" onclick="clearLotesFiltros()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.2 2.8h11.6L9.3 8.2v4.4l-2.6 1.3V8.2z"/><path d="M2 14 14 2"/></svg>Limpiar filtros</button>
           </div>
         </div>
+        <div class="tabs lote-tabs" style="margin:11px 0 0"><div class="tab active" data-t="lotes">Lotes</div><div class="tab" data-t="cajones">Cajones</div></div>
       </div>
       <div class="card">
         <div id="lote-list"><div class="ld">Cargando...</div></div>
@@ -1161,6 +1161,7 @@
             <button class="vh-fil-clear" onclick="clearCajFiltros()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.2 2.8h11.6L9.3 8.2v4.4l-2.6 1.3V8.2z"/><path d="M2 14 14 2"/></svg>Limpiar filtros</button>
           </div>
         </div>
+        <div class="tabs lote-tabs" style="margin:11px 0 0"><div class="tab" data-t="lotes">Lotes</div><div class="tab active" data-t="cajones">Cajones</div></div>
       </div>
       <div class="card"><div id="caj-list" class="nowrap-tbl"><div class="ld">Cargando...</div></div></div>
       </div>
@@ -13270,12 +13271,13 @@ let _lotesData=[];
 
 // ── Cajones (pestaña de Lotes) ──────────────────────────────────────────────
 let _lotesTab='lotes', _caj=[], _cajSel=null;
-document.querySelectorAll('#lote-tabs .tab').forEach(function(t){
+// Cada sección tiene sus pestañas debajo del encabezado (como Presupuestos).
+document.querySelectorAll('.lote-tabs .tab').forEach(function(t){
   t.addEventListener('click',function(){lotesTab(t.dataset.t);});
 });
 function lotesTab(t){
   _lotesTab=t;
-  document.querySelectorAll('#lote-tabs .tab').forEach(function(x){x.classList.toggle('active',x.dataset.t===t);});
+  document.querySelectorAll('.lote-tabs .tab').forEach(function(x){x.classList.toggle('active',x.dataset.t===t);});
   $('lote-sec-lotes').style.display=t==='lotes'?'':'none';
   $('lote-sec-cajones').style.display=t==='cajones'?'':'none';
   if(t==='cajones') loadCajones();
