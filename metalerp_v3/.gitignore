@@ -1,0 +1,6 @@
+# Claves y secretos: nunca subir
+*_api_key.txt
+# Copias de seguridad locales
+*.bak_*
+database/metalerp_backup_*.db
+__pycache__/
