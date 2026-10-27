@@ -23,7 +23,7 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-pip install flask groq --quiet
+pip install -r requirements.txt --quiet --disable-pip-version-check
 python server.py
 
 :fin
