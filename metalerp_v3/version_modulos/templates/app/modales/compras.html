@@ -1,0 +1,159 @@
+<!-- SOLICITUD DE COMPRA -->
+<div class="ov" id="mo-sc"><div class="mo" style="width:520px">
+  <div class="mh" id="sc-modal-title">Solicitud de compra <span class="mx" onclick="closeMo('mo-sc')">×</span></div>
+  <input type="hidden" id="sc-id">
+  <div class="fg2">
+    <div class="fg"><label>Tipo</label>
+      <select id="sc-tipo" onchange="onSCTipoChange()">
+        <option>Productiva</option><option>Indirecta</option>
+      </select>
+    </div>
+    <div class="fg"><label>Urgencia</label><select id="sc-urg"><option>Normal</option><option>Alta</option><option>Crítica</option></select></div>
+    <div class="fg s2" id="sc-mat-row" style="position:relative"><label id="sc-mat-label">Material <span class="req">*</span></label>
+      <input type="text" id="sc-mat-search" placeholder="Buscar por código o descripción..." autocomplete="off"
+        oninput="filtrarSCMat()" onfocus="filtrarSCMat()"
+        onblur="setTimeout(function(){var c=$('sc-mat-results');if(c)c.style.display='none';},150)">
+      <input type="hidden" id="sc-mat">
+      <div id="sc-mat-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:7px;margin-top:3px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.14);z-index:10"></div>
+    </div>
+    <div class="fg s2" id="sc-des-row"><label>Descripción <span class="req">*</span></label>
+      <input id="sc-des" placeholder="Ej: Acero SAE 1045 barra 40mm" readonly>
+    </div>
+    <div class="fg"><label>OT de origen</label><select id="sc-ot"></select></div>
+    <div class="fg"><label>Cantidad <span class="req">*</span></label><input type="number" id="sc-qty" placeholder="0" min="0.01" step="0.01"></div>
+    <div class="fg"><label>Unidad</label><input id="sc-uni" placeholder="kg, m, unid..."></div>
+    <div class="fg"><label>Centro de costo</label><input id="sc-cc" placeholder="Ej: Producción, Mantenimiento"></div>
+    <div class="fg s2"><label>Observaciones</label><textarea id="sc-obs" style="min-height:45px"></textarea></div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-sc')">Cancelar</button><button class="btn btn-p" onclick="saveSC()">Guardar solicitud</button></div>
+</div></div>
+
+<!-- COTIZACIÓN -->
+<div class="ov" id="mo-cot"><div class="mo">
+  <div class="mh">Nueva cotización <span class="mx" onclick="closeMo('mo-cot')">×</span></div>
+  <div class="fg2">
+    <div class="fg"><label>Solicitud <span class="req">*</span></label><select id="cot-sol"></select></div>
+    <div class="fg" style="position:relative"><label>Proveedor <span class="req">*</span></label>
+      <input type="text" id="cot-prv-search" placeholder="🔍 Buscar proveedor..." autocomplete="off"
+        oninput="$('cot-prv').value='';filtrarProvCot()" onfocus="this.select();filtrarProvCot()"
+        onblur="setTimeout(function(){var c=$('cot-prv-results');if(c)c.style.display='none';},150)">
+      <input type="hidden" id="cot-prv">
+      <div id="cot-prv-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:7px;margin-top:3px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.14);z-index:10"></div>
+    </div>
+    <div class="fg"><label>Precio unitario ($) <span class="req">*</span></label><input type="number" id="cot-pre" placeholder="0" min="0"></div>
+    <div class="fg"><label>Plazo entrega (días)</label><input type="number" id="cot-pla" value="3" min="1"></div>
+    <div class="fg"><label>Condición de pago</label><input id="cot-cond" placeholder="Ej: 30 días, contado"></div>
+    <div class="fg s2"><label>Observaciones</label><textarea id="cot-obs" style="min-height:45px"></textarea></div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-cot')">Cancelar</button><button class="btn btn-p" onclick="saveCot()">Guardar cotización</button></div>
+</div></div>
+
+<!-- ORDEN DE COMPRA -->
+<div class="ov" id="mo-oc"><div class="mo" style="width:760px">
+  <div class="mh">Nueva orden de compra <span class="mx" onclick="closeMo('mo-oc')">×</span></div>
+  <div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:8px">
+    Elegí una o más solicitudes de compra (SC) para agrupar en esta OC. Todas deben tener cotización
+    seleccionada con el mismo proveedor. Cada SC va a generar su propio lote al emitir la OC.
+  </div>
+  <div id="oc-sc-list" style="max-height:280px;overflow-y:auto;border:1px solid var(--color-border-secondary);border-radius:8px">
+    <div class="ld">Cargando...</div>
+  </div>
+  <div class="fg2" style="margin-top:10px">
+    <div class="fg"><label>Fecha entrega estimada</label><input type="date" id="oc-ent"></div>
+    <div class="fg"><label>Proveedor</label><div id="oc-prov-info" style="font-size:13px;padding:6px 0;color:var(--color-text-primary)">—</div></div>
+    <div class="fg s2"><label>Observaciones</label><textarea id="oc-obs" style="min-height:40px"></textarea></div>
+  </div>
+  <div style="text-align:right;font-size:13px;font-weight:600;margin-top:10px">Total: <span id="oc-total">$0</span></div>
+  <div data-monetario style="font-size:11px;color:var(--color-text-secondary);margin-top:4px">OCs mayores a $50.000 requieren aprobación de administrador.</div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-oc')">Cancelar</button><button class="btn btn-p" onclick="saveOC()">Emitir OC</button></div>
+</div></div>
+
+<!-- RECEPCIÓN DE MATERIAL/INSUMO -->
+<div class="ov" id="mo-recepcion"><div class="mo" style="width:420px">
+  <div class="mh">Recepción SIN OC de material/insumo <span class="mx" onclick="closeMo('mo-recepcion')">×</span></div>
+  <div class="fg2 f1">
+    <div class="fg s2"><label>Material / Insumo <span class="req">*</span></label><select id="rec-mat"></select></div>
+    <div class="fg"><label>Cantidad <span class="req">*</span></label><input type="number" id="rec-qty" min="0.01" step="0.01" placeholder="0"></div>
+    <div class="fg"><label>Proveedor</label><select id="rec-prov"><option value="">— Ninguno —</option></select></div>
+    <div class="fg"><label>Remito / referencia</label><input id="rec-remito" placeholder="Ej: Remito 0001-00234"></div>
+    <div class="fg"><label>Precio unitario</label><input type="number" id="rec-precio" min="0" step="0.01" placeholder="0"></div>
+    <div class="fg s2"><label>Observaciones</label><input id="rec-obs" placeholder="Opcional"></div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-recepcion')">Cancelar</button><button class="btn btn-p" onclick="saveRecepcion()">Registrar recepción</button></div>
+</div></div>
+
+<!-- NUEVA OTT MANUAL -->
+<div class="ov" id="mo-ott-nueva"><div class="mo" style="width:480px">
+  <div class="mh">Nueva OTT manual <span class="mx" onclick="closeMo('mo-ott-nueva')">×</span></div>
+  <div class="fg2">
+    <div class="fg s2"><label>Material como insumo <span class="req">*</span> <span style="font-size:10px;color:var(--color-text-secondary)">(es el mismo material que se generará al ingresar el remito)</span></label>
+      <select id="ottn-mat"></select></div>
+    <div class="fg"><label>Cantidad a enviar <span class="req">*</span></label><input type="number" id="ottn-qty" min="0.01" step="0.01" placeholder="0"></div>
+    <div class="fg"><label>Proveedor <span class="req">*</span></label><select id="ottn-prov"></select></div>
+    <div class="fg" id="ottn-precio-wrap"><label>Precio acordado ($/u)</label><input type="number" id="ottn-precio" min="0" step="0.01" placeholder="0"></div>
+    <div class="fg"><label>Retorno estimado</label><input type="date" id="ottn-ret"></div>
+    <div class="fg s2"><label>Observaciones</label><textarea id="ottn-obs" style="min-height:45px"></textarea></div>
+  </div>
+  <div style="font-size:12px;color:var(--color-text-secondary);margin-top:8px;padding:8px;background:var(--color-background-secondary);border-radius:6px">
+    Al emitir el primer remito de envío se genera la solicitud de compra por la cantidad enviada. Compras confirma el precio y emite la OC.
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-ott-nueva')">Cancelar</button><button class="btn btn-p" onclick="guardarNuevaOTT()">Crear OTT</button></div>
+</div></div>
+
+<!-- COMPLETAR OC -->
+<div class="ov" id="mo-comp-oc"><div class="mo" style="width:460px">
+  <div class="mh"><span id="compoc-titulo">Completar OC</span> <span class="mx" onclick="closeMo('mo-comp-oc')">×</span></div>
+  <div id="compoc-tipo" style="font-size:12px;margin-bottom:10px"></div>
+  <div class="fg2 f1">
+    <div class="fg"><label>Remito ya recibido</label><select id="compoc-remito-sel" onchange="if(this.value)$('compoc-remito').value=this.value"></select></div>
+    <div class="fg"><label>N° de remito del proveedor <span class="req" id="compoc-remito-req">*</span></label><input id="compoc-remito" placeholder="Ej: 0001-00234"></div>
+  </div>
+  <div id="compoc-pend" style="font-size:12px;color:#A32D2D;margin-top:8px"></div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-comp-oc')">Cancelar</button><button class="btn btn-p" onclick="confirmarCompletarOC()">Completar OC</button></div>
+</div></div>
+
+<!-- ELEGIR OC PARA RECEPCIONAR -->
+<div class="ov" id="mo-etiquetas"><div class="mo" style="width:560px">
+  <div class="mh">📦 Embalado y etiquetado <span class="mx" onclick="closeMo('mo-etiquetas')">×</span></div>
+  <div>
+    <div id="et-ctx" style="font-size:12px;color:var(--color-text-secondary);margin-bottom:10px"></div>
+    <div class="fg2">
+      <div class="fg"><label>Cantidad total</label><input type="number" id="et-total" min="0" step="any" oninput="etRecalc('total')"></div>
+      <div class="fg"><label>Unidad</label><input id="et-unidad" placeholder="u / kg / m"></div>
+    </div>
+    <div class="fg2">
+      <div class="fg"><label>Cantidad de bultos</label><input type="number" id="et-bultos" min="1" step="1" value="1" oninput="etRecalc('bultos')"></div>
+      <div class="fg"><label>Cantidad por bulto</label><input type="number" id="et-xbulto" min="0" step="any" oninput="etRecalc('xbulto')"></div>
+    </div>
+    <div class="fg2">
+      <div class="fg"><label>Artículo / descripción</label><input id="et-desc"></div>
+      <div class="fg"><label>Código de barras (opcional)</label><input id="et-code" placeholder="Si se deja vacío usa referencia/lote"></div>
+    </div>
+    <div class="fg2">
+      <div class="fg"><label>Referencia (remito / OTT / OC)</label><input id="et-ref"></div>
+      <div class="fg"><label>Lote</label><input id="et-lote"></div>
+    </div>
+    <div id="et-prev" style="font-size:11px;color:var(--color-text-secondary);margin-top:6px"></div>
+    <label id="et-caj-wrap" style="display:none;margin-top:10px;font-size:12px;align-items:center;gap:6px;cursor:pointer">
+      <input type="checkbox" id="et-caj" checked style="width:auto;margin:0">
+      <span>Guardar cada bulto como un cajón del lote <b id="et-caj-lote"></b> (se ven en Lotes → Cajones)</span>
+    </label>
+  </div>
+  <div class="ma"><button class="btn" onclick="etCerrar()">Cerrar</button><button class="btn" id="et-b-guardar" style="display:none" onclick="etGuardarBultos(true)">Guardar cajones</button><button class="btn btn-p" onclick="imprimirEtiquetas()">🖨 Imprimir etiquetas</button></div>
+</div></div>
+<div class="ov" id="mo-rec-pick-oc"><div class="mo" style="width:420px">
+  <div class="mh">Recepcionar según OC <span class="mx" onclick="closeMo('mo-rec-pick-oc')">×</span></div>
+  <div class="fg"><label>Orden de compra pendiente de recibir</label><select id="recpick-oc"></select></div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-rec-pick-oc')">Cancelar</button><button class="btn btn-p" onclick="continuarRecSegunOC()">Continuar</button></div>
+</div></div>
+
+<!-- RECEPCIÓN DE OC (Compras) -->
+<div class="ov" id="mo-oc-recibir"><div class="mo">
+  <div class="mh">Recepción de mercadería — OC <span class="mx" onclick="closeMo('mo-oc-recibir')">×</span></div>
+  <input type="hidden" id="recoc-ocid">
+  <div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:10px" id="recoc-prv"></div>
+  <div id="recoc-items"></div>
+  <div class="fg" style="margin-top:10px"><label>Remito del proveedor (opcional)</label><input id="recoc-remito" placeholder="Ej: 0001-00234"></div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-oc-recibir')">Cancelar</button><button class="btn btn-p" onclick="saveRecOC()">Confirmar recepción</button></div>
+</div></div>
+

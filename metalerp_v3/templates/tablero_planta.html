@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0e1318">
+<title>Tablero de planta · MetalERP</title>
+<link rel="icon" href="data:,">
+<style>
+:root{
+  --bg:#0e1318; --panel:#18212a; --panel2:#202b36; --borde:#2b3a48; --borde2:#3a4b5d;
+  --texto:#f2f6fa; --texto2:#a3b3c3; --texto3:#6f8193;
+  --azul:#378ADD; --ok:#2ec27e; --ok-suave:rgba(46,194,126,.14); --nok:#f0544f;
+  --amar:#f5a524; --amar-suave:rgba(245,165,36,.15); --gris-suave:rgba(111,129,147,.16);
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:var(--bg);color:var(--texto);
+  font-family:Roboto,"Segoe UI",system-ui,-apple-system,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer}
+header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:14px 24px;background:rgba(14,19,24,.96);border-bottom:1px solid var(--borde)}
+header h1{margin:0;font-size:26px;font-weight:800;letter-spacing:.2px}
+header h1 small{display:block;font-size:13px;font-weight:600;color:var(--texto2);letter-spacing:0}
+.chips{display:flex;gap:10px;flex-wrap:wrap}
+.chip{display:flex;align-items:center;gap:8px;padding:7px 13px;border-radius:999px;background:var(--panel);border:1px solid var(--borde);font-size:15px;font-weight:700;white-space:nowrap}
+.chip b{font-size:19px}
+.chip i{width:10px;height:10px;border-radius:50%}
+.esp{flex:1}
+.reloj{font-size:30px;font-weight:800;font-variant-numeric:tabular-nums}
+.bt{padding:9px 14px;border-radius:10px;background:var(--panel);border:1px solid var(--borde2);font-size:14px;font-weight:700}
+main{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:20px;padding:20px 24px 28px}
+.grilla{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:16px;align-content:start}
+.maq{position:relative;display:flex;flex-direction:column;gap:10px;padding:16px 18px 14px;border-radius:18px;background:var(--panel);border:2px solid var(--borde);overflow:hidden}
+.maq::before{content:"";position:absolute;left:0;top:0;bottom:0;width:7px;background:var(--c,var(--texto3))}
+.maq.prod{--c:var(--ok);border-color:rgba(46,194,126,.45)}
+.maq.pausa{--c:var(--amar);border-color:rgba(245,165,36,.6);background:linear-gradient(0deg,var(--amar-suave),var(--amar-suave)),var(--panel)}
+.maq.libre{--c:var(--azul)}
+.maq.off{--c:var(--texto3);opacity:.6}
+.m-cab{display:flex;align-items:flex-start;gap:10px}
+.m-cod{font-size:30px;font-weight:800;line-height:1}
+.m-nom{font-size:14px;color:var(--texto2);font-weight:600;margin-top:3px}
+.pill{margin-left:auto;padding:5px 11px;border-radius:999px;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;background:var(--gris-suave);color:var(--texto2)}
+.prod .pill{background:var(--ok-suave);color:var(--ok)}
+.pausa .pill{background:var(--amar-suave);color:var(--amar)}
+.libre .pill{background:rgba(55,138,221,.16);color:#7db6ee}
+.m-op{font-size:15px;color:var(--texto2);line-height:1.35;min-height:40px}
+.m-op b{display:block;color:var(--texto);font-size:19px}
+.m-emp{display:flex;align-items:center;gap:9px;font-size:17px;font-weight:700}
+.av{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;background:var(--panel2);border:1px solid var(--borde2);font-size:13px;font-weight:800;flex:none}
+.m-t{display:flex;align-items:baseline;gap:10px}
+.m-t b{font-size:40px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1}
+.pausa .m-t b{color:var(--amar)}
+.m-t span{font-size:14px;color:var(--texto2)}
+.motivo{font-size:20px;font-weight:800;color:var(--amar)}
+.barra{height:8px;border-radius:5px;background:var(--panel2);overflow:hidden}
+.barra i{display:block;height:100%;background:var(--azul)}
+.m-prog{display:flex;justify-content:space-between;font-size:13px;color:var(--texto2);margin-top:-4px}
+.m-pie{display:flex;gap:14px;flex-wrap:wrap;padding-top:10px;border-top:1px solid var(--borde);font-size:14px;color:var(--texto2)}
+.m-pie b{color:var(--texto)}
+.m-pie .ok b{color:var(--ok)} .m-pie .nok b{color:var(--nok)}
+aside{display:flex;flex-direction:column;gap:16px}
+.caja{padding:16px 18px;border-radius:18px;background:var(--panel);border:1px solid var(--borde)}
+.caja h2{margin:0 0 12px;font-size:16px;text-transform:uppercase;letter-spacing:.6px;color:var(--texto2)}
+.tot{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.tot div{padding:10px 12px;border-radius:12px;background:var(--panel2)}
+.tot b{display:block;font-size:22px;font-weight:800;white-space:nowrap}
+.tot span{font-size:13px;color:var(--texto2)}
+.mot{display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center;margin-bottom:10px;font-size:14px}
+.mot b{font-variant-numeric:tabular-nums}
+.mot .barra{grid-column:1/-1;height:7px}
+.mot .barra i{background:var(--amar)}
+.vacio{color:var(--texto3);font-size:15px}
+.aviso{margin:40px auto;max-width:560px;text-align:center;font-size:18px;color:var(--texto2);line-height:1.5}
+.aviso a{color:#7db6ee}
+@media (max-width:900px){ main{grid-template-columns:1fr} aside{order:-1} .reloj{font-size:22px} }
+@media (max-width:420px){ header,main{padding-left:16px;padding-right:16px} .grilla{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+<header>
+  <h1>Planta en vivo<small id="act">Conectando…</small></h1>
+  <div class="chips" id="chips"></div>
+  <div class="esp"></div>
+  <button class="bt" onclick="pantallaCompleta()">Pantalla completa</button>
+  <div class="reloj" id="reloj">--:--</div>
+</header>
+<main>
+  <section class="grilla" id="grilla"></section>
+  <aside>
+    <div class="caja"><h2>Hoy en planta</h2><div class="tot" id="tot"></div></div>
+    <div class="caja"><h2>Paradas de hoy por motivo</h2><div id="motivos"></div></div>
+  </aside>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fN = n => (Math.round((Number(n) || 0) * 10) / 10).toLocaleString('es-AR');
+const pad = n => String(n).padStart(2, '0');
+const hms = s => { s = Math.max(0, Math.floor(s)); return (s >= 3600 ? Math.floor(s / 3600) + ':' : '') + pad(Math.floor(s / 60) % 60) + ':' + pad(s % 60); };
+const minTxt = m => m >= 60 ? Math.floor(m / 60) + ' h ' + Math.round(m % 60) + ' min' : Math.round(m) + ' min';
+const iniciales = n => String(n || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(x => x[0]).join('').toUpperCase();
+const COLOR = {Produciendo:'var(--ok)', 'En pausa':'var(--amar)', 'Sin operario':'var(--azul)', 'Eligiendo trabajo':'var(--azul)', 'Desconectada':'var(--texto3)'};
+let datos = null, leido = 0;
+
+async function cargar(){
+  try{
+    const r = await fetch('/api/planta/tablero', {cache:'no-store'});
+    if(r.status === 401 || r.status === 403){
+      $('grilla').innerHTML = '<div class="aviso">La sesión de MetalERP se cerró o este usuario no es administrador.<br><a href="/login">Iniciá sesión</a> y volvé a abrir el tablero.</div>';
+      $('act').textContent = 'Sin sesión'; return;
+    }
+    datos = await r.json(); leido = Date.now();
+    pintar();
+  }catch(e){ $('act').textContent = 'Sin conexión con el servidor · reintentando'; }
+}
+
+function pintar(){
+  if(!datos) return;
+  const seg = (Date.now() - leido) / 1000;
+  const res = datos.resumen || {};
+  $('chips').innerHTML = ['Produciendo', 'En pausa', 'Sin operario', 'Desconectada'].map(k =>
+    '<span class="chip"><i style="background:' + COLOR[k] + '"></i>' + k + ' <b>' + (k === 'Sin operario' ? (res['Sin operario'] || 0) + (res['Eligiendo trabajo'] || 0) : (res[k] || 0)) + '</b></span>').join('');
+  $('act').textContent = 'Actualizado ' + new Date(leido).toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false});
+  const ts = datos.tablets || [];
+  $('grilla').innerHTML = ts.length ? ts.map(t => tarjeta(t, seg)).join('')
+    : '<div class="aviso">No hay tablets activas. Dalas de alta en Sistema → Tablets de planta.</div>';
+  const h = datos.hoy || {};
+  $('tot').innerHTML = '<div><b style="color:var(--ok)">' + fN(h.ok) + '</b><span>Piezas OK</span></div>'
+    + '<div><b style="color:var(--nok)">' + fN(h.nok) + '</b><span>Piezas NO OK</span></div>'
+    + '<div><b>' + minTxt(h.min || 0) + '</b><span>Trabajado declarado</span></div>'
+    + '<div><b style="color:var(--amar)">' + minTxt(h.paradas_min || 0) + '</b><span>En paradas (' + (h.paradas || 0) + ')</span></div>';
+  const ms = datos.motivos || [], max = Math.max(1, ...ms.map(m => m.min));
+  $('motivos').innerHTML = ms.length ? ms.map(m => '<div class="mot"><span>' + esc(m.motivo) + '</span><b>' + minTxt(m.min) + '</b>'
+    + '<div class="barra"><i style="width:' + (m.min / max * 100) + '%"></i></div></div>').join('')
+    : '<div class="vacio">Todavía no hubo paradas hoy.</div>';
+}
+
+function tarjeta(t, seg){
+  const v = t.vivo || {}, op = t.operacion, h = t.hoy || {};
+  const cls = {Produciendo:'prod', 'En pausa':'pausa', 'Sin operario':'libre', 'Eligiendo trabajo':'libre'}[t.estado] || 'off';
+  let cuerpo = '';
+  if(t.estado === 'Desconectada'){
+    cuerpo = '<div class="m-op">' + (t.ultima_conexion ? 'Última conexión ' + esc(t.ultima_conexion.slice(11, 16)) : 'Todavía no se conectó') + '</div>';
+  }else{
+    cuerpo += v.empleado ? '<div class="m-emp"><span class="av">' + esc(iniciales(v.empleado)) + '</span>' + esc(v.empleado) + '</div>'
+      : '<div class="m-op">Esperando que un operario apoye el dedo</div>';
+    if(op){
+      cuerpo += '<div class="m-op"><b>' + esc(op.ot) + ' · Paso ' + esc(op.paso) + ' · ' + esc(op.nombre) + '</b>' + esc(op.pieza || '') + '</div>';
+      if(t.estado === 'En pausa'){
+        cuerpo += '<div class="motivo">' + esc(v.motivo || 'Pausa sin motivo') + '</div>'
+          + '<div class="m-t"><b>' + hms((v.pausa_seg || 0) + seg) + '</b><span>en pausa</span></div>';
+      }else{
+        cuerpo += '<div class="m-t"><b>' + hms((v.trabajado_seg || 0) + seg) + '</b><span>trabajando · sin declarar <b style="font-size:inherit;color:var(--ok)">' + (v.ok || 0) + '</b> OK'
+          + (v.nok ? ' / <b style="font-size:inherit;color:var(--nok)">' + v.nok + '</b> NO OK' : '') + '</span></div>';
+      }
+      const req = Number(op.qty_requerida) || 0, hecho = Number(op.qty_producida) || 0;
+      cuerpo += '<div class="barra"><i style="width:' + (req ? Math.min(100, hecho / req * 100) : 0) + '%"></i></div>'
+        + '<div class="m-prog"><span>Operación: ' + fN(hecho) + ' de ' + fN(req) + '</span><span>' + (req > hecho ? 'Faltan ' + fN(req - hecho) : 'Completa') + '</span></div>';
+    }else if(v.empleado){
+      cuerpo += '<div class="m-op">Eligiendo la OT y la operación</div>';
+    }
+  }
+  return '<div class="maq ' + cls + '"><div class="m-cab"><div><div class="m-cod">' + esc(t.maquina_codigo || t.nombre) + '</div>'
+    + '<div class="m-nom">' + esc(t.maquina_nombre || '') + ' · Tablet ' + esc(t.nombre) + '</div></div><span class="pill">' + esc(t.estado) + '</span></div>'
+    + cuerpo
+    + '<div class="m-pie"><span>Hoy:</span><span class="ok"><b>' + fN(h.ok) + '</b> OK</span><span class="nok"><b>' + fN(h.nok) + '</b> NO OK</span>'
+    + '<span><b>' + (h.paradas || 0) + '</b> paradas · ' + minTxt(h.paradas_min || 0) + '</span></div></div>';
+}
+
+function pantallaCompleta(){
+  if(document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen().catch(() => {});
+}
+function tic(){
+  const d = new Date();
+  $('reloj').textContent = pad(d.getHours()) + ':' + pad(d.getMinutes());
+  pintar();
+}
+cargar(); tic();
+setInterval(cargar, 5000);
+setInterval(tic, 1000);
+</script>
+</body>
+</html>

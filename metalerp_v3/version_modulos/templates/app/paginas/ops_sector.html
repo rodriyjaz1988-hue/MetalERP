@@ -1,0 +1,23 @@
+    <div class="page" id="p-ops_sector">
+      <div class="vhead">
+        <div class="vhead-card">
+          <div class="vhead-row vhead-top">
+            <div class="vhead-tit">
+              <div class="pt" title="Operaciones pendientes y en proceso de las órdenes de trabajo activas">Operaciones pendientes por sector</div>
+            </div>
+            <div id="os-resumen" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"></div>
+            <div class="vh-acciones">
+              <button class="btn" onclick="loadOpsSector()" title="Volver a cargar la lista"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.6 8A5.6 5.6 0 1 1 11.9 4"/><path d="M12.4 1.6V4.4H9.6"/></svg>Actualizar</button>
+            </div>
+          </div>
+          <div class="vhead-row vhead-fil">
+            <select id="os-sector" class="sel-fil vh-fil-sel-w" onchange="loadOpsSector()"><option value="">Todos los sectores</option></select>
+            <select id="os-estado" class="sel-fil vh-fil-sel-w" onchange="loadOpsSector()"><option value="">Pendiente y en proceso</option><option>Pendiente</option><option>En proceso</option></select>
+            <input id="os-q" class="sel-fil vh-fil-wide" placeholder="🔍 Buscar OT / producto / cliente" autocomplete="off" oninput="clearTimeout(window._osT);window._osT=setTimeout(loadOpsSector,300)">
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="tw nowrap-tbl"><table id="os-tbl"></table></div>
+      </div>
+    </div>

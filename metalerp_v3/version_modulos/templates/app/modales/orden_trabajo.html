@@ -1,0 +1,27 @@
+<!-- OT -->
+<div class="ov" id="mo-ot"><div class="mo">
+  <div class="mh">Orden de trabajo <span class="mx" onclick="closeMo('mo-ot')">×</span></div>
+  <input type="hidden" id="ot-id">
+  <div class="fg2">
+    <div class="fg s2" style="position:relative">
+      <label>Producto terminado <span class="req">*</span></label>
+      <input type="text" id="ot-prod-search" placeholder="Buscar por código o nombre..." autocomplete="off"
+        oninput="filtrarOTProductos()" onfocus="filtrarOTProductos()"
+        onblur="setTimeout(function(){var c=$('ot-prod-results');if(c)c.style.display='none';},150)">
+      <input type="hidden" id="ot-prod">
+      <div id="ot-prod-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:7px;margin-top:3px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.14);z-index:10"></div>
+    </div>
+    <div class="fg"><label>Cliente</label><select id="ot-cli"></select></div>
+    <div class="fg"><label>Cantidad <span class="req">*</span></label><input type="number" id="ot-cant" value="1" min="1" onchange="calcOTCostos()"></div>
+    <div class="fg" id="ot-est-wrap"><label>Estado</label><select id="ot-est"><option>Pendiente</option><option>En proceso</option><option>Completada</option><option>Cancelada</option></select></div>
+    <div class="fg"><label>Fecha inicio</label><input type="date" id="ot-ini"></div>
+    <div class="fg"><label id="ot-ent-label">Fecha entrega</label><input type="date" id="ot-ent"></div>
+    <div class="fg"><label>Costo materiales ($)</label><input id="ot-cm" readonly style="background:var(--color-background-secondary);font-weight:500"></div>
+    <div class="fg"><label>Tiempo estándar total (min)</label><input id="ot-tst" readonly style="background:var(--color-background-secondary);font-weight:500"></div>
+    <div class="fg s2" style="font-size:11px;color:var(--color-text-secondary)">Los materiales e insumos se editan por operación desde el detalle de la OT (Operaciones → Editar). Una vez generada, la OT no se vincula más al proceso del producto.</div>
+    <div class="fg s2"><label>Observaciones</label><textarea id="ot-obs"></textarea></div>
+  </div>
+  <div style="font-size:11px;color:var(--color-text-secondary);margin-top:6px">El costo de materiales y el tiempo estándar se calculan automáticamente al seleccionar el producto y la cantidad.</div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-ot')">Cancelar</button><button class="btn btn-p" onclick="saveOT()">Guardar OT</button></div>
+</div></div>
+

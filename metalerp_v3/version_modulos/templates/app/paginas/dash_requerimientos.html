@@ -1,0 +1,26 @@
+    <div class="page" id="p-dash_requerimientos">
+      <div class="pt">Requerimientos productivos</div><div class="ps">Estado de pedidos a proveedores tercerizados y cumplimiento de entregas</div>
+      <div class="metrics" id="dreq-metrics"><div class="ld">Cargando...</div></div>
+      <div style="margin-bottom:12px">
+        <div class="card"><div class="ch"><span class="ct">Índice de calidad mensual</span></div><div id="dreq-chart-calidad"><div class="ld">Cargando...</div></div></div>
+      </div>
+      <div style="margin-bottom:12px">
+        <div class="card"><div class="ch"><span class="ct">Cumplimiento de entrega mensual</span></div><div id="dreq-chart-entrega"><div class="ld">Cargando...</div></div></div>
+      </div>
+      <div style="margin-bottom:12px">
+        <div class="card"><div class="ch"><span class="ct">Cantidad entregada vs. pedida — top 10 requerimientos</span></div><div id="dreq-chart-barras"><div class="ld">Cargando...</div></div></div>
+      </div>
+      <div style="margin-bottom:12px">
+        <div class="card"><div class="ch"><span class="ct">Performance por proveedor — fecha / cantidad / calidad</span></div><div id="dreq-chart-performance-prov" style="overflow-x:auto"><div class="ld">Cargando...</div></div></div>
+      </div>
+      <div class="tc">
+        <div>
+          <div class="card"><div class="ch"><span class="ct" style="cursor:pointer;text-decoration:underline dotted" onclick="irAReqFiltrado('VENCIDO')">Requerimientos vencidos ↗</span></div><div id="dreq-vencidos"></div></div>
+          <div class="card"><div class="ch"><span class="ct">Por proveedor (pendientes)</span></div><div id="dreq-proveedor"></div></div>
+        </div>
+        <div>
+          <div class="card"><div class="ch"><span class="ct" style="cursor:pointer;text-decoration:underline dotted" onclick="irAReqFiltrado('PROXIMO')">Próximos a vencer (7 días) ↗</span></div><div id="dreq-proximos"></div></div>
+        </div>
+      </div>
+    </div>
+

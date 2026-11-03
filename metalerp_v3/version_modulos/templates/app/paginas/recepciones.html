@@ -1,0 +1,27 @@
+    <div class="page" id="p-recepciones">
+      <div class="vhead">
+        <div class="vhead-card">
+          <div class="vhead-row vhead-top">
+            <div class="vhead-tit">
+              <div class="pt" title="Todo lo que entra a planta se aprueba desde acá — recepción directa, Compras (OC) y Terceros (OTT) — sin incluir salidas">Recepción de material/insumo</div>
+            </div>
+            <div class="vh-acciones">
+              <button class="btn" onclick="irAMovimientosRecepciones()" title="Historial de recepciones en Movimientos">Ver historial</button>
+              <button class="btn btn-p" id="b-rec-oc" style="display:none" onclick="openRecSegunOC()">Recepcionar según OC</button>
+              <button class="btn btn-p" id="b-recepcion" style="display:none" onclick="openRecepcion()">Recepcionar sin OC</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="ch"><span class="ct">Pendientes de recibir — Compras (OC)</span></div>
+        <div id="rec-oc-pend-list"><div class="ld">Cargando...</div></div>
+      </div>
+
+      <div class="card">
+        <div class="ch"><span class="ct">Pendientes de retorno — Terceros (OTT)</span> <span style="font-size:11px;color:var(--color-text-secondary)">Se ingresa el remito del proveedor como cualquier material y descuenta lo pendiente de la OTT</span></div>
+        <div id="rec-ott-pend-list"><div class="ld">Cargando...</div></div>
+      </div>
+    </div>
+
