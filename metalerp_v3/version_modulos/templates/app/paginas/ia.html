@@ -1,0 +1,30 @@
+    <div class="page" id="p-ia">
+      <div class="vhead">
+        <div class="vhead-card">
+          <div class="vhead-row vhead-top">
+            <div class="vhead-tit">
+              <div class="pt">Asistente IA</div>
+              <span class="vh-badge ia-modelo" id="ia-modelo" title="Modelo que responde">–</span>
+            </div>
+            <span id="ia-uso" class="ia-uso"></span>
+            <div class="vh-acciones">
+              <button class="btn btn-p" onclick="iaAbrirGlobo(true)">Hablar con Mártin</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="ia-aviso" class="ia-aviso" style="display:none"></div>
+      <div class="card ia-hist">
+        <div class="ia-hist-lista">
+          <input type="text" id="ia-hist-buscar" maxlength="80" placeholder="Buscar en los chats…" oninput="iaHistBuscar()">
+          <div id="ia-hist-items" class="ia-hist-items"></div>
+        </div>
+        <div class="ia-hist-ver">
+          <div id="ia-hist-cab" class="ia-hist-cab" style="display:none"></div>
+          <div id="ia-hist-msjs" class="ia-msjs"></div>
+          <div class="ia-hist-pie"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg><span>Chat guardado, solo lectura. Para una consulta nueva, abrí a Mártin con el globo de abajo a la derecha.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bitacora de auditoria (solo lectura, solo admin) -->

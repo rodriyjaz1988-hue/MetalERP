@@ -456,7 +456,13 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 #     explícitamente con auditoria_proceso("nombre").
 #   · Nunca se guardan contraseñas ni columnas de marca de tiempo técnica.
 
-AUDITORIA_TABLAS_EXCLUIDAS = {"auditoria", "cotizaciones_dolar", "ia_conversaciones", "ia_mensajes"}
+AUDITORIA_TABLAS_EXCLUIDAS = {"auditoria", "cotizaciones_dolar", "ia_conversaciones", "ia_mensajes",
+                              # Registro de cargas masivas: se arma a partir de la propia auditoría.
+                              "cargas_masivas",
+                              # HMI de prueba: un registro por pieza; la novedad final sí se audita.
+                              "hmi_sesiones", "hmi_eventos",
+                              # Tablets de planta: la bandeja es una cola; la novedad que genera sí se audita.
+                              "planta_bandeja", "planta_huellas"}
 # Nombres exactos que nunca se guardan.
 AUDITORIA_COLUMNAS_EXCLUIDAS = {"password", "passwd", "pwd", "clave", "updated_at", "modificado_en"}
 # Fragmentos: cualquier columna que los contenga tampoco se guarda.
@@ -1428,6 +1434,8 @@ NO_MONETARIO = {
     "pdf_mostrar_precios": "bandera 0/1 de configuración; igual se filtra aparte en /api/config",
     "mostrar_costos": "bandera interna del PDF",
     "mostrar_precios": "bandera interna del PDF",
+    "precio_pendiente": "bandera 0/1: renglón de pedido de cliente cargado sin precio, a valorizar por alguien con ver_monetario",
+    "precios_pendientes": "cantidad de renglones del pedido con precio pendiente, no un importe",
 }
 
 # Nombres que NO se resuelven por nombre: cada endpoint decide. Se dejan
@@ -2124,7 +2132,8 @@ CREATE TABLE IF NOT EXISTS ordenes_cliente_items (
     precio_unit REAL DEFAULT 0,
     fecha_deseada TEXT,
     ot_id INTEGER REFERENCES ordenes(id),
-    obs TEXT
+    obs TEXT,
+    precio_pendiente INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS orden_cliente_item_ots (
@@ -2343,6 +2352,24 @@ CREATE INDEX IF NOT EXISTS ix_auditoria_fecha ON auditoria(fecha);
 CREATE INDEX IF NOT EXISTS ix_auditoria_entidad ON auditoria(entidad, registro_id);
 CREATE INDEX IF NOT EXISTS ix_auditoria_actor ON auditoria(actor);
 
+-- Cada carga masiva (Excel genérico o "Cargar stock"): qué tramo de la
+-- auditoría generó, para poder borrar después todo lo que hizo.
+CREATE TABLE IF NOT EXISTS cargas_masivas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL,
+    tipo TEXT NOT NULL,                  -- 'Carga masiva' | 'Cargar stock'
+    ruta TEXT NOT NULL,                  -- endpoint (filtra las filas de auditoría)
+    detalle TEXT,                        -- tabla / archivo / modo
+    usuario_id INTEGER,
+    usuario_nombre TEXT,
+    aud_desde INTEGER NOT NULL,
+    aud_hasta INTEGER NOT NULL,
+    filas INTEGER DEFAULT 0,
+    borrada TEXT,                        -- fecha en que se borró (NULL = vigente)
+    borrada_por TEXT,
+    borrada_detalle TEXT                 -- JSON con lo que se borró / revirtió / quedó
+);
+
 CREATE TABLE IF NOT EXISTS ordenes_tercerizado (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     numero TEXT UNIQUE NOT NULL,
@@ -2502,6 +2529,104 @@ CREATE TRIGGER IF NOT EXISTS trg_moneda_tickets_reparacion AFTER INSERT ON ticke
 WHEN NEW.moneda IS NULL BEGIN
     UPDATE tickets_reparacion SET moneda=COALESCE((SELECT valor FROM configuracion WHERE clave='moneda'),'ARS') WHERE id=NEW.id;
 END;
+-- HMI de máquina (MÓDULO DE PRUEBA): una sesión = un operario trabajando una
+-- operación de OT en una máquina; los ciclos llegan como eventos con un uid
+-- único por sesión, así un reenvío no suma dos veces.
+CREATE TABLE IF NOT EXISTS hmi_sesiones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    maquina_id INTEGER REFERENCES maquinas(id),
+    empleado_id INTEGER NOT NULL REFERENCES empleados(id),
+    orden_id INTEGER NOT NULL REFERENCES ordenes(id),
+    orden_operacion_id INTEGER NOT NULL REFERENCES orden_operaciones(id),
+    estado TEXT NOT NULL DEFAULT 'Produciendo' CHECK(estado IN ('Produciendo','Pausada','Finalizada')),
+    inicio TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    fin TEXT,
+    trabajado_seg REAL NOT NULL DEFAULT 0,
+    desde TEXT,
+    ciclos INTEGER NOT NULL DEFAULT 0,
+    duplicados INTEGER NOT NULL DEFAULT 0,
+    nok INTEGER NOT NULL DEFAULT 0,
+    novedad_id INTEGER REFERENCES novedades_produccion(id),
+    creado_por INTEGER REFERENCES usuarios(id)
+);
+CREATE INDEX IF NOT EXISTS ix_hmi_sesiones_maquina ON hmi_sesiones(maquina_id, estado);
+CREATE TABLE IF NOT EXISTS hmi_eventos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sesion_id INTEGER NOT NULL REFERENCES hmi_sesiones(id) ON DELETE CASCADE,
+    uid TEXT NOT NULL,
+    seq INTEGER,
+    ts_origen TEXT,
+    recibido TEXT DEFAULT (datetime('now','localtime')),
+    UNIQUE(sesion_id, uid)
+);
+-- Registro de cambios del sistema: una fila por cambio de código hecho en
+-- MetalERP (qué, cuándo, por qué y para qué). Solo fecha y descripción son
+-- obligatorias; lo carga a mano un administrador desde Sistema.
+CREATE TABLE IF NOT EXISTS registro_cambios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL,                 -- día del cambio (YYYY-MM-DD)
+    descripcion TEXT NOT NULL,           -- resumen en una línea
+    tipo TEXT,                           -- Nuevo / Mejora / Corrección / ...
+    modulo TEXT,                         -- parte del sistema afectada
+    detalle TEXT,                        -- qué se hizo
+    motivo TEXT,                         -- por qué se hizo
+    objetivo TEXT,                       -- para qué sirve
+    archivos TEXT,                       -- archivos tocados, backups
+    autor TEXT,                          -- quién lo hizo
+    referencia TEXT,                     -- PR, versión, hilo, etc.
+    creado_por INTEGER REFERENCES usuarios(id),
+    creado_en TEXT DEFAULT (datetime('now','localtime')),
+    actualizado_en TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_registro_cambios_fecha ON registro_cambios(fecha);
+-- Tablets de planta: una por máquina, entra sin usuario con su token.
+CREATE TABLE IF NOT EXISTS planta_tablets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT NOT NULL,
+    maquina_id INTEGER NOT NULL REFERENCES maquinas(id),
+    token TEXT UNIQUE NOT NULL,
+    activa INTEGER NOT NULL DEFAULT 1,
+    lector_sn TEXT,                      -- n° de serie del lector de huella de la máquina
+    creado_por INTEGER REFERENCES usuarios(id),
+    creado_en TEXT DEFAULT (datetime('now','localtime'))
+);
+-- Bandeja de entrada de las tablets: el endpoint solo inserta (uuid generado
+-- en la tablet, único: un reenvío no duplica) y un procesador único lo pasa
+-- a novedad de a un registro.
+CREATE TABLE IF NOT EXISTS planta_bandeja (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid TEXT UNIQUE NOT NULL,
+    tablet_id INTEGER NOT NULL REFERENCES planta_tablets(id),
+    tipo TEXT NOT NULL DEFAULT 'produccion',
+    datos TEXT NOT NULL,                 -- JSON tal cual lo cargó el operario
+    hora_operario TEXT,                  -- hora real de carga en la tablet
+    recibido TEXT DEFAULT (datetime('now','localtime')),
+    estado TEXT NOT NULL DEFAULT 'Pendiente'
+        CHECK(estado IN ('Pendiente','Procesando','Procesado','Error','Descartado')),
+    intentos INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    procesado TEXT,
+    novedad_id INTEGER REFERENCES novedades_produccion(id),
+    resuelto_por INTEGER REFERENCES usuarios(id),
+    espera TEXT,                         -- 'lote': la OT todavía no tiene lote; se carga sola al asignarlo
+    espera_ref TEXT,                     -- cómo estaban los lotes de la OT cuando falló
+    reintentar_desde TEXT                -- próximo reintento automático
+);
+CREATE INDEX IF NOT EXISTS ix_planta_bandeja_estado ON planta_bandeja(estado, id);
+CREATE INDEX IF NOT EXISTS ix_planta_bandeja_tablet ON planta_bandeja(tablet_id, id);
+-- Marcas de huella de los lectores de las máquinas: la tablet de esa máquina
+-- entra con el operario (el lector manda el legajo, no la huella).
+CREATE TABLE IF NOT EXISTS planta_huellas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tablet_id INTEGER NOT NULL REFERENCES planta_tablets(id),
+    lector_sn TEXT,
+    legajo TEXT,
+    empleado_id INTEGER REFERENCES empleados(id),   -- NULL: legajo que no está en MetalERP
+    hora TEXT,                                       -- hora de la marca según el lector
+    recibido TEXT DEFAULT (datetime('now','localtime')),
+    origen TEXT                                      -- zkteco / api / simulada
+);
+CREATE INDEX IF NOT EXISTS ix_planta_huellas_tablet ON planta_huellas(tablet_id, id);
 """
 
 def _backfill_remitos_ott_cantidad(db):
@@ -2574,7 +2699,7 @@ def _backfill_remitos_ott_cantidad(db):
 #      mismo cambio sobre una base existente (por ejemplo un ALTER TABLE).
 #   3. Subir ESQUEMA_VERSION a ese número.
 # Cada migración corre una sola vez por base.
-ESQUEMA_VERSION = 11
+ESQUEMA_VERSION = 19
 
 
 def _agregar_columna(db, tabla, columna, tipo):
@@ -2765,6 +2890,59 @@ def _migracion_11(db):
               JOIN ordenes o ON o.id=oo.orden_id WHERE COALESCE(o.stock_descontado,0)=1)""")
 
 
+def _migracion_15(db):
+    """Tablets de planta con huella: lector asignado a la tablet + marcas."""
+    cols = {r[1] for r in db.execute("PRAGMA table_info(planta_tablets)")}
+    if "lector_sn" not in cols:
+        db.execute("ALTER TABLE planta_tablets ADD COLUMN lector_sn TEXT")
+    _crear_tabla_de_schema(db, "planta_huellas")
+
+
+def _migracion_16(db):
+    """Bandeja de tablets: reintentos espaciados y espera de lote."""
+    cols = {r[1] for r in db.execute("PRAGMA table_info(planta_bandeja)")}
+    for col in ("espera", "espera_ref", "reintentar_desde"):
+        if col not in cols:
+            db.execute(f"ALTER TABLE planta_bandeja ADD COLUMN {col} TEXT")
+
+
+def _migracion_17(db):
+    """Pedidos de cliente cargados sin precio (usuario sin ver_monetario):
+    el renglón queda marcado hasta que alguien con el permiso lo valoriza."""
+    _agregar_columna(db, "ordenes_cliente_items", "precio_pendiente", "INTEGER DEFAULT 0")
+
+
+def _migracion_19(db):
+    """Registro de cargas masivas, con las cargas ya hechas reconstruidas
+    desde la auditoría (tramos seguidos de la misma ruta y el mismo usuario).
+    La 18 queda sin usar: _deshacer_situacion_pedidos trata una base en 18
+    como la versión de "situación" que se sacó."""
+    _crear_tabla_de_schema(db, "cargas_masivas")
+    if db.execute("SELECT COUNT(*) FROM cargas_masivas").fetchone()[0]:
+        return
+    filas = db.execute(f"""SELECT id, fecha, usuario_id, actor, ruta, entidad, registro_id
+        FROM auditoria WHERE ruta IN ({",".join("?" * len(CARGA_RUTAS))}) ORDER BY id""",
+        list(CARGA_RUTAS)).fetchall()
+    tramos = []
+    for f in filas:
+        t = tramos[-1] if tramos else None
+        if (t and t["ruta"] == f[4] and t["usuario_id"] == f[2]
+                and (datetime.strptime(f[1], "%Y-%m-%d %H:%M:%S")
+                     - datetime.strptime(t["ultima"], "%Y-%m-%d %H:%M:%S")).total_seconds() <= 30):
+            t["hasta"] = f[0]; t["ultima"] = f[1]; t["entidades"][f[5]] = t["entidades"].get(f[5], 0) + 1
+            continue
+        tramos.append({"ruta": f[4], "usuario_id": f[2], "actor": f[3], "fecha": f[1], "ultima": f[1],
+                       "desde": f[0], "hasta": f[0], "entidades": {f[5]: 1}})
+    for t in tramos:
+        principal = [e for e in t["entidades"] if e not in ("movimientos", "materiales")] or list(t["entidades"])
+        detalle = ", ".join(f"{e} ({t['entidades'][e]})" for e in principal)
+        n = max(t["entidades"][e] for e in principal)
+        db.execute("""INSERT INTO cargas_masivas (fecha,tipo,ruta,detalle,usuario_id,usuario_nombre,aud_desde,aud_hasta,filas)
+            VALUES (?,?,?,?,?,?,?,?,?)""",
+            (t["fecha"], CARGA_RUTAS[t["ruta"]], t["ruta"], detalle, t["usuario_id"], t["actor"],
+             t["desde"], t["hasta"], n))
+
+
 MIGRACIONES = {
     2: _migracion_2,
     3: lambda db: _crear_tabla_de_schema(db, "pedidos_cotizacion"),
@@ -2776,6 +2954,16 @@ MIGRACIONES = {
     9: _migracion_9,
     10: _migracion_10,
     11: _migracion_11,
+    12: lambda db: (_crear_tabla_de_schema(db, "hmi_sesiones"),
+                    _crear_tabla_de_schema(db, "hmi_eventos")),
+    13: lambda db: _crear_tabla_de_schema(db, "registro_cambios"),
+    14: lambda db: (_crear_tabla_de_schema(db, "planta_tablets"),
+                    _crear_tabla_de_schema(db, "planta_bandeja")),
+    15: _migracion_15,
+    16: _migracion_16,
+    17: _migracion_17,
+    18: lambda db: None,
+    19: _migracion_19,
 }
 
 
@@ -2870,6 +3058,39 @@ def _verificar_base_sin_version(db):
 
 
 # ── Arranque de la base ───────────────────────────────────────────────────────
+def _deshacer_situacion_pedidos(db):
+    """2026-11-02: se sacó la "situación" de los renglones de pedidos de
+    cliente y el "N° OC del cliente" (habían entrado como versión 18). Si la
+    base los tiene, el texto vuelve a las observaciones, se borran las
+    columnas y la base vuelve a la versión 17. Idempotente."""
+    if db.execute("PRAGMA user_version").fetchone()[0] != 18:
+        return
+    cols_i = {r[1] for r in db.execute("PRAGMA table_info(ordenes_cliente_items)")}
+    cols_o = {r[1] for r in db.execute("PRAGMA table_info(ordenes_cliente)")}
+    if "situacion" in cols_i:
+        for iid, obs, sit in db.execute("SELECT id, obs, situacion FROM ordenes_cliente_items "
+                                        "WHERE COALESCE(TRIM(situacion),'')<>''").fetchall():
+            db.execute("UPDATE ordenes_cliente_items SET obs=? WHERE id=?",
+                       ((obs + " — " + sit) if obs else sit, iid))
+    if "oc_cliente" in cols_o:
+        for oid, obs, oc in db.execute("SELECT id, obs, oc_cliente FROM ordenes_cliente "
+                                       "WHERE COALESCE(TRIM(oc_cliente),'')<>''").fetchall():
+            if not (obs or "").startswith("OC del cliente "):
+                db.execute("UPDATE ordenes_cliente SET obs=? WHERE id=?",
+                           ("OC del cliente " + oc + (" — " + obs if obs else ""), oid))
+    for tabla, col, cols in (("ordenes_cliente_items", "situacion", cols_i),
+                             ("ordenes_cliente_items", "situacion_fecha", cols_i),
+                             ("ordenes_cliente", "oc_cliente", cols_o)):
+        if col in cols:
+            try:
+                db.execute(f"ALTER TABLE {tabla} DROP COLUMN {col}")
+            except Exception as e:
+                print(f"[base] No se pudo borrar {tabla}.{col}: {e}")
+    db.execute("PRAGMA user_version = 17")
+    db.commit()
+    print("[base] Se sacó la situación de pedidos (versión 18 -> 17); el texto quedó en observaciones.")
+
+
 def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     db = sqlite3.connect(DB_PATH)
@@ -2881,6 +3102,7 @@ def init_db():
         db.executescript(SCHEMA)
         db.execute(f"PRAGMA user_version = {ESQUEMA_VERSION}")
     else:
+        _deshacer_situacion_pedidos(db)
         version = db.execute("PRAGMA user_version").fetchone()[0]
         if version == 0:
             _verificar_base_sin_version(db)
@@ -7999,13 +8221,18 @@ def get_ott_list():
             JOIN ordenes_compra oc ON oc.id=i.oc_id
             WHERE sc.ott_id=ott.id AND oc.estado!='Anulada') oc_numeros,
         COALESCE((SELECT l.cantidad_rechazada FROM lotes l WHERE l.id=ott.lote_retorno_id), 0) AS rechazado_pendiente_devolver,
-        (SELECT l.estado FROM lotes l WHERE l.id=ott.lote_retorno_id) AS lote_retorno_estado
+        (SELECT l.estado FROM lotes l WHERE l.id=ott.lote_retorno_id) AS lote_retorno_estado,
+        -- Total a mandar al proveedor: mismo criterio que la SC del servicio
+        -- (_asegurar_sc_ott): cantidad de la operación, o la planificada de
+        -- una OTT manual, o la de la OT.
+        COALESCE(NULLIF(oo.qty_requerida,0), NULLIF(ott.cantidad_plan,0), o.cantidad, 0) AS cantidad_total
         FROM ordenes_tercerizado ott
         LEFT JOIN materiales mse ON mse.id=ott.material_se_id
         LEFT JOIN ordenes o ON o.id=ott.ot_origen_id
         LEFT JOIN proveedores p ON p.id=ott.proveedor_id
         LEFT JOIN proceso_operaciones po ON po.id=ott.proceso_op_id
         LEFT JOIN productos pr ON pr.id=po.producto_id
+        LEFT JOIN orden_operaciones oo ON oo.id=ott.operacion_id
         WHERE 1=1"""
     params = []
     if estado:
@@ -9613,6 +9840,39 @@ def update_empleado(eid):
     return jsonify({"ok":True})
 
 # ── Ordenes de cliente (comercial) ────────────────────────────────────────────
+def _puede_cargar_pedidos_cliente():
+    """Quién puede crear/editar pedidos de clientes: admin y vendedor como
+    siempre, y logística si tiene habilitado el módulo Pedidos de clientes
+    (mismo criterio que el menú). Sin ver_monetario se cargan sin precio."""
+    rol = session.get("rol")
+    if rol in ("admin", "vendedor"):
+        return True
+    if rol == "logistica":
+        return _permisos_sesion().get("mod_oc_clientes") == "1"
+    return False
+
+
+def pedidos_cliente_editables(f):
+    @wraps(f)
+    def _envuelto(*a, **kw):
+        if "user_id" not in session:
+            return jsonify({"error": "Sesión expirada, volvé a iniciar sesión."}), 401
+        if not _puede_cargar_pedidos_cliente():
+            return jsonify({"error": "Sin permiso"}), 403
+        return f(*a, **kw)
+    return _envuelto
+
+
+def _precio_item_nuevo(item):
+    """(precio, pendiente) de un renglón nuevo. Sin ver_monetario el precio
+    no viaja (lo descarta el before_request): el renglón queda en 0 y marcado
+    como precio pendiente, para que lo valorice alguien con el permiso."""
+    if "precio_unit" in item:
+        try: return float(item["precio_unit"] or 0), 0
+        except (TypeError, ValueError): return 0, 0
+    return 0, 1
+
+
 @app.route("/api/ordenes_cliente", methods=["GET"])
 @login_required()
 def get_ordenes_cliente():
@@ -9679,6 +9939,7 @@ def get_ordenes_cliente():
             monto_entregado += ent_i * precio_i
         d["monto_pedido"] = monto_pedido
         d["monto_entregado"] = monto_entregado
+        d["precios_pendientes"] = sum(1 for i in d["items"] if i.get("precio_pendiente"))
         d["pct_entrega"] = _pct_por_renglon([(i["cantidad"], i["cantidad_entregada"]) for i in d["items"]])
         result.append(d)
     return jsonify(result)
@@ -9704,32 +9965,30 @@ def _sync_precio_venta_producto(producto_id, precio_unit):
         execute("UPDATE materiales SET precio_venta=? WHERE id=?", (precio_unit, producto_id))
 
 @app.route("/api/ordenes_cliente", methods=["POST"])
-@login_required(roles=["admin","vendedor"])
+@pedidos_cliente_editables
 def create_orden_cliente():
     d = request.json
     if not d.get("cliente_id"):
         return jsonify({"error":"Cliente requerido"}), 400
-    # Número automático OC-<año>-#### (la serie que ya se venía usando a
-    # mano); los números viejos con otro formato no cuentan para la serie.
-    # Se reserva con el lock de escritura: el INSERT de abajo lo confirma.
-    numero = siguiente_numero("ordenes_cliente", f"OC-{date.today().year}-", 4, reservar=True)
+    # El N° del pedido se carga a mano (pedido de paco, 2026-11-02): ya no se
+    # genera OC-<año>-#### automático. Tiene que venir y no repetirse.
+    numero = (d.get("numero") or "").strip()
+    if not numero:
+        return jsonify({"error":"Cargá el N° de pedido"}), 400
+    if query("SELECT 1 FROM ordenes_cliente WHERE numero=?", (numero,), one=True):
+        return jsonify({"error":f"Ya existe un pedido con el N° {numero}"}), 409
     # "fecha" = fecha de emisión que se carga en el formulario; antes se
     # ignoraba y quedaba siempre la fecha de alta.
     lid = execute("INSERT INTO ordenes_cliente (numero,cliente_id,fecha,fecha_entrega,estado,obs) VALUES (?,?,COALESCE(?,datetime('now','localtime')),?,?,?)",
         (numero, d["cliente_id"], d.get("fecha") or None, d.get("fecha_entrega"), d.get("estado","Recibida"), d.get("obs")))
     for item in (d.get("items") or []):
         if item.get("producto_id") and item.get("cantidad"):
-            if "precio_unit" in item:
-                precio = item["precio_unit"] or 0
-            else:
-                # Sin ver_monetario el precio no viaja: se usa el de venta del producto.
-                pv = query("SELECT precio_venta FROM materiales WHERE id=?", (item["producto_id"],), one=True)
-                precio = (pv["precio_venta"] if pv else 0) or 0
+            precio, pendiente = _precio_item_nuevo(item)
             item_id = execute("""INSERT INTO ordenes_cliente_items
-                (orden_cliente_id,producto_id,cantidad,precio_unit,fecha_deseada,obs)
-                VALUES (?,?,?,?,?,?)""",
+                (orden_cliente_id,producto_id,cantidad,precio_unit,fecha_deseada,obs,precio_pendiente)
+                VALUES (?,?,?,?,?,?,?)""",
                 (lid, item["producto_id"], item["cantidad"],
-                 precio, item.get("fecha_deseada"), item.get("obs")))
+                 precio, item.get("fecha_deseada"), item.get("obs"), pendiente))
             _sync_requerimiento_desde_pedido(item_id)
             _sync_precio_venta_producto(item["producto_id"], item.get("precio_unit"))
     return jsonify({"ok":True,"id":lid,"numero":numero}), 201
@@ -10016,15 +10275,22 @@ def desvincular_ot_item(item_id, ot_id):
     return jsonify({"ok": True})
 
 @app.route("/api/ordenes_cliente/<int:ocid>", methods=["PUT"])
-@login_required(roles=["admin","vendedor"])
+@pedidos_cliente_editables
 def update_orden_cliente(ocid):
     d = request.json or {}
     actual = query("SELECT * FROM ordenes_cliente WHERE id=?", (ocid,), one=True)
     if not actual: return jsonify({"error":"OC no encontrada"}), 404
     # Solo se pisan los campos que vienen en el body: el formulario no manda
     # fecha_entrega y antes la ponía en NULL en cada edición.
-    # El número es automático: no se cambia al editar.
+    # El N° se carga a mano y se puede corregir al editar (sin repetir otro).
     nuevo_numero = actual["numero"]
+    if "numero" in d:
+        nuevo_numero = (d.get("numero") or "").strip()
+        if not nuevo_numero:
+            return jsonify({"error":"Cargá el N° de pedido"}), 400
+        if nuevo_numero != actual["numero"] and query(
+                "SELECT 1 FROM ordenes_cliente WHERE numero=? AND id<>?", (nuevo_numero, ocid), one=True):
+            return jsonify({"error":f"Ya existe un pedido con el N° {nuevo_numero}"}), 409
     # Ítems: los renglones sin OT que ya existen se ACTUALIZAN por id (el
     # formulario manda el id de cada renglón). Antes se borraban todos y se
     # volvían a crear, y eso:
@@ -10069,32 +10335,72 @@ def update_orden_cliente(ocid):
         execute("DELETE FROM requerimientos_productivos WHERE numero=?", (f"OC-CLI-ITEM-{iid}",))
         execute("DELETE FROM ordenes_cliente_items WHERE id=?", (iid,))
     for iid, item in cambios:
+        # Precio pendiente: se limpia cuando alguien con ver_monetario carga un
+        # precio mayor a 0; si el precio no vino (usuario sin permiso, o el
+        # renglón pendiente se dejó vacío) queda como estaba.
+        pendiente = existentes[iid]["precio_pendiente"] or 0
+        if "precio_unit" in item:
+            try:
+                if float(item["precio_unit"] or 0) > 0: pendiente = 0
+            except (TypeError, ValueError):
+                pass
         execute("""UPDATE ordenes_cliente_items SET producto_id=?,cantidad=?,fecha_deseada=?,obs=?,
-            precio_unit=? WHERE id=?""",
+            precio_unit=?,precio_pendiente=? WHERE id=?""",
             (item["producto_id"], item["cantidad"], item.get("fecha_deseada"), item.get("obs"),
-             _mon_o_actual(item, "precio_unit", "ordenes_cliente_items", iid), iid))
+             _mon_o_actual(item, "precio_unit", "ordenes_cliente_items", iid), pendiente, iid))
         _sync_requerimiento_desde_pedido(iid)
         if "precio_unit" in item:
             _sync_precio_venta_producto(item["producto_id"], item["precio_unit"])
     for item in alta:
-        if "precio_unit" in item:
-            precio = item["precio_unit"] or 0
-        else:
-            # Sin ver_monetario el precio no viaja: se usa el de venta del producto.
-            pv = query("SELECT precio_venta FROM materiales WHERE id=?", (item["producto_id"],), one=True)
-            precio = (pv["precio_venta"] if pv else 0) or 0
+        precio, pendiente = _precio_item_nuevo(item)
         item_id = execute("""INSERT INTO ordenes_cliente_items
-            (orden_cliente_id,producto_id,cantidad,precio_unit,fecha_deseada,obs)
-            VALUES (?,?,?,?,?,?)""",
-            (ocid, item["producto_id"], item["cantidad"], precio, item.get("fecha_deseada"), item.get("obs")))
+            (orden_cliente_id,producto_id,cantidad,precio_unit,fecha_deseada,obs,precio_pendiente)
+            VALUES (?,?,?,?,?,?,?)""",
+            (ocid, item["producto_id"], item["cantidad"], precio, item.get("fecha_deseada"), item.get("obs"), pendiente))
         _sync_requerimiento_desde_pedido(item_id)
         if "precio_unit" in item:
             _sync_precio_venta_producto(item["producto_id"], item["precio_unit"])
+    # Si cambió el N°, los requerimientos espejo de todos los renglones
+    # (también los que ya tienen OT) toman el número nuevo.
+    if nuevo_numero != actual["numero"]:
+        for r in query("SELECT id FROM ordenes_cliente_items WHERE orden_cliente_id=?", (ocid,)):
+            _sync_requerimiento_desde_pedido(r["id"])
     # Completar la OC completa también sus OTs, aunque no estén terminadas.
     if d.get("estado") == "Completada" and actual["estado"] != "Completada":
         completadas, fallidas = _forzar_completar_ots_oc(ocid)
         return jsonify({"ok":True, "ots_completadas":completadas, "ots_fallidas":fallidas})
     return jsonify({"ok":True})
+
+@app.route("/api/ordenes_cliente/<int:ocid>", methods=["DELETE"])
+@pedidos_cliente_editables
+def delete_orden_cliente(ocid):
+    """Borra un pedido de cliente con sus renglones. No se puede si tiene
+    remitos (aunque estén anulados: el remito queda apuntando al pedido).
+    Las OTs vinculadas NO se borran: solo se desvinculan. También se borran
+    los requerimientos espejo de cada renglón (OC-CLI-ITEM-<id>)."""
+    oc = query("SELECT * FROM ordenes_cliente WHERE id=?", (ocid,), one=True)
+    if not oc: return jsonify({"error":"Pedido no encontrado"}), 404
+    rems = query("""SELECT DISTINCT r.numero FROM remitos r
+        WHERE r.orden_cliente_id=?
+           OR r.id IN (SELECT ri.remito_id FROM remito_items ri
+                       JOIN ordenes_cliente_items i ON i.id=ri.orden_cliente_item_id
+                       WHERE i.orden_cliente_id=?)
+        ORDER BY r.numero""", (ocid, ocid))
+    if rems:
+        nums = ", ".join(r["numero"] for r in rems[:5]) + ("…" if len(rems) > 5 else "")
+        return jsonify({"error": f"No se puede borrar {oc['numero']}: tiene remitos ({nums}). Podés cancelarlo."}), 409
+    items = [r["id"] for r in query("SELECT id FROM ordenes_cliente_items WHERE orden_cliente_id=?", (ocid,))]
+    n_ots = query("""SELECT COUNT(DISTINCT ot_id) c FROM (
+        SELECT ot_id FROM ordenes_cliente_items WHERE orden_cliente_id=? AND ot_id IS NOT NULL AND ot_id<>0
+        UNION SELECT x.ot_id FROM orden_cliente_item_ots x JOIN ordenes_cliente_items i ON i.id=x.item_id
+              WHERE i.orden_cliente_id=?)""", (ocid, ocid), one=True)["c"]
+    with transaccion():
+        for iid in items:
+            execute("DELETE FROM requerimientos_productivos WHERE numero=?", (f"OC-CLI-ITEM-{iid}",))
+            execute("DELETE FROM orden_cliente_item_ots WHERE item_id=?", (iid,))
+        execute("DELETE FROM ordenes_cliente_items WHERE orden_cliente_id=?", (ocid,))
+        execute("DELETE FROM ordenes_cliente WHERE id=?", (ocid,))
+    return jsonify({"ok": True, "numero": oc["numero"], "ots_desvinculadas": n_ots})
 
 # ── MRP ampliado: consolidar OC-cliente → generar OTs ────────────────────────
 @auditoria_proceso("SC automática por material faltante")
@@ -12104,6 +12410,146 @@ def _consumir_pse_sobrante_ot(oid):
              f"— Lote {lote['numero']}", session.get("user_id")))
 
 
+def _lote_motivos_no_eliminar(lote):
+    """Motivos por los que un lote NO se puede eliminar sin romper la
+    trazabilidad o el stock de otro módulo. Lista vacía = se puede."""
+    lid = lote["id"]
+    motivos = []
+
+    def _lista(rows, campo="numero"):
+        nums = [r[campo] for r in rows if r[campo]]
+        return ", ".join(nums[:5]) + ("…" if len(nums) > 5 else "")
+
+    r = query("""SELECT DISTINCT r.numero FROM remito_items ri JOIN remitos r ON r.id=ri.remito_id
+        WHERE ri.lote_id=? ORDER BY r.numero""", (lid,))
+    if r: motivos.append("salió en remitos (" + _lista(r) + ")")
+    r = query("""SELECT DISTINCT o.numero FROM orden_lotes ol JOIN ordenes o ON o.id=ol.orden_id
+        WHERE ol.lote_id=? ORDER BY o.numero""", (lid,))
+    if r: motivos.append("está asignado a OTs (" + _lista(r) + "): quitá la asignación desde la OT")
+    elif float(lote["cantidad_reservada"] or 0) > 0.0001:
+        motivos.append("tiene cantidad reservada")
+    r = query("SELECT numero FROM ordenes_tercerizado WHERE lote_retorno_id=? ORDER BY numero", (lid,))
+    if r: motivos.append("es el lote de retorno de la OTT " + _lista(r))
+    r = query("""SELECT DISTINCT oc.numero FROM ordenes_compra_items i JOIN ordenes_compra oc ON oc.id=i.oc_id
+        WHERE i.lote_id=? ORDER BY oc.numero""", (lid,))
+    if r: motivos.append("es el lote de la orden de compra " + _lista(r))
+    r = query("""SELECT DISTINCT o.numero FROM cajones c JOIN ordenes o ON o.id=c.orden_id
+        WHERE c.lote_id=? ORDER BY o.numero""", (lid,))
+    if r: motivos.append("tiene cajones de la OT " + _lista(r))
+    r = query("SELECT numero FROM ordenes WHERE numero=? OR numero||'-PT'=?", (lote["numero"], lote["numero"]))
+    if r: motivos.append("es el lote de producto terminado de la OT " + _lista(r))
+    if query("""SELECT 1 FROM movimientos WHERE lote_id=?
+            AND tipo IN ('salida','consumo_mp','produccion_pt') LIMIT 1""", (lid,), one=True):
+        motivos.append("ya tiene consumos o producción registrados")
+    if query("""SELECT 1 FROM cajones c WHERE c.lote_id=? AND (
+            EXISTS (SELECT 1 FROM novedad_cajones x WHERE x.cajon_id=c.id)
+            OR EXISTS (SELECT 1 FROM ott_cajones x WHERE x.cajon_id=c.id)
+            OR EXISTS (SELECT 1 FROM remito_item_cajones x WHERE x.cajon_id=c.id)) LIMIT 1""",
+            (lid,), one=True):
+        motivos.append("sus cajones/bultos ya se usaron")
+    return motivos
+
+
+def _lote_stock_que_sale(lote):
+    """Cantidad que el lote suma hoy al stock del material (materiales.stock)."""
+    if lote["stock_computado"]:
+        return max(0.0, float(lote["cantidad_disponible"] or 0))
+    return max(0.0, float(lote["cantidad_activa"] or 0))
+
+
+@app.route("/api/lotes/puede_eliminar", methods=["GET"])
+@login_required(roles=["admin","almacen"])
+def lotes_puede_eliminar_varios():
+    """Verificación previa para eliminar varios lotes (?ids=1,2,3)."""
+    try:
+        ids = sorted({int(x) for x in (request.args.get("ids") or "").split(",") if x.strip()})
+    except ValueError:
+        return jsonify({"error": "Lista de lotes inválida"}), 400
+    if not ids: return jsonify([])
+    out = []
+    for lote in query(f"SELECT * FROM lotes WHERE id IN ({','.join('?' * len(ids))})", ids):
+        motivos = _lote_motivos_no_eliminar(lote)
+        out.append({"id": lote["id"], "numero": lote["numero"], "puede": not motivos,
+                    "motivos": motivos, "stock": _lote_stock_que_sale(lote)})
+    return jsonify(out)
+
+
+@app.route("/api/lotes/<int:lid>/puede_eliminar", methods=["GET"])
+@login_required(roles=["admin","almacen"])
+def lote_puede_eliminar(lid):
+    lote = query("SELECT * FROM lotes WHERE id=?", (lid,), one=True)
+    if not lote: return jsonify({"error": "Lote no encontrado"}), 404
+    motivos = _lote_motivos_no_eliminar(lote)
+    return jsonify({"puede": not motivos, "motivos": motivos,
+                    "stock": _lote_stock_que_sale(lote), "numero": lote["numero"]})
+
+
+@app.route("/api/lotes/<int:lid>", methods=["DELETE"])
+@login_required(roles=["admin","almacen"])
+def delete_lote(lid):
+    """Elimina un lote cargado por error. Solo si no se usó en ningún otro
+    lado (ver _lote_motivos_no_eliminar). Lo que el lote sumaba al stock
+    sale del inventario; los movimientos viejos quedan en el historial (sin
+    el vínculo al lote) y se agrega uno que registra la eliminación."""
+    lote = query("SELECT * FROM lotes WHERE id=?", (lid,), one=True)
+    if not lote: return jsonify({"error": "Lote no encontrado"}), 404
+    motivos = _lote_motivos_no_eliminar(lote)
+    if motivos:
+        return jsonify({"error": f"No se puede eliminar el lote {lote['numero']}: " + "; ".join(motivos) + "."}), 409
+    sale = _eliminar_lote(lote)
+    return jsonify({"ok": True, "numero": lote["numero"], "stock_descontado": sale})
+
+
+@app.route("/api/lotes", methods=["DELETE"])
+@login_required(roles=["admin","almacen"])
+def delete_lotes_varios():
+    """Elimina varios lotes de una vez (?ids=1,2,3). Todo o nada: si alguno
+    no se puede eliminar (ver _lote_motivos_no_eliminar) no se elimina
+    ninguno y se dice cuáles y por qué."""
+    try:
+        ids = sorted({int(x) for x in (request.args.get("ids") or "").split(",") if x.strip()})
+    except ValueError:
+        return jsonify({"error": "Lista de lotes inválida"}), 400
+    if not ids:
+        return jsonify({"error": "Seleccioná al menos un lote"}), 400
+    lotes = query(f"SELECT * FROM lotes WHERE id IN ({','.join('?' * len(ids))})", ids)
+    if len(lotes) != len(ids):
+        return jsonify({"error": "Alguno de los lotes ya no existe. Actualizá la lista."}), 404
+    bloqueados = []
+    for lote in lotes:
+        motivos = _lote_motivos_no_eliminar(lote)
+        if motivos:
+            bloqueados.append(f"{lote['numero']}: " + "; ".join(motivos))
+    if bloqueados:
+        return jsonify({"error": "No se eliminó ningún lote. No se pueden eliminar: " + " | ".join(bloqueados) + "."}), 409
+    with transaccion():
+        for lote in lotes:
+            _eliminar_lote(lote)
+    return jsonify({"ok": True, "eliminados": [l["numero"] for l in lotes]})
+
+
+def _eliminar_lote(lote):
+    """Borra el lote (ya verificado con _lote_motivos_no_eliminar) y saca del
+    stock lo que sumaba. Devuelve la cantidad descontada del stock."""
+    lid = lote["id"]
+    sale = _lote_stock_que_sale(lote)
+    with transaccion():
+        execute("DELETE FROM cajones WHERE lote_id=? AND orden_id IS NULL", (lid,))
+        execute("UPDATE movimientos SET lote_id=NULL WHERE lote_id=?", (lid,))
+        execute("UPDATE recepciones SET lote_id=NULL WHERE lote_id=?", (lid,))
+        if sale > 0:
+            execute("""UPDATE materiales SET stock=MAX(0, stock-?),
+                actualizado=datetime('now','localtime') WHERE id=?""", (sale, lote["material_id"]))
+        execute("""INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id)
+            VALUES (?,NULL,'ajuste',?,?,?)""",
+            (lote["material_id"], sale,
+             f"Lote {lote['numero']} eliminado (original {float(lote['cantidad_original'] or 0):g}, "
+             f"aprobado {float(lote['cantidad_activa'] or 0):g})",
+             session.get("user_id")))
+        execute("DELETE FROM lotes WHERE id=?", (lid,))
+    return sale
+
+
 @app.route("/api/lotes/<int:lid>", methods=["PUT"])
 @login_required(roles=["admin","almacen","calidad"])
 def update_lote(lid):
@@ -12948,23 +13394,39 @@ def update_solicitud(sid):
 # ── Cotizaciones de compra ────────────────────────────────────────────────────
 @app.route("/api/cotizaciones_compra", methods=["GET"])
 @login_required()
-@solo_con_monetario
 def get_cotizaciones():
+    # Sin ver_monetario también se listan (para seleccionar y emitir la OC):
+    # el after_request saca precio_unit. "es_menor" / "sin_precio" son
+    # banderas, no importes.
     sid = request.args.get("solicitud_id")
     sql = """SELECT c.*,p.razon proveedor_nombre,s.descripcion solicitud_desc,s.cantidad sol_cantidad,s.unidad sol_unidad,s.tipo solicitud_tipo,s.estado solicitud_estado
         FROM cotizaciones_compra c
         JOIN proveedores p ON p.id=c.proveedor_id
         JOIN solicitudes_compra s ON s.id=c.solicitud_id"""
     rows = query(sql+" WHERE c.solicitud_id=? ORDER BY c.precio_unit",(sid,)) if sid else query(sql+" ORDER BY c.id DESC")
-    return jsonify([dict(r) for r in rows])
+    out = [dict(r) for r in rows]
+    minimo = {}
+    for c in out:
+        p = float(c.get("precio_unit") or 0)
+        if p > 0 and (c["solicitud_id"] not in minimo or p < minimo[c["solicitud_id"]]):
+            minimo[c["solicitud_id"]] = p
+    for c in out:
+        p = float(c.get("precio_unit") or 0)
+        c["sin_precio"] = 1 if p <= 0 else 0
+        c["es_menor"] = 1 if p > 0 and abs(p - minimo.get(c["solicitud_id"], -1)) < 1e-9 else 0
+    return jsonify(out)
 
 @app.route("/api/cotizaciones_compra", methods=["POST"])
 @login_required(roles=["admin","almacen","vendedor"])
-@solo_con_monetario
 def create_cotizacion():
     d = request.json
-    if not d.get("solicitud_id") or not d.get("proveedor_id") or not d.get("precio_unit"):
+    ver_mon = puede_ver_monetario()
+    if not d.get("solicitud_id") or not d.get("proveedor_id") or (ver_mon and not d.get("precio_unit")):
         return jsonify({"error":"Solicitud, proveedor y precio requeridos"}), 400
+    if not ver_mon:
+        # Sin el permiso se carga proveedor/plazo/condición; el precio queda
+        # en 0 ("Precio pendiente") hasta que lo cargue alguien con permiso.
+        d["precio_unit"] = 0
     sol = query("SELECT estado FROM solicitudes_compra WHERE id=?", (d["solicitud_id"],), one=True)
     if not sol:
         return jsonify({"error":"Solicitud de compra no encontrada"}), 404
@@ -12981,7 +13443,6 @@ ESTADOS_SC_CERRADOS = ("OC Emitida", "Cerrada", "Cancelada", "Rechazada")
 
 @app.route("/api/cotizaciones_compra/<int:cid>", methods=["PUT"])
 @login_required(roles=["admin","almacen","vendedor"])
-@solo_con_monetario
 def update_cotizacion(cid):
     cot = query("SELECT * FROM cotizaciones_compra WHERE id=?", (cid,), one=True)
     if not cot: return jsonify({"error":"Cotización no encontrada"}), 404
@@ -12989,17 +13450,17 @@ def update_cotizacion(cid):
     if sol and sol["estado"] in ESTADOS_SC_CERRADOS:
         return jsonify({"error":"No se puede editar: la solicitud de compra ya completó su circuito"}), 400
     d = request.json
-    if not d.get("proveedor_id") or not d.get("precio_unit"):
+    ver_mon = puede_ver_monetario()
+    if not d.get("proveedor_id") or (ver_mon and not d.get("precio_unit")):
         return jsonify({"error":"Proveedor y precio requeridos"}), 400
     execute("""UPDATE cotizaciones_compra SET proveedor_id=?,precio_unit=?,plazo_entrega_dias=?,
         condicion_pago=?,obs=? WHERE id=?""",
-        (d["proveedor_id"],d["precio_unit"],d.get("plazo_entrega_dias",3),
+        (d["proveedor_id"],d["precio_unit"] if ver_mon else (cot["precio_unit"] or 0),d.get("plazo_entrega_dias",3),
          d.get("condicion_pago"),d.get("obs"),cid))
     return jsonify({"ok":True})
 
 @app.route("/api/cotizaciones_compra/<int:cid>/seleccionar", methods=["POST"])
 @login_required(roles=["admin","almacen","vendedor"])
-@solo_con_monetario
 def seleccionar_cotizacion(cid):
     cot = query("SELECT * FROM cotizaciones_compra WHERE id=?", (cid,), one=True)
     if not cot: return jsonify({"error":"Cotización no encontrada"}), 404
@@ -13013,7 +13474,6 @@ def seleccionar_cotizacion(cid):
 
 @app.route("/api/cotizaciones_compra/<int:cid>/deseleccionar", methods=["POST"])
 @login_required(roles=["admin","almacen","vendedor"])
-@solo_con_monetario
 def deseleccionar_cotizacion(cid):
     cot = query("SELECT * FROM cotizaciones_compra WHERE id=?", (cid,), one=True)
     if not cot: return jsonify({"error":"Cotización no encontrada"}), 404
@@ -13090,10 +13550,27 @@ def get_ocs_by_proveedor(pid):
 
 @app.route("/api/ordenes_compra", methods=["POST"])
 @login_required(roles=["admin","almacen","vendedor"])
-@solo_con_monetario
 def create_oc():
     d = request.json
     if not d.get("proveedor_id") or not d.get("items"): return jsonify({"error":"Proveedor e ítems requeridos"}), 400
+    ver_mon = puede_ver_monetario()
+    sin_precio = False
+    if not ver_mon:
+        # Sin ver_monetario el precio no viaja: se toma de la cotización
+        # seleccionada de cada SC (o de la lista de precios del proveedor).
+        for item in d["items"]:
+            precio = 0
+            if item.get("solicitud_id"):
+                c = query("SELECT precio_unit FROM cotizaciones_compra WHERE solicitud_id=? AND seleccionada=1",
+                          (item["solicitud_id"],), one=True)
+                precio = float((c["precio_unit"] if c else 0) or 0)
+            if not precio and item.get("material_id"):
+                lp = query("SELECT precio_unit FROM proveedor_materiales WHERE proveedor_id=? AND material_id=?",
+                           (d["proveedor_id"], item["material_id"]), one=True)
+                precio = float((lp["precio_unit"] if lp else 0) or 0)
+            item["precio_unit"] = precio
+            if precio <= 0:
+                sin_precio = True
     # ── Una OC puede juntar varias SC (1 a N) en una sola orden, siempre que
     # todas tengan cotización seleccionada con el MISMO proveedor que la OC
     # (una OC va a un solo proveedor). También se revalida que la SC siga
@@ -13143,6 +13620,9 @@ def create_oc():
             estado = "Aprobada" if todos_ok else "Pendiente aprobacion"
         elif not todos_ok:
             estado = "Pendiente aprobacion"
+    if sin_precio:
+        # Algún renglón quedó sin precio: que lo revise quien aprueba.
+        estado = "Pendiente aprobacion"
     lid = execute("""INSERT INTO ordenes_compra
         (numero,proveedor_id,estado,monto_total,fecha_entrega_est,obs,creado_por)
         VALUES (?,?,?,?,?,?,?)""",
@@ -13186,7 +13666,10 @@ def create_oc():
         if _o and _o["ott_id"]:
             _ott_sync_oc_recibido(_o["ott_id"])
             _sync_requerimiento_desde_ott(_o["ott_id"])
-    return jsonify({"ok":True,"id":lid,"numero":numero,"estado":estado,"total":total,"lotes":lotes_creados}), 201
+    resp = {"ok":True,"id":lid,"numero":numero,"estado":estado,"total":total,"lotes":lotes_creados}
+    if not ver_mon:
+        resp.pop("total")   # "total" es ambiguo y el filtro automático no lo saca
+    return jsonify(resp), 201
 
 def _estado_recepcion_oc(items):
     """'Recibida' si TODOS los renglones llegaron completos, 'Recibida parcial'
@@ -13881,7 +14364,8 @@ def get_rendimiento_operario():
         strftime('%Y-%m', n.fecha) mes,
         strftime('%Y-%m-%d', n.fecha) dia,
         COUNT(*) novedades,
-        AVG(n.rendimiento_pct) rend_promedio,
+        COALESCE(SUM(n.rendimiento_pct*n.tiempo_real_min)/NULLIF(SUM(n.tiempo_real_min),0),
+                 AVG(n.rendimiento_pct)) rend_promedio,
         SUM(n.cantidad_producida) total_producido,
         SUM(n.tiempo_real_min) total_min_real
         FROM novedades_produccion n
@@ -13910,7 +14394,7 @@ def get_rendimiento_operario():
             "novedades": r["novedades"],
             "rend_promedio": round(float(r["rend_promedio"] or 0), 1),
             "total_producido": r["total_producido"],
-            "total_min_real": r["total_min_real"],
+            "total_min_real": round(float(r["total_min_real"] or 0), 1),
         })
         años[a]["meses"][m]["total_novedades"] += r["novedades"]
         años[a]["meses"][m]["rend_sum"] += float(r["rend_promedio"] or 0)
@@ -13955,7 +14439,10 @@ def get_rendimiento_operario_dias():
     sql = """SELECT
         strftime('%Y-%m-%d', n.fecha) dia,
         COUNT(*) novedades,
-        AVG(n.rendimiento_pct) rend_promedio,
+        -- Ponderado por tiempo: la tablet manda muchas declaraciones cortas y
+        -- un promedio simple les daba el mismo peso que a una de una hora.
+        COALESCE(SUM(n.rendimiento_pct*n.tiempo_real_min)/NULLIF(SUM(n.tiempo_real_min),0),
+                 AVG(n.rendimiento_pct)) rend_promedio,
         SUM(n.cantidad_producida) total_producido_bruto,
         SUM(COALESCE(n.piezas_observadas,0)) total_no_ok,
         SUM(n.tiempo_real_min) total_min_real,
@@ -13977,8 +14464,8 @@ def get_rendimiento_operario_dias():
         "rend_promedio": round(float(r["rend_promedio"] or 0), 1),
         "total_producido": r["total_producido_bruto"] or 0,
         "total_no_ok": r["total_no_ok"] or 0,
-        "total_min_real": r["total_min_real"],
-        "total_tiempo_perdido": r["total_tiempo_perdido"],
+        "total_min_real": round(float(r["total_min_real"] or 0), 1),
+        "total_tiempo_perdido": round(float(r["total_tiempo_perdido"] or 0), 1),
     } for r in rows]
     return jsonify(out)
 
@@ -15452,7 +15939,6 @@ def _pdf_cantidad(n):
 
 @app.route("/api/ordenes_compra/<int:ocid>/pdf")
 @login_required()
-@solo_con_monetario
 def emitir_oc_pdf(ocid):
     return _pdf_o_error(_build_oc_pdf, ocid)
 
@@ -15460,6 +15946,7 @@ def emitir_oc_pdf(ocid):
 def _build_oc_pdf(ocid):
     """Genera el PDF de la Orden de Compra con la misma estética que el PDF
     de OT."""
+    ver_mon_pdf = puede_ver_monetario()
     from reportlab.lib.units import mm
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_CENTER, TA_RIGHT
@@ -15524,7 +16011,7 @@ def _build_oc_pdf(ocid):
          P(_pdf_fecha(oc["fecha_entrega_est"]), size=9)],
 
         [P("Monto total", size=8, bold=True, color=MUTED),
-         Paragraph(f'<b>{_pdf_dinero(oc["monto_total"], _moneda_de(oc))}</b>', sty(size=9)),
+         Paragraph(f'<b>{_pdf_dinero(oc["monto_total"], _moneda_de(oc)) if ver_mon_pdf else "—"}</b>', sty(size=9)),
          P("Aprobada por", size=8, bold=True, color=MUTED),
          P(oc["aprobado_por_nombre"] or "—", size=9)],
     ])
@@ -15533,6 +16020,8 @@ def _build_oc_pdf(ocid):
 
     # ── 3. Ítems ──────────────────────────────────────────────────────────────
     story.append(KeepTogether([pdf.barra("ÍTEMS SOLICITADOS")]))
+    # Sin ver_monetario el PDF sale igual, pero sin precios ni totales.
+    _din = (lambda v: _pdf_dinero(v, _moneda_de(oc))) if ver_mon_pdf else (lambda v: "—")
 
     if items:
         it_head = [
@@ -15553,8 +16042,8 @@ def _build_oc_pdf(ocid):
                 Paragraph(desc, sty(size=8)),
                 P(f'{i["cantidad"]} {i["unidad"] or ""}', size=8, align=TA_CENTER),
                 P(entrega, size=8, align=TA_CENTER),
-                P(_pdf_dinero(i["precio_unit"], _moneda_de(oc)), size=8, align=TA_RIGHT),
-                Paragraph(f'<b>{_pdf_dinero(total_item, _moneda_de(oc))}</b>', sty(size=8, align=TA_RIGHT)),
+                P(_din(i["precio_unit"]), size=8, align=TA_RIGHT),
+                Paragraph(f'<b>{_din(total_item)}</b>', sty(size=8, align=TA_RIGHT)),
             ])
 
         story.append(pdf.tabla(it_rows, [18*mm, 62*mm, 24*mm, 20*mm, 24*mm, 24*mm]))
@@ -15799,6 +16288,7 @@ def bulk_import():
 
     if not table or not rows:
         return jsonify({"error": "table y rows requeridos"}), 400
+    _aud_previo = _carga_aud_max()
 
     # Whitelist: only real tables
     import sqlite3 as _sq
@@ -15809,7 +16299,7 @@ def bulk_import():
 
     if table not in valid:
         return jsonify({"error": f"Tabla '{table}' no existe"}), 400
-    if table in ("usuarios", "sqlite_sequence"):
+    if table in ("usuarios", "sqlite_sequence", "cargas_masivas", "auditoria"):
         return jsonify({"error": "Tabla protegida"}), 403
 
     # Get column names (skip 'id' for plain inserts unless provided)
@@ -15839,7 +16329,54 @@ def bulk_import():
     fk_cols = {row[3]: (row[2], row[4]) for row in fk_info}  # {col: (ref_table, ref_col)}
     _db_fk.close()
 
+    # Referencias por código/nombre/número en vez de id: los ids internos
+    # cambian de una base a otra (servidor de prueba vs. el que se usa), así
+    # que una planilla con ids solo sirve en la base donde se armó. Para cada
+    # columna FK "<algo>_id" se acepta en su lugar una columna auxiliar:
+    #   <algo>_codigo -> busca por codigo  (ej. producto_codigo, material_codigo)
+    #   <algo>_numero -> busca por numero  (ej. orden_cliente_numero)
+    #   <algo>_razon  -> busca por razon   (ej. cliente_razon, proveedor_razon)
+    # Sin distinguir mayúsculas ni espacios. Si no existe, la fila da error
+    # (no se crea nada ni se deja vacío). Si viene, pisa al <algo>_id.
+    _resolver_ref = []   # (col_fk, columna_aux, tabla_ref, campo)
+    for col, (ref_table, ref_col) in fk_cols.items():
+        if ref_col != "id" or not col.endswith("_id"):
+            continue
+        base = col[:-3]
+        ref_campos = {r["name"] for r in query(f"PRAGMA table_info({ref_table})")}
+        for suf in ("codigo", "numero", "razon"):
+            if suf in ref_campos and f"{base}_{suf}" not in col_meta:
+                _resolver_ref.append((col, f"{base}_{suf}", ref_table, suf))
+    _ref_cache = {}
+
+    def _resolver_fila(row):
+        for col, aux, ref_table, campo in _resolver_ref:
+            val = row.get(aux)
+            if val is None or str(val).strip() == "":
+                continue
+            if isinstance(val, float) and val.is_integer():
+                val = int(val)
+            clave = (ref_table, campo, str(val).strip().upper())
+            if clave not in _ref_cache:
+                encontrados = query(f"SELECT * FROM {ref_table} WHERE upper(trim({campo}))=? ORDER BY id",
+                                    (clave[2],))
+                if len(encontrados) > 1 and "activo" in encontrados[0].keys():
+                    activos = [r for r in encontrados if r["activo"] not in (0, "0")]
+                    encontrados = activos or encontrados
+                _ref_cache[clave] = [r["id"] for r in encontrados]
+            ids = _ref_cache[clave]
+            if not ids:
+                return f"{aux} '{val}' no existe"
+            if len(ids) > 1:
+                return f"{aux} '{val}' está repetido ({len(ids)} registros), usá {col}"
+            row[col] = ids[0]
+        return None
+
     for i, row in enumerate(rows):
+        err_ref = _resolver_fila(row) if _resolver_ref else None
+        if err_ref:
+            errors.append(f"Fila {i+1}: {err_ref}")
+            continue
         # Only keep columns that exist in the table
         valid_row = {k: v for k, v in row.items() if k in col_meta}
         # Remove 'id' for plain inserts (let autoincrement handle it)
@@ -15901,8 +16438,445 @@ def bulk_import():
         except Exception as e:
             errors.append(f"Fila {i+1}: {str(e)[:80]}")
 
+    _carga_registrar("POST /api/bulk/import", _aud_previo,
+                     f"{table} — {'insertar o reemplazar' if mode == 'upsert' else 'insertar'}"
+                     + (f" — {d.get('archivo')}" if d.get("archivo") else ""), inserted)
     return jsonify({"ok": True, "inserted": inserted,
                     "errors": errors, "total": len(rows)})
+
+# ── Carga masiva de stock ─────────────────────────────────────────────────────
+# Hoja "stock" del Excel: codigo + cantidad (obs opcional). Dos modos:
+#  - sumar:  la cantidad entra como stock nuevo.
+#  - conteo: la cantidad es lo que se contó (toma de inventario) y el stock
+#            queda en ese número (se suma o se resta la diferencia).
+# Material / Producto terminado / Semielaborado viven en lotes: lo que entra
+# es un lote nuevo ya Aprobado (es stock que ya está en planta), y lo que sale
+# se descuenta de lo libre de sus lotes (lo aprobado y no reservado a una OT),
+# del lote más viejo al más nuevo. Insumo y Herramienta van directo al stock.
+STOCK_MASIVO_LOTES = ("Material", "Producto terminado", "Semielaborado")
+
+
+def _stock_masivo_num(v):
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).strip().replace(" ", "")
+    if "," in s or re.fullmatch(r"\d{1,3}(\.\d{3})+", s):   # 1.234,5 / 1.900
+        s = s.replace(".", "").replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return "error"
+
+
+def _stock_masivo_plan(filas, modo):
+    """Arma lo que haría cada fila, sin tocar nada."""
+    mats = {}
+    for m in query("SELECT id, codigo, descripcion, categoria, stock, activo FROM materiales"):
+        mats.setdefault((m["codigo"] or "").strip().upper(), m)
+    libres = {}
+    for r in query("""SELECT material_id, SUM(MAX(0, COALESCE(cantidad_activa,0)-COALESCE(cantidad_reservada,0))) libre
+            FROM lotes WHERE estado<>'Agotado' GROUP BY material_id"""):
+        libres[r["material_id"]] = float(r["libre"] or 0)
+    plan, vistos = [], {}
+    for i, f in enumerate(filas):
+        fila = f.get("_fila") or i + 2
+        cod = str(f.get("codigo") if f.get("codigo") is not None else "").strip()
+        cant = _stock_masivo_num(f.get("cantidad"))
+        p = {"fila": fila, "codigo": cod, "obs": (str(f.get("obs") or "").strip() or None)}
+        if not cod and cant is None:
+            continue
+        plan.append(p)
+        if not cod:
+            p["error"] = "Falta el código"; continue
+        m = mats.get(cod.upper())
+        if not m:
+            p["error"] = "No existe ningún artículo con ese código"; continue
+        p.update(material_id=m["id"], codigo=m["codigo"], descripcion=m["descripcion"],
+                 categoria=m["categoria"], actual=round(float(m["stock"] or 0), 4))
+        if cant == "error" or cant is None:
+            p["error"] = "Cantidad vacía o no es un número"; continue
+        if cant < 0:
+            p["error"] = "La cantidad no puede ser negativa"; continue
+        if m["id"] in vistos:
+            p["error"] = f"Código repetido (ya está en la fila {vistos[m['id']]})"; continue
+        vistos[m["id"]] = fila
+        p["cantidad"] = cant
+        dif = cant if modo == "sumar" else round(cant - p["actual"], 4)
+        p["diferencia"] = dif
+        p["nuevo"] = round(p["actual"] + dif, 4)
+        if abs(dif) < 0.0001:
+            p["accion"] = "Sin cambios"; continue
+        if dif > 0:
+            p["accion"] = "Lote nuevo aprobado" if m["categoria"] in STOCK_MASIVO_LOTES else "Suma al stock"
+            continue
+        if m["categoria"] in STOCK_MASIVO_LOTES:
+            libre = libres.get(m["id"], 0.0)
+            if libre + 0.0001 < -dif:
+                p["error"] = (f"Hay que bajar {-dif:g} pero los lotes solo tienen {libre:g} libres "
+                              f"(el resto está reservado a OT o sin aprobar por Calidad)")
+                continue
+            p["accion"] = "Baja de lotes"
+        else:
+            p["accion"] = "Resta del stock"
+        if not m["activo"]:
+            p["aviso"] = "Artículo inactivo"
+    return plan
+
+
+def _stock_masivo_aplicar(p, modo, uid):
+    mid, dif = p["material_id"], p["diferencia"]
+    ref = ("Carga masiva de stock" if modo == "sumar" else "Toma de inventario (carga masiva)") \
+        + (f" — {p['obs']}" if p.get("obs") else "")
+    if dif > 0 and p["categoria"] in STOCK_MASIVO_LOTES:
+        num = _gen_lote_numero()
+        lid = execute("""INSERT INTO lotes (numero, material_id, cantidad_original, cantidad_disponible,
+                cantidad_activa, referencia_proveedor, estado, obs, creado_por, stock_computado)
+            VALUES (?,?,?,?,?,?,'Aprobado',?,?,1)""",
+            (num, mid, dif, dif, dif, ref, "Creado por carga masiva de stock", uid))
+        execute("UPDATE materiales SET stock=stock+?, actualizado=datetime('now','localtime') WHERE id=?", (dif, mid))
+        execute("""INSERT INTO movimientos (material_id, lote_id, tipo, cantidad, referencia, usuario_id)
+            VALUES (?,?,'entrada',?,?,?)""", (mid, lid, dif, f"{ref} — {num}", uid))
+        return num
+    if dif > 0:
+        execute("UPDATE materiales SET stock=stock+?, actualizado=datetime('now','localtime') WHERE id=?", (dif, mid))
+        execute("""INSERT INTO movimientos (material_id, tipo, cantidad, referencia, usuario_id)
+            VALUES (?,'entrada',?,?,?)""", (mid, dif, ref, uid))
+        return None
+    falta = -dif
+    if p["categoria"] in STOCK_MASIVO_LOTES:
+        lotes = query("""SELECT id, numero, MAX(0, COALESCE(cantidad_activa,0)-COALESCE(cantidad_reservada,0)) libre
+            FROM lotes WHERE material_id=? AND estado<>'Agotado' ORDER BY id""", (mid,))
+        usados = []
+        for l in lotes:
+            if falta <= 0.0001:
+                break
+            q = min(float(l["libre"] or 0), falta)
+            if q <= 0:
+                continue
+            execute("""UPDATE lotes SET cantidad_disponible=MAX(0, cantidad_disponible-?),
+                    cantidad_activa=MAX(0, cantidad_activa-?),
+                    estado=CASE WHEN cantidad_disponible-? <= 0.0001 THEN 'Agotado' ELSE estado END
+                WHERE id=?""", (q, q, q, l["id"]))
+            execute("""INSERT INTO movimientos (material_id, lote_id, tipo, cantidad, referencia, usuario_id)
+                VALUES (?,?,'salida',?,?,?)""", (mid, l["id"], q, f"{ref} — {l['numero']}", uid))
+            falta = round(falta - q, 4)
+            usados.append(l["numero"])
+        if falta > 0.0001:
+            raise ValueError(f"{p['codigo']}: los lotes ya no tienen stock libre suficiente")
+        execute("UPDATE materiales SET stock=MAX(0, stock-?), actualizado=datetime('now','localtime') WHERE id=?",
+                (-dif, mid))
+        return ", ".join(usados)
+    execute("UPDATE materiales SET stock=MAX(0, stock-?), actualizado=datetime('now','localtime') WHERE id=?",
+            (falta, mid))
+    execute("""INSERT INTO movimientos (material_id, tipo, cantidad, referencia, usuario_id)
+        VALUES (?,'salida',?,?,?)""", (mid, falta, ref, uid))
+    return None
+
+
+@app.route("/api/bulk/stock", methods=["POST"])
+@login_required(roles=["admin"])
+def bulk_stock():
+    """{filas: [{codigo, cantidad, obs}], modo: 'sumar'|'conteo', confirmar: bool}.
+    Sin confirmar devuelve la vista previa. Al confirmar se aplican solo las
+    filas sin error, todas juntas (si una falla no queda nada a medias)."""
+    d = request.get_json(silent=True) or {}
+    modo = d.get("modo")
+    if modo not in ("sumar", "conteo"):
+        return jsonify({"error": "Elegí si la cantidad se suma o es el conteo"}), 400
+    filas = d.get("filas")
+    if not isinstance(filas, list) or not filas:
+        return jsonify({"error": "La hoja stock no tiene filas"}), 400
+    plan = _stock_masivo_plan(filas, modo)
+    if not d.get("confirmar"):
+        return jsonify({"filas": plan})
+    aplicar = [p for p in plan if not p.get("error") and abs(p.get("diferencia") or 0) >= 0.0001]
+    _aud_previo = _carga_aud_max()
+    try:
+        with transaccion():
+            for p in aplicar:
+                p["lotes"] = _stock_masivo_aplicar(p, modo, session["user_id"])
+    except ValueError as e:
+        return jsonify({"error": f"No se cargó nada: {e}. Volvé a revisar la vista previa."}), 409
+    _carga_registrar("POST /api/bulk/stock", _aud_previo,
+                     ("conteo" if modo == "conteo" else "suma al stock")
+                     + (f" — {d.get('archivo')}" if d.get("archivo") else ""), len(aplicar))
+    return jsonify({"ok": True, "aplicadas": len(aplicar),
+                    "con_error": sum(1 for p in plan if p.get("error")), "filas": plan})
+
+
+# ── Borrar una carga masiva ───────────────────────────────────────────────────
+# Cada carga masiva queda en cargas_masivas con el tramo de la auditoría que
+# generó. Borrarla es recorrer ese tramo al revés:
+#   · lo que la carga dio de alta se borra (si después lo volvió a escribir
+#     otra carga, ya es de esa otra y no se toca);
+#   · lo que modificó se vuelve atrás: las cantidades (stock, cantidades de
+#     lotes) restando lo que la carga sumó, sin pisar lo que pasó después; el
+#     resto de los campos solo si siguen como los dejó la carga.
+# No se borra nada que otro módulo esté usando (remitos, consumos, OTs...):
+# eso queda y se informa. Lo demás se borra todo junto.
+CARGA_RUTAS = {"POST /api/bulk/import": "Carga masiva", "POST /api/bulk/stock": "Cargar stock"}
+CARGA_COLS_DELTA = {"stock", "cantidad_disponible", "cantidad_activa", "cantidad_original",
+                    "cantidad_reservada", "cantidad_rechazada"}
+CARGA_COLS_IGNORAR = {"actualizado", "creado", "fecha", "_filas_insertadas"}
+CARGA_SINGULAR = {"ordenes_cliente": "pedido", "ordenes_cliente_items": "renglón de pedido", "lotes": "lote", "movimientos": "movimiento", "materiales": "artículo", "clientes": "cliente", "proveedores": "proveedor", "cajones": "cajón"}
+CARGA_NOMBRES = {"ordenes_cliente": "pedidos de cliente", "ordenes_cliente_items": "renglones de pedidos",
+                 "lotes": "lotes", "movimientos": "movimientos de stock", "materiales": "artículos",
+                 "clientes": "clientes", "proveedores": "proveedores", "cajones": "cajones"}
+# Referencias que no impiden borrar: se desvinculan (columna a NULL) o se borran.
+CARGA_DESVINCULAR = {("movimientos", "lote_id"), ("recepciones", "lote_id"),
+                     ("ordenes", "orden_cliente_id"), ("ordenes", "orden_cliente_item_id")}
+CARGA_BORRAR_HIJOS = {("orden_cliente_item_ots", "item_id")}
+
+
+def _carga_aud_max():
+    r = query("SELECT MAX(id) m FROM auditoria", one=True)
+    return int(r["m"] or 0)
+
+
+def _carga_registrar(ruta, aud_previo, detalle, filas):
+    """Anota la carga recién hecha (si escribió algo)."""
+    try:
+        hasta = _carga_aud_max()
+        n = query("SELECT COUNT(*) c FROM auditoria WHERE id>? AND id<=? AND ruta=?",
+                  (aud_previo, hasta, ruta), one=True)["c"]
+        if not n:
+            return
+        execute("""INSERT INTO cargas_masivas (fecha,tipo,ruta,detalle,usuario_id,usuario_nombre,aud_desde,aud_hasta,filas)
+            VALUES (datetime('now','localtime'),?,?,?,?,?,?,?,?)""",
+            (CARGA_RUTAS[ruta], ruta, detalle, session.get("user_id"),
+             session.get("nombre") or session.get("username"), aud_previo + 1, hasta, filas))
+    except Exception as e:
+        print(f"[cargas] No se pudo registrar la carga masiva: {e!r}")
+
+
+def _carga_json(txt):
+    try:
+        return _json.loads(txt) if txt else {}
+    except Exception:
+        return {}
+
+
+_carga_fks_cache = None
+
+
+def _carga_fks():
+    """{tabla_referida: [(tabla, columna)]} según las FK declaradas.
+    `productos` es una vista de `materiales`: se toman como la misma."""
+    global _carga_fks_cache
+    if _carga_fks_cache is None:
+        refs = {}
+        for t in query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"):
+            for fk in query(f"PRAGMA foreign_key_list({t['name']})"):
+                destino = "materiales" if fk["table"] == "productos" else fk["table"]
+                if (fk["to"] or "id") == "id":
+                    refs.setdefault(destino, []).append((t["name"], fk["from"]))
+        _carga_fks_cache = refs
+    return _carga_fks_cache
+
+
+def _carga_plan(c):
+    """Qué haría borrar la carga `c` (fila de cargas_masivas), sin tocar nada."""
+    filas = query("""SELECT id, entidad, registro_id, accion, valores_antes, valores_despues
+        FROM auditoria WHERE id BETWEEN ? AND ? AND ruta=? ORDER BY id""",
+        (c["aud_desde"], c["aud_hasta"], c["ruta"]))
+    regs = {}
+    for f in filas:
+        if f["registro_id"] is None or f["accion"] not in ("alta", "modificacion"):
+            continue
+        try:
+            rid = int(f["registro_id"])
+        except (TypeError, ValueError):
+            continue
+        k = (f["entidad"], rid)
+        r = regs.setdefault(k, {"tabla": f["entidad"], "id": rid, "alta": False, "antes": {},
+                                "despues": {}, "orden": f["id"]})
+        if f["accion"] == "alta":
+            r["alta"] = True
+            r["despues"] = _carga_json(f["valores_despues"])
+        else:
+            for col, v in _carga_json(f["valores_antes"]).items():
+                r["antes"].setdefault(col, v)
+            r["despues"].update(_carga_json(f["valores_despues"]))
+
+    borrar, modificar, omitidos, bloqueados = {}, [], [], []
+    sin_stock = set()   # material_id cuyo lote de la carga ya no está: no se toca su stock
+    for k, r in sorted(regs.items(), key=lambda kv: -kv[1]["orden"]):
+        tabla, rid = k
+        actual = query(f"SELECT * FROM {tabla} WHERE id=?", (rid,), one=True)
+        if r["alta"]:
+            pisado = query(f"""SELECT fecha FROM auditoria WHERE entidad=? AND registro_id=? AND id>?
+                AND accion='alta' AND ruta IN ({",".join("?" * len(CARGA_RUTAS))}) ORDER BY id LIMIT 1""",
+                [tabla, str(rid), c["aud_hasta"]] + list(CARGA_RUTAS), one=True)
+            etiqueta = _carga_etiqueta(tabla, actual or r["despues"])
+            if pisado:
+                omitidos.append(f"{etiqueta}: lo volvió a cargar otra carga ({pisado['fecha'][:16]})")
+                if tabla == "lotes": sin_stock.add(r["despues"].get("material_id"))
+                continue
+            if not actual:
+                omitidos.append(f"{etiqueta}: ya no existe")
+                if tabla == "lotes": sin_stock.add(r["despues"].get("material_id"))
+                continue
+            borrar[k] = {"tabla": tabla, "id": rid, "fila": actual, "etiqueta": etiqueta}
+        elif actual:
+            modificar.append({"tabla": tabla, "id": rid, "fila": actual, "antes": r["antes"],
+                              "despues": r["despues"]})
+
+    # Lo que otro módulo usa no se borra. Si un registro queda, quedan también
+    # los de la carga de los que depende (ej: el pedido de un renglón que queda).
+    motivos = {}
+    for k, b in borrar.items():
+        if b["tabla"] == "lotes":
+            m = _lote_motivos_no_eliminar(b["fila"])
+            if m: motivos[k] = m
+    cambio = True
+    while cambio:
+        cambio = False
+        for k, b in list(borrar.items()):
+            if k in motivos:
+                continue
+            usados = []
+            for (t2, col) in _carga_fks().get(b["tabla"], []):
+                if (t2, col) in CARGA_DESVINCULAR or (t2, col) in CARGA_BORRAR_HIJOS:
+                    continue
+                ids = [x["id"] for x in query(f"SELECT id FROM {t2} WHERE {col}=?", (b["id"],))] \
+                    if "id" in {cc["name"] for cc in query(f"PRAGMA table_info({t2})")} else None
+                if ids is None:
+                    n = query(f"SELECT COUNT(*) c FROM {t2} WHERE {col}=?", (b["id"],), one=True)["c"]
+                    if n: usados.append(f"{t2} ({n})")
+                    continue
+                fuera = [i for i in ids if (t2, i) not in borrar or (t2, i) in motivos]
+                if fuera:
+                    usados.append(f"{CARGA_NOMBRES.get(t2, t2)} ({len(fuera)})")
+            if b["tabla"] == "ordenes_cliente_items":
+                if query("SELECT 1 FROM remito_items WHERE orden_cliente_item_id=? LIMIT 1", (b["id"],), one=True):
+                    usados.append("remitos")
+            if usados:
+                motivos[k] = ["lo usan " + ", ".join(sorted(set(usados)))]
+                cambio = True
+    for k, m in motivos.items():
+        b = borrar.pop(k)
+        bloqueados.append(f"{b['etiqueta']}: " + "; ".join(m))
+        if b["tabla"] == "lotes":
+            sin_stock.add(b["fila"]["material_id"])
+    # Movimientos y stock que acompañan a un lote que no se borra quedan como están.
+    if sin_stock:
+        for k in [k for k, b in borrar.items()
+                  if b["tabla"] == "movimientos" and b["fila"]["material_id"] in sin_stock]:
+            borrar.pop(k)
+        modificar = [m for m in modificar
+                     if not (m["tabla"] == "materiales" and m["id"] in sin_stock)]
+    # Lo modificado de un registro que se borra no hace falta revertirlo.
+    modificar = [m for m in modificar if (m["tabla"], m["id"]) not in borrar]
+
+    resumen = {}
+    for b in borrar.values():
+        n = CARGA_NOMBRES.get(b["tabla"], b["tabla"])
+        resumen[n] = resumen.get(n, 0) + 1
+    revertir = {}
+    for m in modificar:
+        n = CARGA_NOMBRES.get(m["tabla"], m["tabla"])
+        revertir[n] = revertir.get(n, 0) + 1
+    return {"borrar": list(borrar.values()), "modificar": modificar, "omitidos": omitidos,
+            "bloqueados": bloqueados, "resumen_borrar": resumen, "resumen_revertir": revertir}
+
+
+def _carga_etiqueta(tabla, fila):
+    fila = dict(fila or {})
+    nombre = CARGA_SINGULAR.get(tabla, tabla)
+    for campo in ("numero", "codigo", "razon"):
+        if fila.get(campo):
+            return f"{nombre} {fila[campo]}"
+    if tabla == "ordenes_cliente_items" and fila.get("orden_cliente_id"):
+        oc = query("SELECT numero FROM ordenes_cliente WHERE id=?", (fila["orden_cliente_id"],), one=True)
+        if oc: return f"{nombre} de {oc['numero']} (#{fila.get('id', '?')})"
+    return f"{nombre} #{fila.get('id', '?')}"
+
+
+def _carga_ejecutar(plan):
+    hechos = {"borrados": [], "revertidos": []}
+    with transaccion():
+        for b in plan["borrar"]:               # ya viene en orden inverso a la carga
+            tabla, rid = b["tabla"], b["id"]
+            for (t2, col) in _carga_fks().get(tabla, []):
+                if (t2, col) in CARGA_BORRAR_HIJOS:
+                    execute(f"DELETE FROM {t2} WHERE {col}=?", (rid,))
+                elif (t2, col) in CARGA_DESVINCULAR:
+                    execute(f"UPDATE {t2} SET {col}=NULL WHERE {col}=?", (rid,))
+            if tabla == "ordenes_cliente_items":
+                execute("DELETE FROM requerimientos_productivos WHERE numero=?", (f"OC-CLI-ITEM-{rid}",))
+                execute("DELETE FROM orden_cliente_item_ots WHERE item_id=?", (rid,))
+            if tabla == "lotes":
+                execute("DELETE FROM cajones WHERE lote_id=? AND orden_id IS NULL", (rid,))
+            execute(f"DELETE FROM {tabla} WHERE id=?", (rid,))
+            hechos["borrados"].append(b["etiqueta"])
+        for m in plan["modificar"]:
+            tabla, rid, fila = m["tabla"], m["id"], m["fila"]
+            sets, vals = [], []
+            for col, antes in m["antes"].items():
+                if col in CARGA_COLS_IGNORAR or col not in fila.keys():
+                    continue
+                despues = m["despues"].get(col)
+                if col in CARGA_COLS_DELTA:
+                    try:
+                        delta = float(antes or 0) - float(despues or 0)
+                    except (TypeError, ValueError):
+                        continue
+                    if abs(delta) < 1e-9:
+                        continue
+                    sets.append(f"{col}=MAX(0, COALESCE({col},0)+?)"); vals.append(delta)
+                elif fila[col] == despues:
+                    sets.append(f"{col}=?"); vals.append(antes)
+            if not sets:
+                continue
+            if "actualizado" in fila.keys():
+                sets.append("actualizado=datetime('now','localtime')")
+            execute(f"UPDATE {tabla} SET {', '.join(sets)} WHERE id=?", vals + [rid])
+            hechos["revertidos"].append(f"{tabla} #{rid}")
+    return hechos
+
+
+@app.route("/api/cargas_masivas", methods=["GET"])
+@login_required(roles=["admin"])
+def get_cargas_masivas():
+    return jsonify([dict(r) for r in query(
+        "SELECT * FROM cargas_masivas ORDER BY id DESC LIMIT 200")])
+
+
+@app.route("/api/cargas_masivas/<int:cid>/vista_previa", methods=["GET"])
+@login_required(roles=["admin"])
+def carga_masiva_vista_previa(cid):
+    c = query("SELECT * FROM cargas_masivas WHERE id=?", (cid,), one=True)
+    if not c: return jsonify({"error": "Carga no encontrada"}), 404
+    if c["borrada"]: return jsonify({"error": f"Esta carga ya se borró el {c['borrada'][:16]}"}), 409
+    plan = _carga_plan(c)
+    return jsonify({"carga": dict(c), "resumen_borrar": plan["resumen_borrar"],
+                    "resumen_revertir": plan["resumen_revertir"],
+                    "bloqueados": plan["bloqueados"], "omitidos": plan["omitidos"],
+                    "nada": not plan["borrar"] and not plan["modificar"]})
+
+
+@app.route("/api/cargas_masivas/<int:cid>/borrar", methods=["POST"])
+@login_required(roles=["admin"])
+def carga_masiva_borrar(cid):
+    c = query("SELECT * FROM cargas_masivas WHERE id=?", (cid,), one=True)
+    if not c: return jsonify({"error": "Carga no encontrada"}), 404
+    if c["borrada"]: return jsonify({"error": f"Esta carga ya se borró el {c['borrada'][:16]}"}), 409
+    plan = _carga_plan(c)
+    if not plan["borrar"] and not plan["modificar"]:
+        return jsonify({"error": "No queda nada de esta carga para borrar"}), 409
+    try:
+        hechos = _carga_ejecutar(plan)
+    except Exception as e:
+        print(f"[cargas] Falló el borrado de la carga {cid}: {e!r}")
+        return jsonify({"error": f"No se borró nada: {e}"}), 500
+    detalle = {"borrados": hechos["borrados"], "revertidos": hechos["revertidos"],
+               "quedaron": plan["bloqueados"], "omitidos": plan["omitidos"]}
+    execute("UPDATE cargas_masivas SET borrada=datetime('now','localtime'), borrada_por=?, borrada_detalle=? WHERE id=?",
+            (session.get("nombre") or session.get("username"), _json.dumps(detalle, ensure_ascii=False), cid))
+    return jsonify({"ok": True, "borrados": len(hechos["borrados"]), "revertidos": len(hechos["revertidos"]),
+                    "quedaron": plan["bloqueados"]})
 
 # ── Boot ──────────────────────────────────────────────────────────────────────
 def get_local_ip():
@@ -16113,6 +17087,75 @@ def get_auditoria_detalle(aid):
     d.pop("valores_antes", None)
     d.pop("valores_despues", None)
     return jsonify(d)
+
+
+# ── Registro de cambios del sistema (solo admin) ─────────────────────────────
+# Historial de los cambios de código hechos en MetalERP, cargado a mano.
+# Obligatorios: fecha y descripción. Todo lo demás es opcional.
+# tipo, modulo, motivo, objetivo, archivos y referencia siguen en la tabla
+# (datos viejos) pero ya no se cargan ni se editan.
+CAMBIOS_CAMPOS_TEXTO = ("descripcion", "detalle", "autor")
+
+
+def _cambio_desde_request():
+    d = request.get_json(silent=True) or {}
+    datos = {}
+    for c in CAMBIOS_CAMPOS_TEXTO:
+        v = d.get(c)
+        v = str(v).strip() if v is not None else ""
+        datos[c] = v or None
+    fecha = str(d.get("fecha") or "").strip()[:10]
+    try:
+        datetime.strptime(fecha, "%Y-%m-%d")
+    except ValueError:
+        return None, "La fecha es obligatoria (formato AAAA-MM-DD)."
+    if not datos["descripcion"]:
+        return None, "La descripción es obligatoria."
+    datos["fecha"] = fecha
+    return datos, None
+
+
+@app.route("/api/registro-cambios")
+@login_required(roles=["admin"])
+def get_registro_cambios():
+    filas = query("""SELECT rc.*, u.nombre AS creado_por_nombre FROM registro_cambios rc
+                     LEFT JOIN usuarios u ON u.id=rc.creado_por
+                     ORDER BY rc.fecha DESC, rc.id DESC""")
+    return jsonify([dict(f) for f in filas])
+
+
+@app.route("/api/registro-cambios", methods=["POST"])
+@login_required(roles=["admin"])
+def crear_registro_cambio():
+    datos, err = _cambio_desde_request()
+    if err:
+        return jsonify({"error": err}), 400
+    cols = ["fecha", *CAMBIOS_CAMPOS_TEXTO, "creado_por"]
+    vals = [datos["fecha"], *[datos[c] for c in CAMBIOS_CAMPOS_TEXTO], session.get("user_id")]
+    nid = execute(f"INSERT INTO registro_cambios ({','.join(cols)}) VALUES ({','.join('?' * len(cols))})", vals)
+    return jsonify({"ok": True, "id": nid})
+
+
+@app.route("/api/registro-cambios/<int:cid>", methods=["PUT"])
+@login_required(roles=["admin"])
+def editar_registro_cambio(cid):
+    if not query("SELECT 1 FROM registro_cambios WHERE id=?", (cid,), one=True):
+        return jsonify({"error": "Cambio no encontrado"}), 404
+    datos, err = _cambio_desde_request()
+    if err:
+        return jsonify({"error": err}), 400
+    cols = ["fecha", *CAMBIOS_CAMPOS_TEXTO]
+    execute(f"""UPDATE registro_cambios SET {', '.join(c + '=?' for c in cols)},
+                actualizado_en=datetime('now','localtime') WHERE id=?""",
+            [datos[c] for c in cols] + [cid])
+    return jsonify({"ok": True})
+
+
+@app.route("/api/registro-cambios/<int:cid>", methods=["DELETE"])
+@login_required(roles=["admin"])
+def borrar_registro_cambio(cid):
+    execute("DELETE FROM registro_cambios WHERE id=?", (cid,))
+    return jsonify({"ok": True})
 
 
 # ── Asistente IA (permiso "ia") ───────────────────────────────────────────────
@@ -17004,17 +18047,59 @@ def ia_voz():
     return app.response_class(audio, mimetype="audio/mpeg", headers={"Cache-Control": "no-store"})
 
 
-# ── HMI de máquina — MÓDULO DE PRUEBA (solo lectura) ─────────────────────────
-# Maqueta de la estación táctil junto a la máquina (huella + contador de
-# piezas). La huella y el contador están SIMULADOS en el navegador: estas
-# rutas solo LEEN de la base y no guardan nada (ni novedades, ni sesiones).
-# Sirve para ver y discutir el flujo antes de conectar hardware real.
+# ── HMI de máquina — MÓDULO DE PRUEBA ─────────────────────────────────────────
+# Estación táctil junto a la máquina (huella + contador de piezas). La huella
+# y los pulsos del contador se SIMULAN en el navegador; lo que sí es real es
+# el circuito del lado del servidor: la sesión de trabajo, cada ciclo como
+# evento con uid único (un reenvío no suma dos veces) y, si el usuario lo
+# pide al final, la novedad real por POST /api/novedades con sus reglas.
+
+def _hmi_trabajado(s):
+    """Segundos trabajados: lo acumulado más el tramo en curso si no está en pausa."""
+    seg = float(s["trabajado_seg"] or 0)
+    if s["desde"]:
+        try:
+            seg += max(0.0, (datetime.now() - datetime.strptime(s["desde"], "%Y-%m-%d %H:%M:%S")).total_seconds())
+        except ValueError:
+            pass
+    return seg
+
+
+def _hmi_sesion_dict(sid):
+    s = query("""SELECT s.*, e.nombre emp_nombre, e.apellido emp_apellido, e.legajo,
+            o.numero ot_numero, oo.nombre op_nombre, oo.orden paso,
+            oo.qty_requerida, oo.qty_producida, oo.tiempo_ciclo_seg,
+            p.codigo pieza_codigo, p.nombre pieza_nombre, m.codigo maquina_codigo,
+            n.numero novedad_numero,
+            (SELECT MAX(recibido) FROM hmi_eventos WHERE sesion_id=s.id) ultimo_evento
+        FROM hmi_sesiones s
+        JOIN empleados e ON e.id=s.empleado_id
+        JOIN ordenes o ON o.id=s.orden_id
+        JOIN orden_operaciones oo ON oo.id=s.orden_operacion_id
+        LEFT JOIN productos p ON p.id=o.producto_id
+        LEFT JOIN maquinas m ON m.id=s.maquina_id
+        LEFT JOIN novedades_produccion n ON n.id=s.novedad_id
+        WHERE s.id=?""", (sid,), one=True)
+    if not s:
+        return None
+    d = dict(s)
+    d["trabajado_seg"] = round(_hmi_trabajado(s), 1)
+    return d
+
+
+def _hmi_sesion_o_error(sid, estados=None):
+    s = query("SELECT * FROM hmi_sesiones WHERE id=?", (sid,), one=True)
+    if not s:
+        return None, (jsonify({"error": "Sesión no encontrada"}), 404)
+    if estados and s["estado"] not in estados:
+        return None, (jsonify({"error": f"La sesión está {s['estado']}", "estado": s["estado"]}), 409)
+    return s, None
+
 
 @app.route("/hmi-test")
 @login_required(roles=["admin", "operario"])
 def hmi_test():
-    # Se sirve el archivo tal cual (sin Jinja): la página es estática y toma
-    # todo por /api/hmi_test/datos.
+    # Se sirve el archivo tal cual (sin Jinja): toma todo por /api/hmi_test/*.
     with open(os.path.join(BASE_DIR, "templates", "hmi_test.html"), encoding="utf-8") as f:
         return f.read(), 200, {"Content-Type": "text/html; charset=utf-8"}
 
@@ -17022,9 +18107,9 @@ def hmi_test():
 @app.route("/api/hmi_test/datos")
 @login_required(roles=["admin", "operario"])
 def hmi_test_datos():
-    """Máquina de la terminal, empleados activos y operaciones propias abiertas
-    de OT Pendiente / En proceso. Si la máquina no tiene operaciones asignadas
-    se devuelven todas (avisando con por_maquina=False)."""
+    """Máquina de la terminal, empleados activos, operaciones propias abiertas
+    de OT Pendiente / En proceso (todas si la máquina no tiene ninguna
+    asignada, avisando con por_maquina=False) y la sesión abierta, si hay."""
     cod = (request.args.get("maquina") or "T16").strip()
     maq = query("SELECT id, codigo, nombre, marca, modelo FROM maquinas WHERE codigo=?", (cod,), one=True)
     empleados = [dict(r) for r in query("""SELECT id, legajo, nombre, apellido, cargo, turno
@@ -17046,10 +18131,1009 @@ def hmi_test_datos():
         por_maquina = bool(ops)
     if not ops:
         ops = [dict(r) for r in query(sql + " ORDER BY o.numero, CAST(oo.orden AS REAL)")]
+    activa = None
+    if maq:
+        r = query("""SELECT id FROM hmi_sesiones WHERE maquina_id=? AND estado!='Finalizada'
+            ORDER BY id DESC LIMIT 1""", (maq["id"],), one=True)
+        activa = _hmi_sesion_dict(r["id"]) if r else None
     return jsonify({"maquina": dict(maq) if maq else {"codigo": cod, "nombre": "(no encontrada)"},
                     "por_maquina": por_maquina, "empleados": empleados, "operaciones": ops,
+                    "sesion_activa": activa,
                     "hora_servidor": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
 
+
+@app.route("/api/hmi_test/sesiones", methods=["POST"])
+@login_required(roles=["admin", "operario"])
+def hmi_test_iniciar():
+    d = request.get_json(silent=True) or {}
+    maq = query("SELECT id FROM maquinas WHERE codigo=?", ((d.get("maquina") or "").strip(),), one=True)
+    if not maq:
+        return jsonify({"error": "Máquina no encontrada"}), 400
+    emp = query("SELECT id FROM empleados WHERE id=? AND activo=1", (d.get("empleado_id"),), one=True)
+    if not emp:
+        return jsonify({"error": "Empleado no encontrado o inactivo"}), 400
+    op = query("""SELECT oo.id, oo.orden_id, oo.estado, oo.es_tercerizada, o.estado ot_estado
+        FROM orden_operaciones oo JOIN ordenes o ON o.id=oo.orden_id WHERE oo.id=?""",
+        (d.get("orden_operacion_id"),), one=True)
+    if not op:
+        return jsonify({"error": "Operación no encontrada"}), 400
+    if op["ot_estado"] not in ("Pendiente", "En proceso"):
+        return jsonify({"error": f"La OT está {op['ot_estado']}"}), 400
+    if op["es_tercerizada"]:
+        return jsonify({"error": "La operación es tercerizada: no se trabaja en esta máquina"}), 400
+    if op["estado"] == "Completada":
+        return jsonify({"error": "La operación ya está Completada"}), 400
+    ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with transaccion():
+        abierta = query("""SELECT id FROM hmi_sesiones WHERE maquina_id=? AND estado!='Finalizada'""",
+            (maq["id"],), one=True)
+        if abierta:
+            return jsonify({"error": "Ya hay un trabajo abierto en esta máquina", "sesion_id": abierta["id"]}), 409
+        sid = execute("""INSERT INTO hmi_sesiones (maquina_id, empleado_id, orden_id, orden_operacion_id,
+                estado, inicio, desde, creado_por) VALUES (?,?,?,?, 'Produciendo', ?, ?, ?)""",
+            (maq["id"], emp["id"], op["orden_id"], op["id"], ahora, ahora, session["user_id"]))
+    return jsonify(_hmi_sesion_dict(sid)), 201
+
+
+@app.route("/api/hmi_test/sesiones/<int:sid>")
+@login_required(roles=["admin", "operario"])
+def hmi_test_sesion(sid):
+    s = _hmi_sesion_dict(sid)
+    return (jsonify(s), 200) if s else (jsonify({"error": "Sesión no encontrada"}), 404)
+
+
+@app.route("/api/hmi_test/sesiones/<int:sid>/eventos", methods=["POST"])
+@login_required(roles=["admin", "operario"])
+def hmi_test_evento(sid):
+    """Un ciclo terminado. Idempotente por (sesión, uid): si el mismo evento
+    llega dos veces (reintento tras un corte), el segundo no suma."""
+    d = request.get_json(silent=True) or {}
+    uid = str(d.get("uid") or "").strip()
+    if not uid or len(uid) > 80:
+        return jsonify({"error": "uid requerido"}), 400
+    with transaccion():
+        s, err = _hmi_sesion_o_error(sid)
+        if err:
+            return err
+        ya = query("SELECT 1 FROM hmi_eventos WHERE sesion_id=? AND uid=?", (sid, uid), one=True)
+        if ya:
+            execute("UPDATE hmi_sesiones SET duplicados=duplicados+1 WHERE id=?", (sid,))
+            duplicado = True
+        elif s["estado"] != "Produciendo":
+            return jsonify({"error": f"La sesión está {s['estado']}: el ciclo no se cuenta",
+                            "estado": s["estado"]}), 409
+        else:
+            execute("INSERT INTO hmi_eventos (sesion_id, uid, seq, ts_origen) VALUES (?,?,?,?)",
+                (sid, uid, d.get("seq"), d.get("ts")))
+            execute("UPDATE hmi_sesiones SET ciclos=ciclos+1 WHERE id=?", (sid,))
+            duplicado = False
+    r = query("SELECT ciclos, duplicados FROM hmi_sesiones WHERE id=?", (sid,), one=True)
+    return jsonify({"ok": True, "duplicado": duplicado, "ciclos": r["ciclos"], "duplicados": r["duplicados"]})
+
+
+@app.route("/api/hmi_test/sesiones/<int:sid>/pausa", methods=["POST"])
+@login_required(roles=["admin", "operario"])
+def hmi_test_pausa(sid):
+    with transaccion():
+        s, err = _hmi_sesion_o_error(sid, ("Produciendo",))
+        if err:
+            return err
+        execute("UPDATE hmi_sesiones SET estado='Pausada', trabajado_seg=?, desde=NULL WHERE id=?",
+            (_hmi_trabajado(s), sid))
+    return jsonify(_hmi_sesion_dict(sid))
+
+
+@app.route("/api/hmi_test/sesiones/<int:sid>/reanudar", methods=["POST"])
+@login_required(roles=["admin", "operario"])
+def hmi_test_reanudar(sid):
+    with transaccion():
+        s, err = _hmi_sesion_o_error(sid, ("Pausada",))
+        if err:
+            return err
+        execute("UPDATE hmi_sesiones SET estado='Produciendo', desde=? WHERE id=?",
+            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), sid))
+    return jsonify(_hmi_sesion_dict(sid))
+
+
+@app.route("/api/hmi_test/sesiones/<int:sid>/finalizar", methods=["POST"])
+@login_required(roles=["admin", "operario"])
+def hmi_test_finalizar(sid):
+    d = request.get_json(silent=True) or {}
+    try:
+        nok = int(d.get("nok") or 0)
+    except (TypeError, ValueError):
+        return jsonify({"error": "NO OK inválido"}), 400
+    with transaccion():
+        s, err = _hmi_sesion_o_error(sid, ("Produciendo", "Pausada"))
+        if err:
+            return err
+        if nok < 0 or nok > int(s["ciclos"]):
+            return jsonify({"error": f"NO OK debe estar entre 0 y {s['ciclos']}"}), 400
+        execute("""UPDATE hmi_sesiones SET estado='Finalizada', fin=?, trabajado_seg=?, desde=NULL, nok=?
+            WHERE id=?""", (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), _hmi_trabajado(s), nok, sid))
+    return jsonify(_hmi_sesion_dict(sid))
+
+
+@app.route("/api/hmi_test/sesiones/<int:sid>/novedad", methods=["POST"])
+@login_required(roles=["admin", "operario"])
+def hmi_test_vincular_novedad(sid):
+    """Anota en la sesión la novedad real que se creó con POST /api/novedades."""
+    d = request.get_json(silent=True) or {}
+    s, err = _hmi_sesion_o_error(sid, ("Finalizada",))
+    if err:
+        return err
+    n = query("SELECT id, orden_operacion_id FROM novedades_produccion WHERE id=?", (d.get("novedad_id"),), one=True)
+    if not n or n["orden_operacion_id"] != s["orden_operacion_id"]:
+        return jsonify({"error": "La novedad no corresponde a esta sesión"}), 400
+    execute("UPDATE hmi_sesiones SET novedad_id=? WHERE id=? AND novedad_id IS NULL", (n["id"], sid))
+    return jsonify(_hmi_sesion_dict(sid))
+
+
+
+# ══ Tablets de planta (etapa 1: producción) ═══════════════════════════════════
+# Una tablet por máquina, en modo kiosco, entra sin usuario: se identifica con
+# un token propio (Sistema → Tablets de planta). Lo que carga el operario va a
+# la bandeja (planta_bandeja) y un procesador ÚNICO lo convierte en novedad con
+# la misma lógica de siempre (POST /api/novedades), de a un registro por vez.
+#
+#   tablet --POST /api/tablet/registros--> planta_bandeja (solo INSERT, uuid único)
+#   procesador (un hilo) --> /api/novedades --> Procesado (con la NOV) o Error
+#
+# Un reenvío del mismo registro (corte de Wi-Fi antes del OK) no duplica: el
+# uuid lo genera la tablet y la bandeja lo tiene UNIQUE. Los errores de
+# validación (OT cancelada, sin lote, etc.) quedan en "Error" para que un
+# administrador corrija y reprocese; no se reintentan solos.
+
+PLANTA_TIPOS = {"produccion", "parada"}
+# Motivos de parada que elige el operario al poner Pausa en la tablet. Son los
+# mismos códigos de Trabajo no productivo (CODIGOS_PARADA_MAQUINA en app.html):
+# se usa la lista del sector de la máquina si la categoría se llama igual, y si
+# no la de CNC. Cada pausa queda como un TNP del operario.
+PLANTA_MOTIVOS_PARADA = {
+    "CNC": ["MANTENIMIENTO", "PUESTA EN MARCHA", "ALMUERZO - CENA", "LIMPIEZA DEL SECTOR", "LIMPIEZA INTERIOR",
+        "CAMBIAR INSERTO", "GIRAR INSERTO", "CORREGIR MEDIDA", "CAMBIAR BARRA", "AGREGAR SOLUBLE", "CAMBIO DE OPERADOR",
+        "FALTA DE OPERADOR", "PROBLEMAS CON ALIMENTADOR", "CAMBIO DE PREPARACION", "CORTE Y DESPUNTE DE BARRAS", "BAÑO",
+        "ROTURA DE HTAS", "CAMBIO DE INSERTO EN OTRA MAQUINA", "EXPLICACION / REUNION", "FALTA DE PREPARACION",
+        "MOVER PIEZAS", "FALTA DE MATERIAL", "ESPERAR AL ENCARGADO / PEDIR INSERTO", "REPASAR PIEZAS", "DESCARGAR MATERIAL"],
+    "CORTADORAS": ["MANTENIMIENTO", "PUESTA EN MARCHA", "ALMUERZO - CENA", "LIMPIEZA DEL SECTOR", "LIMPIEZA DE CORTADORA",
+        "FALTA DE PREPARACION", "MOVER PIEZAS", "CORREGIR MEDIDA", "CAMBIAR BARRAS", "FALTA DE MATERIAL", "CAMBIO DE OPERADOR",
+        "FALTA DE OPERADOR", "PROBLEMAS CON PISTONES", "CAMBIO DE PREPARACION", "ESPERAR AL ENCARGADO", "BAÑO",
+        "REPASAR PIEZAS", "DESCARGAR MATERIAL", "EXPLICACION / REUNION", "CONTAR PIEZAS", "PEDIR ELEMENTOS DE SEGURIDAD",
+        "ENTREGAR PZ A CONTROL", "CAMBIO DE SIERRA", "EMITIR DOCUMENTACION", "ARMADO DE PLANILLAS"],
+    "CORTADORA LASER": ["PRODUCCION", "MANTENIMIENTO", "PUESTA EN MARCHA", "ALMUERZO - CENA", "CREAR PROGRAMA",
+        "MODIFICAR PROGRAMA", "CAMBIO DE TUBO DE GAS", "CAMBIO DE PREPARACION", "CAMBIO DE MATERIAL", "CORRECCION DE MEDIDAS",
+        "ESPERAR AL ENCARGADO", "BAÑO", "PEDIR ELEMENTOS DE SEGURIDAD", "ALARMA DE MAQUINA", "EXPLICACION / REUNION",
+        "LEVANTAR PIEZAS DE BATEA", "CORTAR SOBRANTES", "ESPERAR REPOSICION DE MATERIA PRIMA (CLARK)",
+        "LIMPIEZA DE LENTE Y BOQUILLA", "CORTE DE PRUEBA"],
+    "BALANCINES": ["MANTENIMIENTO", "PUESTA EN MARCHA", "ALMUERZO - CENA", "LIMPIEZA DEL SECTOR", "LIMPIEZA DE MATRIZ",
+        "FALTA DE PREPARACION", "MOVER PIEZAS", "CORREGIR MEDIDA", "CAMBIAR ROLLO", "FALTA DE MATERIAL", "CAMBIO DE OPERADOR",
+        "FALTA DE OPERADOR", "PROBLEMAS CON ALIMENTADOR", "CAMBIO DE PREPARACION", "ESPERAR AL ENCARGADO", "BAÑO",
+        "REPASAR PIEZAS", "DESCARGAR MATERIAL", "EXPLICACION / REUNION", "CONTAR PIEZAS", "PEDIR ELEMENTOS DE SEGURIDAD",
+        "ENTREGAR PZ A CONTROL", "PESAR DESPERDICIO / RECORTES (COBRE, LATON)", "EMITIR DOCUMENTACION", "ARMADO DE PLANILLAS"],
+}
+
+
+def _planta_motivos_parada(maquina_id):
+    c = query("""SELECT cm.nombre FROM maquinas m JOIN categorias_maquina cm ON cm.id=m.categoria_id
+        WHERE m.id=?""", (maquina_id,), one=True)
+    nombre = str(c["nombre"] or "").strip().upper() if c else ""
+    return PLANTA_MOTIVOS_PARADA.get(nombre) or PLANTA_MOTIVOS_PARADA["CNC"]
+# Si la novedad no se puede cargar se reintenta sola sin límite: a los 1, 3 y 5
+# minutos y después cada 5 minutos, hasta que entre (por ejemplo cuando vuelve
+# y se aprueba el lote de una OTT) o el supervisor la corrija o descarte. Solo
+# queda en Error si la operación o el operario ya no existen. La falta de
+# lote no cuenta: el registro espera hasta que producción asigne el lote a la
+# OT y entonces se carga solo (y consume el material en ese momento).
+PLANTA_REINTENTOS_MIN = (1, 3, 5)
+PLANTA_ERRORES_LOTE = ("Falta vincular un lote", "Stock disponible insuficiente en lote")
+_planta_visto = {}                    # tablet_id -> última vez que consultó (en memoria)
+_planta_aviso = threading.Event()     # despierta al procesador cuando entra algo
+_planta_hilo = None
+
+
+def _planta_tablet_actual():
+    tok = (request.headers.get("X-Tablet-Token") or "").strip()
+    if not tok:
+        return None
+    return query("""SELECT t.*, m.codigo maquina_codigo, m.nombre maquina_nombre
+        FROM planta_tablets t LEFT JOIN maquinas m ON m.id=t.maquina_id
+        WHERE t.token=? AND t.activa=1""", (tok,), one=True)
+
+
+def tablet_requerida(f):
+    @wraps(f)
+    def wrapped(*a, **kw):
+        t = _planta_tablet_actual()
+        if not t:
+            return jsonify({"error": "Tablet no habilitada. Pedile al administrador el enlace de esta máquina.",
+                            "sin_token": True}), 401
+        g.tablet = t
+        _planta_visto[t["id"]] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return f(*a, **kw)
+    return wrapped
+
+
+@app.route("/tablet")
+def tablet_pagina():
+    # Sin login: la página no trae datos, todo pasa por /api/tablet/* con el token.
+    with open(os.path.join(BASE_DIR, "templates", "tablet.html"), encoding="utf-8") as f:
+        return f.read(), 200, {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store"}
+
+
+def _planta_registro_dict(r):
+    try:
+        datos = _json.loads(r["datos"] or "{}")
+    except ValueError:
+        datos = {}
+    return {"id": r["id"], "uuid": r["uuid"], "tipo": r["tipo"], "estado": r["estado"],
+            "error": r["error"], "hora_operario": r["hora_operario"], "recibido": r["recibido"],
+            "procesado": r["procesado"], "novedad_id": r["novedad_id"],
+            "novedad_numero": r["novedad_numero"] if "novedad_numero" in r.keys() else None,
+            "espera": r["espera"] if "espera" in r.keys() else None,
+            "intentos": r["intentos"], "reintentar_desde": r["reintentar_desde"] if "reintentar_desde" in r.keys() else None,
+            "datos": datos}
+
+
+def _planta_operaciones_abiertas(maquina_id=None, sin_maquina=False):
+    """Operaciones propias abiertas de OT Pendiente / En proceso (de una
+    máquina, las que no tienen máquina, o todas), las de entrega más próxima
+    primero."""
+    sql = """SELECT oo.id, oo.orden_id, oo.orden paso, oo.nombre, oo.estado,
+            oo.qty_requerida, oo.qty_producida, oo.tiempo_ciclo_seg,
+            o.numero ot_numero, o.estado ot_estado, o.fecha_entrega,
+            p.codigo pieza_codigo, p.nombre pieza_nombre
+        FROM orden_operaciones oo
+        JOIN ordenes o ON o.id=oo.orden_id
+        LEFT JOIN productos p ON p.id=o.producto_id
+        WHERE o.estado IN ('Pendiente','En proceso')
+          AND COALESCE(oo.es_tercerizada,0)=0
+          AND oo.estado!='Completada'"""
+    params = ()
+    if maquina_id is not None:
+        sql += " AND oo.maquina_id=?"
+        params = (maquina_id,)
+    elif sin_maquina:
+        sql += " AND oo.maquina_id IS NULL"
+    sql += " ORDER BY o.fecha_entrega IS NULL, o.fecha_entrega, o.numero, CAST(oo.orden AS REAL)"
+    return [dict(r) for r in query(sql, params)]
+
+
+@app.route("/api/tablet/estado")
+@tablet_requerida
+def tablet_estado():
+    """Todo lo que la pantalla necesita: máquina, operarios, operaciones
+    abiertas (las de la máquina; todas si no tiene ninguna asignada) y el
+    estado de los últimos registros que mandó esta tablet."""
+    t = g.tablet
+    empleados = [dict(r) for r in query("""SELECT id, legajo, nombre, apellido, turno
+        FROM empleados WHERE activo=1 ORDER BY apellido, nombre""")]
+    ops = _planta_operaciones_abiertas(t["maquina_id"])
+    por_maquina = bool(ops)
+    if not ops:
+        ops = _planta_operaciones_abiertas()
+    else:
+        # Además de las de su máquina, las que todavía no tienen máquina
+        # asignada (la tablet las muestra aparte, debajo).
+        ops += [dict(o, sin_maquina=True) for o in _planta_operaciones_abiertas(sin_maquina=True)]
+    regs = [_planta_registro_dict(r) for r in query("""SELECT b.*, n.numero novedad_numero
+        FROM planta_bandeja b LEFT JOIN novedades_produccion n ON n.id=b.novedad_id
+        WHERE b.tablet_id=? ORDER BY b.id DESC LIMIT 20""", (t["id"],))]
+    return jsonify({"tablet": {"id": t["id"], "nombre": t["nombre"]},
+                    "maquina": {"id": t["maquina_id"], "codigo": t["maquina_codigo"], "nombre": t["maquina_nombre"]},
+                    "por_maquina": por_maquina, "empleados": empleados, "operaciones": ops,
+                    "motivos_parada": _planta_motivos_parada(t["maquina_id"]),
+                    "registros": regs, "hora_servidor": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+
+
+# ── Tablero de planta (en vivo) ──────────────────────────────────────────────
+# Cada tablet manda cada pocos segundos lo que está mostrando: operario,
+# operación, produciendo o en pausa y por qué. Queda solo en memoria: si el
+# servidor se reinicia, las tablets lo vuelven a mandar en la vuelta siguiente.
+# El tablero (/tablero-planta) lo junta con lo declarado hoy en la bandeja.
+_planta_vivo = {}                     # tablet_id -> estado que mandó + hora en que llegó
+PLANTA_VIVO_CAMPOS = ("pantalla", "empleado_id", "empleado", "orden_operacion_id", "pausado", "motivo",
+                      "pausa_seg", "trabajado_seg", "ok", "nok", "en_cola")
+PLANTA_VIVO_VENCE_SEG = 30           # sin noticias de la tablet en ese tiempo = desconectada
+
+
+@app.route("/api/tablet/vivo", methods=["POST"])
+@tablet_requerida
+def tablet_vivo():
+    d = request.get_json(silent=True) or {}
+    _planta_vivo[g.tablet["id"]] = dict({k: d.get(k) for k in PLANTA_VIVO_CAMPOS}, visto=datetime.now())
+    return jsonify({"ok": True})
+
+
+@app.route("/tablero-planta")
+@login_required(roles=["admin"])
+def tablero_planta_pagina():
+    with open(os.path.join(BASE_DIR, "templates", "tablero_planta.html"), encoding="utf-8") as f:
+        return f.read(), 200, {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store"}
+
+
+def _num(v):
+    try:
+        return float(v or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+@app.route("/api/planta/tablero")
+@login_required(roles=["admin"])
+def planta_tablero():
+    ahora = datetime.now()
+    hoy = ahora.strftime("%Y-%m-%d")
+    tot = {"ok": 0.0, "nok": 0.0, "min": 0.0, "paradas": 0, "paradas_min": 0.0}
+    por_tablet, motivos = {}, {}
+    for r in query("""SELECT tablet_id, tipo, datos FROM planta_bandeja
+            WHERE estado!='Descartado' AND SUBSTR(COALESCE(hora_operario, recibido), 1, 10)=?""", (hoy,)):
+        try:
+            d = _json.loads(r["datos"] or "{}")
+        except ValueError:
+            continue
+        h = por_tablet.setdefault(r["tablet_id"], {"ok": 0.0, "nok": 0.0, "min": 0.0, "paradas": 0, "paradas_min": 0.0})
+        if r["tipo"] == "parada":
+            m = _num(d.get("minutos"))
+            for x in (h, tot):
+                x["paradas"] += 1
+                x["paradas_min"] += m
+            mot = str(d.get("motivo") or "Sin motivo")
+            motivos[mot] = motivos.get(mot, 0.0) + m
+        else:
+            for x in (h, tot):
+                x["ok"] += _num(d.get("cantidad_ok"))
+                x["nok"] += _num(d.get("cantidad_nok"))
+                x["min"] += _num(d.get("tiempo_min"))
+    tablets, resumen = [], {}
+    for t in query("""SELECT t.id, t.nombre, m.codigo maquina_codigo, m.nombre maquina_nombre
+            FROM planta_tablets t LEFT JOIN maquinas m ON m.id=t.maquina_id
+            WHERE t.activa=1 ORDER BY m.codigo, t.nombre"""):
+        v = _planta_vivo.get(t["id"])
+        edad = (ahora - v["visto"]).total_seconds() if v else None
+        op = None
+        if v is None or edad > PLANTA_VIVO_VENCE_SEG:
+            estado = "Desconectada"
+        elif v.get("pantalla") == "produciendo" and v.get("orden_operacion_id"):
+            estado = "En pausa" if v.get("pausado") else "Produciendo"
+        elif v.get("empleado_id"):
+            estado = "Eligiendo trabajo"
+        else:
+            estado = "Sin operario"
+        if estado in ("Produciendo", "En pausa"):
+            o = query("""SELECT oo.orden paso, oo.nombre, oo.qty_requerida, oo.qty_producida, oo.tiempo_ciclo_seg,
+                    o.numero ot, p.codigo pieza_codigo, p.nombre pieza_nombre
+                FROM orden_operaciones oo JOIN ordenes o ON o.id=oo.orden_id
+                LEFT JOIN productos p ON p.id=o.producto_id WHERE oo.id=?""", (v["orden_operacion_id"],), one=True)
+            if o:
+                op = dict(o, paso=f"{_num(o['paso']):g}",
+                          pieza=" · ".join(x for x in (o["pieza_codigo"], o["pieza_nombre"]) if x))
+        vivo = None
+        if v and estado != "Desconectada":
+            vivo = {k: v.get(k) for k in PLANTA_VIVO_CAMPOS}
+            # Los segundos se cuentan desde que llegó el aviso, no con el reloj de la tablet.
+            for k in ("pausa_seg", "trabajado_seg"):
+                if vivo.get(k) is not None:
+                    vivo[k] = _num(vivo[k]) + (edad if (k == "pausa_seg") == bool(v.get("pausado")) else 0)
+        resumen[estado] = resumen.get(estado, 0) + 1
+        tablets.append({"id": t["id"], "nombre": t["nombre"], "maquina_codigo": t["maquina_codigo"],
+                        "maquina_nombre": t["maquina_nombre"], "estado": estado, "vivo": vivo, "operacion": op,
+                        "ultima_conexion": _planta_visto.get(t["id"]), "hoy": por_tablet.get(t["id"], {})})
+    return jsonify({"tablets": tablets, "resumen": resumen, "hoy": tot,
+                    "motivos": [{"motivo": k, "min": round(m, 1)} for k, m in sorted(motivos.items(), key=lambda x: -x[1])[:8]],
+                    "hora_servidor": ahora.strftime("%Y-%m-%d %H:%M:%S")})
+
+
+@app.route("/api/tablet/registros", methods=["POST"])
+@tablet_requerida
+def tablet_registrar():
+    """Solo anota en la bandeja y responde: la tablet no espera a que se
+    procese. Un uuid repetido devuelve OK con duplicado=True."""
+    d = request.get_json(silent=True) or {}
+    uid = str(d.get("uuid") or "").strip()
+    if not re.fullmatch(r"[0-9a-fA-F-]{16,64}", uid):
+        return jsonify({"error": "Registro sin identificador válido"}), 400
+    tipo = d.get("tipo") or "produccion"
+    if tipo not in PLANTA_TIPOS:
+        return jsonify({"error": f"Tipo de registro desconocido: {tipo}"}), 400
+    datos = d.get("datos")
+    if not isinstance(datos, dict):
+        return jsonify({"error": "Registro sin datos"}), 400
+    hora = str(d.get("hora") or "")[:19] or None
+    db = get_db()
+    cur = db.execute("""INSERT OR IGNORE INTO planta_bandeja (uuid, tablet_id, tipo, datos, hora_operario)
+        VALUES (?,?,?,?,?)""", (uid, g.tablet["id"], tipo, _json.dumps(datos, ensure_ascii=False), hora))
+    db.commit()
+    _planta_aviso.set()
+    return jsonify({"ok": True, "duplicado": cur.rowcount == 0})
+
+
+# ── Procesador único ─────────────────────────────────────────────────────────
+
+def _planta_fecha(hora_operario, recibido):
+    """La hora real de carga en la tablet, salvo que el reloj de la tablet
+    esté muy corrido (más de 12 h contra la hora en que llegó)."""
+    try:
+        h = datetime.strptime(hora_operario, "%Y-%m-%d %H:%M:%S")
+        r = datetime.strptime(recibido, "%Y-%m-%d %H:%M:%S")
+        if abs((h - r).total_seconds()) <= 12 * 3600:
+            return hora_operario
+    except (TypeError, ValueError):
+        pass
+    return recibido
+
+
+def _planta_marca(rid):
+    return f"[tablet #{rid}]"
+
+
+def _planta_procesar(rid):
+    """Convierte un registro de la bandeja en novedad. Devuelve True si quedó
+    resuelto (Procesado o Error) y False si hay que reintentar más tarde."""
+    with app.app_context():
+        db = get_db()
+        r = db.execute("""SELECT b.*, t.nombre tablet_nombre, t.maquina_id, t.creado_por tablet_usuario
+            FROM planta_bandeja b JOIN planta_tablets t ON t.id=b.tablet_id WHERE b.id=?""", (rid,)).fetchone()
+        if not r or r["estado"] not in ("Pendiente", "Procesando"):
+            return True
+        try:
+            d = _json.loads(r["datos"] or "{}")
+        except ValueError:
+            d = {}
+
+        def error(msg):
+            db.execute("""UPDATE planta_bandeja SET estado='Error', error=?, intentos=intentos+1,
+                procesado=datetime('now','localtime') WHERE id=?""", (msg[:500], rid))
+            db.commit()
+            return True
+
+        if r["tipo"] == "parada":
+            return _planta_procesar_parada(db, r, d, error)
+
+        op = db.execute("SELECT id, orden_id FROM orden_operaciones WHERE id=?",
+                        (d.get("orden_operacion_id"),)).fetchone()
+        if not op:
+            return error("La operación ya no existe")
+        emp = db.execute("SELECT id, turno, nombre, apellido FROM empleados WHERE id=?",
+                         (d.get("empleado_id"),)).fetchone()
+        if not emp:
+            return error("El operario ya no existe")
+        usr = db.execute("SELECT id, username, nombre FROM usuarios WHERE id=?", (r["tablet_usuario"],)).fetchone() \
+            or db.execute("SELECT id, username, nombre FROM usuarios WHERE rol='admin' ORDER BY id LIMIT 1").fetchone()
+        obs = (d.get("obs") or "").strip()
+        payload = {
+            "orden_id": op["orden_id"], "orden_operacion_id": op["id"],
+            "empleado_id": emp["id"], "maquina_id": r["maquina_id"], "turno": emp["turno"],
+            "cantidad_producida": d.get("cantidad_ok") or 0,
+            "piezas_observadas": d.get("cantidad_nok") or 0,
+            "tiempo_real_min": d.get("tiempo_min") or 0,
+            "tiempo_perdido": d.get("tiempo_perdido_min") or 0,
+            "fecha": _planta_fecha(r["hora_operario"], r["recibido"]),
+            "obs": f"{r['tablet_nombre']} {_planta_marca(rid)}" + (" · ingresó con huella" if d.get("huella_id") else "")
+                   + (f" · sin huella, autorizó {_planta_admin_nombre(d.get('admin_id'))}" if d.get("admin_id") else "")
+                   + (f" · {obs}" if obs else ""),
+        }
+        db.execute("UPDATE planta_bandeja SET estado='Procesando' WHERE id=?", (rid,))
+        db.commit()
+        intentos = r["intentos"] or 0
+
+    try:
+        with app.test_request_context("/api/novedades", method="POST", json=payload):
+            session.update({"user_id": usr["id"], "username": usr["username"], "nombre": usr["nombre"],
+                            "rol": "operario", "rol_nombre": "Tablet de planta"})
+            resp = app.full_dispatch_request()
+            cuerpo = resp.get_json(silent=True) or {}
+            codigo = resp.status_code
+    except Exception as e:  # base bloqueada, etc.: se reintenta
+        cuerpo, codigo = {"error": f"Error interno: {e}"}, 500
+
+    with app.app_context():
+        db = get_db()
+        if codigo < 300 and cuerpo.get("id"):
+            db.execute("""UPDATE planta_bandeja SET estado='Procesado', novedad_id=?, error=NULL,
+                intentos=intentos+1, procesado=datetime('now','localtime') WHERE id=?""", (cuerpo["id"], rid))
+            db.commit()
+            return True
+        msg = str(cuerpo.get("error") or f"HTTP {codigo}")[:500]
+        if codigo < 500 and any(t in msg for t in PLANTA_ERRORES_LOTE):
+            db.execute("""UPDATE planta_bandeja SET estado='Pendiente', espera='lote', espera_ref=?, error=?,
+                reintentar_desde=NULL WHERE id=?""", (_planta_firma_lotes(db, payload["orden_id"]), msg, rid))
+            db.commit()
+            return True
+        intentos += 1
+        minutos = PLANTA_REINTENTOS_MIN[min(intentos, len(PLANTA_REINTENTOS_MIN)) - 1]
+        prox = (datetime.now() + timedelta(minutes=minutos)).strftime("%Y-%m-%d %H:%M:%S")
+        db.execute("""UPDATE planta_bandeja SET estado='Pendiente', error=?, intentos=?, reintentar_desde=?
+            WHERE id=?""", (msg, intentos, prox, rid))
+        db.commit()
+        return True
+
+
+def _planta_procesar_parada(db, r, d, error):
+    """Una pausa con motivo de la tablet queda como Trabajo no productivo del
+    operario. El TNP y el Procesado del registro van en la misma transacción,
+    así un corte en el medio no lo carga dos veces."""
+    motivo = str(d.get("motivo") or "").strip()[:80]
+    try:
+        minutos = round(float(d.get("minutos") or 0), 1)
+    except (TypeError, ValueError):
+        minutos = 0
+    if not motivo or minutos <= 0:
+        return error("Parada sin motivo o sin tiempo")
+    if not db.execute("SELECT 1 FROM empleados WHERE id=?", (d.get("empleado_id"),)).fetchone():
+        return error("El operario ya no existe")
+    maq = db.execute("SELECT nombre FROM maquinas WHERE id=?", (r["maquina_id"],)).fetchone()
+    op = db.execute("""SELECT oo.orden, oo.nombre, o.numero FROM orden_operaciones oo
+        JOIN ordenes o ON o.id=oo.orden_id WHERE oo.id=?""", (d.get("orden_operacion_id"),)).fetchone()
+    partes = [motivo, maq["nombre"] if maq else r["tablet_nombre"]]
+    if op:
+        partes.append(f"{op['numero']} paso {float(op['orden'] or 0):g} {op['nombre']}")
+    desc = " · ".join(p for p in partes if p) + " · tablet"
+    usr = r["tablet_usuario"] or (db.execute("SELECT id FROM usuarios WHERE rol='admin' ORDER BY id LIMIT 1").fetchone() or [None])[0]
+    numero = siguiente_numero("trabajo_no_productivo", "TNP-", 5, reservar=True)
+    tid = db.execute("""INSERT INTO trabajo_no_productivo (numero, empleado_id, descripcion, tiempo_min, fecha, creado_por)
+        VALUES (?,?,?,?,?,?)""", (numero, d.get("empleado_id"), desc, minutos,
+        _planta_fecha(d.get("desde"), r["recibido"]), usr)).lastrowid
+    d = dict(d, tnp_id=tid, tnp_numero=numero)
+    db.execute("""UPDATE planta_bandeja SET estado='Procesado', datos=?, error=NULL, intentos=intentos+1,
+        procesado=datetime('now','localtime') WHERE id=?""", (_json.dumps(d, ensure_ascii=False), r["id"]))
+    db.commit()
+    return True
+
+
+def _planta_firma_lotes(db, orden_id):
+    """Resumen de los lotes asignados a la OT: si cambia, se asignó algo."""
+    f = db.execute("""SELECT COUNT(*) n, COALESCE(MAX(id),0) m, COALESCE(SUM(cantidad_usada),0) s
+        FROM orden_lotes WHERE orden_id=?""", (orden_id,)).fetchone()
+    return f"{f['n']}|{f['m']}|{f['s']}"
+
+
+def _planta_revisar_esperas():
+    """Los que esperan lote vuelven a la cola cuando a su OT le asignaron lote."""
+    with app.app_context():
+        db = get_db()
+        cambio = False
+        for r in db.execute("SELECT id, datos, espera_ref FROM planta_bandeja WHERE estado='Pendiente' AND espera='lote'").fetchall():
+            try:
+                oid = _json.loads(r["datos"] or "{}").get("orden_operacion_id")
+            except ValueError:
+                continue
+            op = db.execute("SELECT orden_id FROM orden_operaciones WHERE id=?", (oid,)).fetchone()
+            if not op or _planta_firma_lotes(db, op["orden_id"]) != r["espera_ref"]:
+                db.execute("""UPDATE planta_bandeja SET espera=NULL, espera_ref=NULL, intentos=0,
+                    reintentar_desde=NULL WHERE id=?""", (r["id"],))
+                cambio = True
+        if cambio:
+            db.commit()
+
+
+def _planta_recuperar():
+    """Al arrancar: un registro que quedó 'Procesando' (se cortó la luz en el
+    medio) se da por Procesado si su novedad llegó a crearse; si no, vuelve a
+    Pendiente. Así nunca se carga dos veces."""
+    with app.app_context():
+        db = get_db()
+        for r in db.execute("SELECT id FROM planta_bandeja WHERE estado='Procesando'").fetchall():
+            n = db.execute("SELECT id FROM novedades_produccion WHERE obs LIKE ? ORDER BY id DESC LIMIT 1",
+                           (f"%{_planta_marca(r['id'])}%",)).fetchone()
+            if n:
+                db.execute("""UPDATE planta_bandeja SET estado='Procesado', novedad_id=?,
+                    procesado=datetime('now','localtime') WHERE id=?""", (n["id"], r["id"]))
+            else:
+                db.execute("UPDATE planta_bandeja SET estado='Pendiente' WHERE id=?", (r["id"],))
+        # Los que quedaron en Error por el viejo tope de 3 reintentos vuelven a
+        # intentarse (los de operación u operario borrado siguen en Error).
+        db.execute("""UPDATE planta_bandeja SET estado='Pendiente', reintentar_desde=NULL, procesado=NULL
+            WHERE estado='Error' AND intentos>3 AND error NOT IN ('La operación ya no existe', 'El operario ya no existe')""")
+        db.commit()
+
+
+def _planta_bucle():
+    _planta_recuperar()
+    espera = 2
+    revision = datetime.min
+    while True:
+        _planta_aviso.wait(espera)
+        _planta_aviso.clear()
+        try:
+            if (datetime.now() - revision).total_seconds() > 10:
+                revision = datetime.now()
+                _planta_revisar_esperas()
+            with app.app_context():
+                ids = [r["id"] for r in get_db().execute(
+                    """SELECT id FROM planta_bandeja WHERE estado='Pendiente' AND espera IS NULL
+                       AND (reintentar_desde IS NULL OR reintentar_desde<=?) ORDER BY id LIMIT 200""",
+                    (datetime.now().strftime("%Y-%m-%d %H:%M:%S"),)).fetchall()]
+            espera = 2
+            for rid in ids:
+                if not _planta_procesar(rid):
+                    espera = 10     # problema transitorio: dar un respiro antes de reintentar
+                    break
+        except Exception as e:
+            print(f"  [tablets] error en el procesador: {e}")
+            espera = 10
+
+
+def iniciar_procesador_planta():
+    global _planta_hilo
+    if _planta_hilo and _planta_hilo.is_alive():
+        return
+    _planta_hilo = threading.Thread(target=_planta_bucle, name="procesador-planta", daemon=True)
+    _planta_hilo.start()
+
+
+# ── Administración (Sistema → Tablets de planta) ──────────────────────────────
+
+def _planta_enlace(token):
+    host = request.host
+    if host.split(":")[0] in ("localhost", "127.0.0.1"):
+        puerto = host.split(":")[1] if ":" in host else "80"
+        host = f"{get_local_ip()}:{puerto}"
+    return f"http://{host}/tablet?t={token}"
+
+
+@app.route("/api/planta/tablets")
+@login_required(roles=["admin"])
+def planta_tablets():
+    filas = query("""SELECT t.*, m.codigo maquina_codigo, m.nombre maquina_nombre,
+            (SELECT COUNT(*) FROM planta_bandeja b WHERE b.tablet_id=t.id AND b.estado IN ('Pendiente','Procesando')) pendientes,
+            (SELECT COUNT(*) FROM planta_bandeja b WHERE b.tablet_id=t.id AND b.estado='Error') errores,
+            (SELECT MAX(recibido) FROM planta_bandeja b WHERE b.tablet_id=t.id) ultimo_registro,
+            (SELECT MAX(recibido) FROM planta_huellas h WHERE h.tablet_id=t.id) ultima_huella
+        FROM planta_tablets t LEFT JOIN maquinas m ON m.id=t.maquina_id ORDER BY t.activa DESC, t.nombre""")
+    res = []
+    for r in filas:
+        x = dict(r)
+        x["ultimo_contacto"] = _planta_visto.get(r["id"])
+        x["lector_visto"] = (_planta_lectores.get(r["lector_sn"]) or {}).get("visto") if r["lector_sn"] else None
+        x["enlace"] = _planta_enlace(r["token"])
+        res.append(x)
+    return jsonify(res)
+
+
+@app.route("/api/planta/tablets", methods=["POST"])
+@login_required(roles=["admin"])
+def planta_tablet_crear():
+    d = request.get_json(silent=True) or {}
+    nombre = (d.get("nombre") or "").strip()
+    maq = query("SELECT id, codigo FROM maquinas WHERE id=?", (d.get("maquina_id"),), one=True)
+    if not maq:
+        return jsonify({"error": "Elegí la máquina"}), 400
+    nombre = nombre or f"Tablet {maq['codigo']}"
+    tid = execute("""INSERT INTO planta_tablets (nombre, maquina_id, token, creado_por)
+        VALUES (?,?,?,?)""", (nombre, maq["id"], secrets.token_urlsafe(18), session["user_id"]))
+    return jsonify({"ok": True, "id": tid}), 201
+
+
+@app.route("/api/planta/tablets/<int:tid>", methods=["PUT"])
+@login_required(roles=["admin"])
+def planta_tablet_editar(tid):
+    d = request.get_json(silent=True) or {}
+    t = query("SELECT * FROM planta_tablets WHERE id=?", (tid,), one=True)
+    if not t:
+        return jsonify({"error": "Tablet no encontrada"}), 404
+    maq = query("SELECT id FROM maquinas WHERE id=?", (d.get("maquina_id", t["maquina_id"]),), one=True)
+    if not maq:
+        return jsonify({"error": "Elegí la máquina"}), 400
+    nombre = (d.get("nombre") if d.get("nombre") is not None else t["nombre"]).strip() or t["nombre"]
+    activa = 1 if d.get("activa", t["activa"]) else 0
+    execute("UPDATE planta_tablets SET nombre=?, maquina_id=?, activa=? WHERE id=?", (nombre, maq["id"], activa, tid))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/planta/tablets/<int:tid>/token", methods=["POST"])
+@login_required(roles=["admin"])
+def planta_tablet_token(tid):
+    """Enlace nuevo (tablet perdida o robada): el anterior deja de servir."""
+    if not query("SELECT 1 FROM planta_tablets WHERE id=?", (tid,), one=True):
+        return jsonify({"error": "Tablet no encontrada"}), 404
+    execute("UPDATE planta_tablets SET token=? WHERE id=?", (secrets.token_urlsafe(18), tid))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/planta/bandeja")
+@login_required(roles=["admin"])
+def planta_bandeja_lista():
+    cond, params = [], []
+    if request.args.get("estado") == "Esperando lote":
+        cond.append("b.estado='Pendiente' AND b.espera='lote'")
+    elif request.args.get("estado"):
+        cond.append("b.estado=?"); params.append(request.args["estado"])
+    if request.args.get("tablet_id"):
+        cond.append("b.tablet_id=?"); params.append(request.args["tablet_id"])
+    filas = query(f"""SELECT b.*, n.numero novedad_numero, t.nombre tablet_nombre, m.codigo maquina_codigo,
+            u.nombre resuelto_por_nombre
+        FROM planta_bandeja b JOIN planta_tablets t ON t.id=b.tablet_id
+        LEFT JOIN maquinas m ON m.id=t.maquina_id
+        LEFT JOIN novedades_produccion n ON n.id=b.novedad_id
+        LEFT JOIN usuarios u ON u.id=b.resuelto_por
+        {'WHERE ' + ' AND '.join(cond) if cond else ''}
+        ORDER BY b.id DESC LIMIT 500""", params)
+    emp = {r["id"]: f"{r['apellido'] or ''} {r['nombre'] or ''}".strip()
+           for r in query("SELECT id, nombre, apellido FROM empleados")}
+    ops = {}
+    res = []
+    for r in filas:
+        x = _planta_registro_dict(r)
+        x.update({"tablet_nombre": r["tablet_nombre"], "maquina_codigo": r["maquina_codigo"],
+                  "intentos": r["intentos"], "resuelto_por_nombre": r["resuelto_por_nombre"]})
+        oid = x["datos"].get("orden_operacion_id")
+        if oid not in ops:
+            o = query("""SELECT oo.orden paso, oo.nombre, o.numero ot FROM orden_operaciones oo
+                JOIN ordenes o ON o.id=oo.orden_id WHERE oo.id=?""", (oid,), one=True)
+            ops[oid] = f"{o['ot']} · {o['paso']} {o['nombre']}" if o else "(operación borrada)"
+        x["operacion"] = ops[oid]
+        x["empleado"] = emp.get(x["datos"].get("empleado_id"), "(sin operario)")
+        res.append(x)
+    totales = {r["estado"]: r["n"] for r in query("SELECT estado, COUNT(*) n FROM planta_bandeja GROUP BY estado")}
+    totales["Esperando lote"] = query("SELECT COUNT(*) n FROM planta_bandeja WHERE estado='Pendiente' AND espera='lote'", one=True)["n"]
+    return jsonify({"registros": res, "totales": totales})
+
+
+@app.route("/api/planta/operaciones")
+@login_required(roles=["admin"])
+def planta_operaciones():
+    return jsonify(_planta_operaciones_abiertas())
+
+
+@app.route("/api/planta/bandeja/<int:rid>/reprocesar", methods=["POST"])
+@login_required(roles=["admin"])
+def planta_bandeja_reprocesar(rid):
+    """Vuelve a Pendiente un registro con Error, opcionalmente corrigiendo
+    cantidades, tiempo, operación u operario."""
+    r = query("SELECT * FROM planta_bandeja WHERE id=?", (rid,), one=True)
+    if not r:
+        return jsonify({"error": "Registro no encontrado"}), 404
+    if r["estado"] != "Error" and not (r["estado"] == "Pendiente" and (r["espera"] or r["intentos"])):
+        return jsonify({"error": f"Solo se reprocesan registros con error, reintentando o esperando lote (este está {r['estado']})"}), 400
+    datos = _json.loads(r["datos"] or "{}")
+    cambios = (request.get_json(silent=True) or {}).get("datos") or {}
+    for k in ("cantidad_ok", "cantidad_nok", "tiempo_min", "tiempo_perdido_min"):
+        if k in cambios:
+            try:
+                datos[k] = max(0.0, float(cambios[k] or 0))
+            except (TypeError, ValueError):
+                return jsonify({"error": f"Valor inválido en {k}"}), 400
+    for k in ("orden_operacion_id", "empleado_id"):
+        if cambios.get(k):
+            datos[k] = int(cambios[k])
+    execute("""UPDATE planta_bandeja SET estado='Pendiente', datos=?, error=NULL, intentos=0, espera=NULL,
+        espera_ref=NULL, reintentar_desde=NULL, resuelto_por=? WHERE id=?""",
+        (_json.dumps(datos, ensure_ascii=False), session["user_id"], rid))
+    _planta_aviso.set()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/planta/bandeja/<int:rid>/descartar", methods=["POST"])
+@login_required(roles=["admin"])
+def planta_bandeja_descartar(rid):
+    r = query("SELECT estado, espera, intentos FROM planta_bandeja WHERE id=?", (rid,), one=True)
+    if not r:
+        return jsonify({"error": "Registro no encontrado"}), 404
+    if r["estado"] != "Error" and not (r["estado"] == "Pendiente" and (r["espera"] or r["intentos"])):
+        return jsonify({"error": "Solo se descartan registros con error"}), 400
+    execute("UPDATE planta_bandeja SET estado='Descartado', resuelto_por=?, procesado=datetime('now','localtime') WHERE id=?",
+            (session["user_id"], rid))
+    return jsonify({"ok": True})
+
+
+# ══ Tablets de planta: entrada con huella ═════════════════════════════════════
+# El operario no elige su nombre: apoya el dedo en el lector de huella de la
+# máquina. El lector reconoce la huella (las plantillas viven en el lector, no
+# en MetalERP) y manda al servidor el legajo; el servidor lo anota en
+# planta_huellas para la tablet que tiene asignado ese lector, y la tablet, que
+# pregunta cada segundo y medio, entra sola con ese operario.
+#
+#   Lector ZKTeco con "push" (ADMS): se configura en el lector la IP del
+#   servidor y el puerto 5000; habla con /iclock/* (protocolo del fabricante).
+#   Cualquier otro lector o puente: POST /api/planta/huella {sn, legajo, hora}.
+#
+# El lector se asigna a la tablet por su número de serie (Sistema → Tablets de
+# planta). Una marca vieja (el lector, al conectarse, sube todo su historial)
+# no inicia sesión: solo cuentan las de los últimos minutos.
+
+PLANTA_HUELLA_VENTANA_MIN = 10        # marcas más viejas que esto (hora del lector) se ignoran
+PLANTA_HUELLA_VIGENCIA_SEG = 60       # la tablet toma una marca solo si llegó hace menos de esto
+_planta_lectores = {}                 # sn -> {"visto", "ip"} (en memoria; para la pantalla de admin)
+
+
+def _planta_norm_legajo(v):
+    v = re.sub(r"\s+", "", str(v or ""))
+    return v.lstrip("0") or ("0" if v else "")
+
+
+def _planta_empleado_por_legajo(legajo):
+    buscado = _planta_norm_legajo(legajo)
+    if not buscado:
+        return None
+    for e in query("SELECT id, legajo, nombre, apellido FROM empleados WHERE activo=1 AND legajo IS NOT NULL"):
+        if _planta_norm_legajo(e["legajo"]) == buscado:
+            return e
+    return None
+
+
+def _planta_lector_visto(sn):
+    _planta_lectores[sn] = {"visto": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "ip": request.remote_addr}
+
+
+def _planta_anotar_huella(sn, legajo, hora=None, origen="api", tablet=None):
+    """Anota una marca. Devuelve (ok, motivo). Con tablet (simulada) no mira el lector."""
+    ahora = datetime.now()
+    if hora:
+        try:
+            h = datetime.strptime(str(hora).strip()[:19], "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return False, "hora inválida"
+        if abs((ahora - h).total_seconds()) > PLANTA_HUELLA_VENTANA_MIN * 60:
+            return False, "marca vieja"
+        hora = h.strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        hora = ahora.strftime("%Y-%m-%d %H:%M:%S")
+    if tablet is None:
+        tablet = query("SELECT id FROM planta_tablets WHERE lector_sn=? AND activa=1", (sn,), one=True)
+        if not tablet:
+            return False, "lector sin tablet asignada"
+    emp = _planta_empleado_por_legajo(legajo)
+    execute("""INSERT INTO planta_huellas (tablet_id, lector_sn, legajo, empleado_id, hora, origen)
+        VALUES (?,?,?,?,?,?)""", (tablet["id"], sn, str(legajo or "").strip(), emp["id"] if emp else None, hora, origen))
+    return True, "ok"
+
+
+# ── Lector ZKTeco por push (ADMS / iclock) ───────────────────────────────────
+
+def _zk_texto(t):
+    return t, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+
+@app.route("/iclock/cdata", methods=["GET", "POST"])
+def zk_cdata():
+    sn = (request.args.get("SN") or "").strip()
+    if not sn:
+        return _zk_texto("ERROR")
+    _planta_lector_visto(sn)
+    if request.method == "GET":
+        # Saludo inicial: Realtime=1 hace que mande cada marca en el momento.
+        return _zk_texto("\n".join([
+            f"GET OPTION FROM: {sn}", "ATTLOGStamp=None", "OPERLOGStamp=9999", "ATTPHOTOStamp=None",
+            "ErrorDelay=30", "Delay=2", "TransTimes=00:00;14:05", "TransInterval=1",
+            "TransFlag=TransData AttLog", "TimeZone=-3", "Realtime=1", "Encrypt=None"]) + "\n")
+    cuerpo = request.get_data(as_text=True) or ""
+    filas = [f for f in cuerpo.replace("\r", "").split("\n") if f.strip()]
+    if (request.args.get("table") or "").upper() == "ATTLOG":
+        # PIN \t AAAA-MM-DD HH:MM:SS \t estado \t verificación ...
+        for f in filas:
+            partes = f.split("\t")
+            if len(partes) >= 2:
+                _planta_anotar_huella(sn, partes[0], partes[1], "zkteco")
+    return _zk_texto(f"OK: {len(filas)}")
+
+
+@app.route("/iclock/getrequest", methods=["GET"])
+def zk_getrequest():
+    sn = (request.args.get("SN") or "").strip()
+    if sn:
+        _planta_lector_visto(sn)
+    return _zk_texto("OK")
+
+
+@app.route("/iclock/devicecmd", methods=["POST"])
+def zk_devicecmd():
+    return _zk_texto("OK")
+
+
+@app.route("/api/planta/huella", methods=["POST"])
+def planta_huella_generica():
+    """Para lectores de otra marca o un programa puente: {sn, legajo, hora?}.
+    Solo se acepta si el número de serie está asignado a una tablet activa."""
+    d = request.get_json(silent=True) or {}
+    sn = str(d.get("sn") or "").strip()
+    legajo = str(d.get("legajo") or "").strip()
+    if not sn or not legajo:
+        return jsonify({"error": "Faltan sn y legajo"}), 400
+    _planta_lector_visto(sn)
+    ok, motivo = _planta_anotar_huella(sn, legajo, d.get("hora"), "api")
+    if not ok:
+        return jsonify({"error": motivo}), 409
+    return jsonify({"ok": True})
+
+
+# ── Tablet ───────────────────────────────────────────────────────────────────
+
+def _planta_huella_dict(r):
+    nombre = " ".join(x for x in [r["apellido"], r["nombre"]] if x) if r["empleado_id"] else None
+    return {"id": r["id"], "empleado_id": r["empleado_id"], "legajo": r["legajo"], "nombre": nombre,
+            "hora": r["hora"], "recibido": r["recibido"]}
+
+
+@app.route("/api/tablet/huella")
+@tablet_requerida
+def tablet_huella():
+    """La última marca de esta tablet posterior a `desde`, si llegó hace menos de
+    un minuto. `ultima_id` le sirve a la tablet para no tomar una marca vieja
+    cuando recién arranca."""
+    t = g.tablet
+    desde = request.args.get("desde", type=int) or 0
+    limite = (datetime.now() - timedelta(seconds=PLANTA_HUELLA_VIGENCIA_SEG)).strftime("%Y-%m-%d %H:%M:%S")
+    r = query("""SELECT h.*, e.nombre, e.apellido FROM planta_huellas h
+        LEFT JOIN empleados e ON e.id=h.empleado_id
+        WHERE h.tablet_id=? AND h.id>? AND h.recibido>=? ORDER BY h.id DESC LIMIT 1""", (t["id"], desde, limite), one=True)
+    ult = query("SELECT MAX(id) m FROM planta_huellas WHERE tablet_id=?", (t["id"],), one=True)
+    return jsonify({"huella": _planta_huella_dict(r) if r else None, "ultima_id": (ult["m"] if ult else None) or 0,
+                    "lector": bool(t["lector_sn"]),
+                    "lector_visto": (_planta_lectores.get(t["lector_sn"]) or {}).get("visto") if t["lector_sn"] else None})
+
+
+# ── Administración ───────────────────────────────────────────────────────────
+
+@app.route("/api/planta/lectores")
+@login_required(roles=["admin"])
+def planta_lectores():
+    """Lectores que se comunicaron desde que arrancó el servidor (asignados o no)."""
+    asignados = {r["lector_sn"]: r["nombre"] for r in query(
+        "SELECT lector_sn, nombre FROM planta_tablets WHERE lector_sn IS NOT NULL")}
+    return jsonify([{"sn": sn, "visto": v["visto"], "ip": v["ip"], "tablet": asignados.get(sn)}
+                    for sn, v in sorted(_planta_lectores.items(), key=lambda x: x[1]["visto"], reverse=True)])
+
+
+@app.route("/api/planta/tablets/<int:tid>/lector", methods=["PUT"])
+@login_required(roles=["admin"])
+def planta_tablet_lector(tid):
+    d = request.get_json(silent=True) or {}
+    if not query("SELECT 1 FROM planta_tablets WHERE id=?", (tid,), one=True):
+        return jsonify({"error": "Tablet no encontrada"}), 404
+    sn = str(d.get("lector_sn") or "").strip() or None
+    if sn:
+        otra = query("SELECT nombre FROM planta_tablets WHERE lector_sn=? AND id!=?", (sn, tid), one=True)
+        if otra:
+            return jsonify({"error": f"Ese lector ya está asignado a {otra['nombre']}"}), 409
+    execute("UPDATE planta_tablets SET lector_sn=? WHERE id=?", (sn, tid))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/planta/tablets/<int:tid>/huella", methods=["POST"])
+@login_required(roles=["admin"])
+def planta_tablet_huella_simulada(tid):
+    """Probar sin lector: hace de cuenta que ese operario apoyó el dedo."""
+    d = request.get_json(silent=True) or {}
+    t = query("SELECT id, lector_sn FROM planta_tablets WHERE id=?", (tid,), one=True)
+    e = query("SELECT legajo FROM empleados WHERE id=? AND activo=1", (d.get("empleado_id"),), one=True)
+    if not t or not e:
+        return jsonify({"error": "Elegí la tablet y el operario"}), 400
+    if not str(e["legajo"] or "").strip():
+        return jsonify({"error": "Ese operario no tiene legajo cargado: sin legajo el lector no lo puede identificar"}), 400
+    _planta_anotar_huella(t["lector_sn"], e["legajo"], None, "simulada", tablet=t)
+    return jsonify({"ok": True})
+
+
+
+# ── Tablets de planta: ingreso de administrador sin huella ────────────────────
+# Si el lector falla o el operario no puede marcar, un administrador de
+# MetalERP pone su usuario y contraseña en la tablet y elige al operario de la
+# lista. La novedad queda con "sin huella, autorizó <administrador>".
+_planta_admin_fallos = {}             # tablet_id -> [cantidad, hasta]
+
+
+def _planta_admin_nombre(uid):
+    u = query("SELECT nombre, username FROM usuarios WHERE id=?", (uid,), one=True)
+    return (u["nombre"] or u["username"]) if u else f"usuario #{uid}"
+
+
+@app.route("/api/tablet/admin", methods=["POST"])
+@tablet_requerida
+def tablet_admin():
+    t = g.tablet
+    n, hasta = _planta_admin_fallos.get(t["id"], [0, None])
+    if hasta and datetime.now() < hasta:
+        return jsonify({"error": "Demasiados intentos. Esperá un minuto."}), 429
+    d = request.get_json(silent=True) or {}
+    u = query("SELECT * FROM usuarios WHERE username=? AND activo=1", (str(d.get("username") or "").strip(),), one=True)
+    if not u or u["password"] != hash_pw(d.get("password") or ""):
+        n += 1
+        _planta_admin_fallos[t["id"]] = [0, datetime.now() + timedelta(minutes=1)] if n >= 5 else [n, None]
+        return jsonify({"error": "Usuario o contraseña incorrectos"}), 401
+    if _rol_base(u["rol"]) != "admin":
+        return jsonify({"error": "Solo un administrador puede entrar sin huella"}), 403
+    _planta_admin_fallos.pop(t["id"], None)
+    return jsonify({"ok": True, "admin": {"id": u["id"], "nombre": u["nombre"] or u["username"]}})
 
 
 if __name__ == "__main__":
@@ -17061,6 +19145,7 @@ if __name__ == "__main__":
         _backfill_requerimientos_desde_compras()
         _backfill_requerimientos_desde_pedidos()
     iniciar_cotizacion_automatica()
+    iniciar_procesador_planta()
     ip = get_local_ip()
     
     # 1. Definimos el puerto en una variable única

@@ -83,12 +83,13 @@ h1{font-size:30px;margin:0 0 6px}
 </style>
 </head>
 <body>
-<div class="sim-banda">MODO PRUEBA · huella y contador SIMULADOS · no se guarda nada en MetalERP</div>
+<div class="sim-banda">MODO PRUEBA · huella y pulsos SIMULADOS · los ciclos SÍ se registran en el servidor</div>
 <header>
   <div class="maq" id="h-maq">Cargando…<small>&nbsp;</small></div>
   <div class="sp"></div>
   <div class="chip" id="h-oper" style="display:none"><span>👷</span><span id="h-oper-n"></span></div>
   <div class="chip"><span class="dot" id="h-srv"></span><span id="h-srv-t">Servidor</span></div>
+  <div class="chip" id="h-cola" style="display:none"><span>⏳</span><span id="h-cola-t"></span></div>
   <div class="chip"><span class="dot" id="h-sen"></span><span id="h-sen-t">Contador</span></div>
   <div class="reloj" id="h-reloj">--:--</div>
 </header>
@@ -143,6 +144,8 @@ h1{font-size:30px;margin:0 0 6px}
         <div class="big" id="p-tiempo">00:00:00</div>
         <div style="margin-top:10px;color:var(--mut);font-size:16px">Último ciclo / esperado</div>
         <div class="big" style="font-size:30px" id="p-ciclo">— / —</div>
+        <div style="margin-top:10px;color:var(--mut);font-size:16px">Registro en el servidor</div>
+        <div style="font-size:18px" id="p-srv">—</div>
       </div>
     </div>
     <div class="pie">
@@ -153,7 +156,8 @@ h1{font-size:30px;margin:0 0 6px}
       <div class="fila">
         <button class="btn sim" onclick="simCiclo()">+1 ciclo (simulado)</button>
         <button class="btn sim" id="btn-auto" onclick="toggleAuto()">Ciclos automáticos: NO</button>
-        <button class="btn sim" onclick="simCaida()">Cortar contador</button>
+        <button class="btn sim" onclick="simDuplicado()">Reenviar último (duplicado)</button>
+        <button class="btn sim" id="btn-red" onclick="toggleRed()">Cortar red</button>
       </div>
     </div>
   </section>
@@ -161,13 +165,13 @@ h1{font-size:30px;margin:0 0 6px}
   <!-- D. Resumen -->
   <section class="vista" id="v-res">
     <h1>Resumen del trabajo</h1>
-    <p class="sub">Revisá y declará las piezas NO OK antes de confirmar.</p>
+    <p class="sub">El trabajo quedó en pausa. Declará las piezas NO OK y confirmá.</p>
     <div class="res">
       <div class="caja">
         <div class="kv" id="r-kv"></div>
       </div>
       <div class="caja">
-        <div style="font-size:20px;margin-bottom:6px">Ciclos contados por la máquina</div>
+        <div style="font-size:20px;margin-bottom:6px">Ciclos registrados en el servidor</div>
         <div class="big" id="r-ciclos">0</div>
         <div style="font-size:20px;margin:16px 0 6px">Piezas NO OK (rechazadas)</div>
         <div class="stepper">
@@ -181,61 +185,74 @@ h1{font-size:30px;margin:0 0 6px}
     </div>
     <div class="pie">
       <button class="btn" onclick="volverProd()">◀ Seguir produciendo</button>
-      <button class="btn ok" onclick="pedirConfirm('¿Confirmar y registrar? (en modo prueba NO se guarda)', confirmarRes)">✔ Confirmar</button>
+      <button class="btn ok" onclick="confirmarRes()">✔ Confirmar</button>
     </div>
   </section>
 </main>
 
-<div class="ov" id="ov"><div class="dlg"><p id="ov-t"></p><div class="fila">
-  <button class="btn" onclick="cerrarConfirm()">Cancelar</button>
-  <button class="btn acc" id="ov-ok">Sí</button></div></div></div>
+<div class="ov" id="ov"><div class="dlg"><p id="ov-t"></p><div class="fila" id="ov-btns"></div></div></div>
 
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
-// MAQUETA. La huella y el contador se simulan acá; en la versión real los
-// resuelven el terminal biométrico y el servicio que lee la Haas, y el
-// servidor guarda la sesión y los eventos. Nada de esto escribe en la base.
+// MÓDULO DE PRUEBA. La huella y los pulsos del contador se simulan acá (en la
+// versión real los resuelven el terminal biométrico y el servicio que lee la
+// máquina). Lo que es real: la sesión de trabajo y cada ciclo se guardan en el
+// servidor; cada ciclo viaja con un uid único, queda en una cola local hasta
+// que el servidor lo confirma, y un reenvío no suma dos veces.
 // ─────────────────────────────────────────────────────────────────────────────
 const MAQ = new URLSearchParams(location.search).get('maquina') || 'T16';
-let D = null, emp = null, opSel = null;
-let ses = null;           // {op, inicio, ciclos, trabajadoMs, desde, pausada, ultCiclo}
-let autoId = null, sensorOk = true, srvOk = false;
+const COLA_KEY = 'hmi_cola_' + MAQ;
+let D = null, emp = null, opSel = null, ses = null;
+let autoId = null, srvOk = false, redCortada = false, enviando = false, ultimoUid = null, nokN = 0;
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fN = n => (Math.round((+n || 0) * 100) / 100).toLocaleString('es-AR');
 const hhmm = d => d.toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'});
-const dur = ms => { const s = Math.floor(ms/1000); return [s/3600|0, (s%3600)/60|0, s%60].map(x => String(x).padStart(2,'0')).join(':'); };
+const hora = s => s ? s.slice(11, 16) : '—';
+const dur = seg => { const s = Math.floor(seg); return [s/3600|0, (s%3600)/60|0, s%60].map(x => String(x).padStart(2,'0')).join(':'); };
+const nombreEmp = e => (e.nombre || '').trim() + ' ' + (e.apellido || '');
 
 function vista(v){ document.querySelectorAll('.vista').forEach(e => e.classList.toggle('on', e.id === 'v-' + v)); }
 
-async function cargar(){
-  try{
-    const r = await fetch('/api/hmi_test/datos?maquina=' + encodeURIComponent(MAQ), {credentials:'same-origin', cache:'no-store'});
-    if (!r.ok) throw new Error(r.status === 401 ? 'Sesión vencida: entrá a MetalERP de nuevo' : 'HTTP ' + r.status);
-    const d = await r.json(); srvOk = true; return d;
-  }catch(e){ srvOk = false; throw e; }
-  finally{ pintarEstados(); }
+// Cola local de ciclos sin confirmar (sobrevive a recargar la página).
+function leerCola(){ try{ return JSON.parse(localStorage.getItem(COLA_KEY) || '[]'); }catch(e){ return []; } }
+function guardarCola(c){ try{ localStorage.setItem(COLA_KEY, JSON.stringify(c)); }catch(e){} }
+
+async function api(url, body){
+  if (redCortada) throw new Error('red cortada (simulado)');
+  const r = await fetch(url, body === undefined ? {credentials:'same-origin', cache:'no-store'} :
+    {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  srvOk = true; pintarEstados();
+  let d = {}; try{ d = await r.json(); }catch(e){}
+  if (r.status === 401) throw Object.assign(new Error('Sesión de MetalERP vencida: volvé a entrar'), {status:401});
+  if (!r.ok) throw Object.assign(new Error(d.error || ('HTTP ' + r.status)), {status:r.status, data:d});
+  return d;
 }
 
 async function init(){
-  try{ D = await cargar(); }catch(e){ $('msg-ident').textContent = 'Sin conexión con el servidor: ' + e.message; $('msg-ident').className = 'msg-ident err'; return; }
+  try{ D = await api('/api/hmi_test/datos?maquina=' + encodeURIComponent(MAQ)); }
+  catch(e){ srvOk = !!e.status; pintarEstados(); $('msg-ident').textContent = 'Sin conexión con el servidor: ' + e.message; $('msg-ident').className = 'msg-ident err'; return; }
   const m = D.maquina;
   $('h-maq').innerHTML = esc(m.codigo) + ' · ' + esc(m.nombre) + '<small>' + esc([m.marca, m.modelo].filter(Boolean).join(' ') || 'Terminal de máquina') + '</small>';
   $('sim-emps').innerHTML = D.empleados.map(e =>
     `<button class="btn sim" onclick="simHuella(${e.id})">${esc(e.apellido)}, ${esc(e.nombre)}<br><small>Legajo ${esc(e.legajo || '—')}</small></button>`).join('')
     || '<span style="color:var(--mut)">No hay empleados activos cargados</span>';
+  // Recuperación: si quedó un trabajo abierto en esta máquina (corte de luz,
+  // recarga, tablet reiniciada), se retoma tal como está en el servidor.
+  if (D.sesion_activa){ tomarSesion(D.sesion_activa); aviso('Se recuperó el trabajo abierto en esta máquina.'); }
+  enviarCola();
 }
 
 // ── A. Identificación (simulada) ─────────────────────────────────────────────
 function simHuella(id){
   emp = D.empleados.find(e => e.id === id);
   $('huella').classList.remove('err'); $('msg-ident').className = 'msg-ident';
-  $('h-oper').style.display = ''; $('h-oper-n').textContent = emp.nombre.trim() + ' ' + emp.apellido;
+  $('h-oper').style.display = ''; $('h-oper-n').textContent = nombreEmp(emp);
   pintarOps(); vista('sel');
 }
 function simHuellaMala(){ $('huella').classList.add('err'); $('msg-ident').className = 'msg-ident err'; $('msg-ident').textContent = 'Huella no reconocida. Probá de nuevo o avisá al encargado.'; }
 function simLectorCaido(){ $('huella').classList.add('err'); $('msg-ident').className = 'msg-ident err'; $('msg-ident').textContent = 'Lector desconectado. Usá la alternativa (tarjeta o PIN) o avisá al encargado.'; }
-function salir(){ emp = null; opSel = null; $('h-oper').style.display = 'none'; $('huella').classList.remove('err'); $('msg-ident').innerHTML = '&nbsp;'; vista('ident'); }
+function salir(){ emp = null; opSel = null; ses = null; $('h-oper').style.display = 'none'; $('huella').classList.remove('err'); $('msg-ident').innerHTML = '&nbsp;'; vista('ident'); }
 
 // ── B. Selección ─────────────────────────────────────────────────────────────
 function pintarOps(){
@@ -256,91 +273,211 @@ function pintarOps(){
 function elegir(id){ opSel = D.operaciones.find(o => o.id === id); pintarOps(); }
 
 // ── C. Producción ────────────────────────────────────────────────────────────
-function iniciar(){
-  // Versión real: acá el servidor valida la operación (OT abierta, paso no
-  // completado, lotes asignados) y abre la sesión; si algo falta lo avisa YA.
-  ses = {op: opSel, inicio: new Date(), ciclos: 0, trabajadoMs: 0, desde: Date.now(), pausada: false, ultCiclo: null, ultMs: null};
-  $('p-ot').textContent = opSel.ot_numero;
-  $('p-pz').textContent = (opSel.pieza_codigo || '') + ' ' + (opSel.pieza_nombre || '');
-  $('p-op').textContent = 'Paso ' + opSel.paso + ' · ' + opSel.nombre;
-  $('p-emp').textContent = emp.nombre.trim() + ' ' + emp.apellido;
-  $('p-ini').textContent = hhmm(ses.inicio);
+async function iniciar(){
+  $('btn-iniciar').disabled = true;
+  try{
+    const s = await api('/api/hmi_test/sesiones', {maquina: MAQ, empleado_id: emp.id, orden_operacion_id: opSel.id});
+    tomarSesion(s);
+  }catch(e){
+    if (e.status === 409 && e.data && e.data.sesion_id){
+      aviso('Ya había un trabajo abierto en esta máquina: se retoma ese.');
+      tomarSesion(await api('/api/hmi_test/sesiones/' + e.data.sesion_id));
+    } else { aviso('No se pudo iniciar: ' + e.message); $('btn-iniciar').disabled = false; }
+  }
+}
+function tomarSesion(s){
+  ses = s; ses._t0 = Date.now();
+  emp = {id: s.empleado_id, nombre: s.emp_nombre, apellido: s.emp_apellido, legajo: s.legajo};
+  $('h-oper').style.display = ''; $('h-oper-n').textContent = nombreEmp(emp);
+  $('p-ot').textContent = s.ot_numero;
+  $('p-pz').textContent = (s.pieza_codigo || '') + ' ' + (s.pieza_nombre || '');
+  $('p-op').textContent = 'Paso ' + s.paso + ' · ' + s.op_nombre;
+  $('p-emp').textContent = nombreEmp(emp);
+  $('p-ini').textContent = hora(s.inicio);
   pintarProd(); vista('prod');
 }
-function trabajado(){ return ses.trabajadoMs + (ses.pausada ? 0 : Date.now() - ses.desde); }
+function actualizarSesion(s){ const ult = ses && ses.ultCiclo; ses = Object.assign(s, {_t0: Date.now(), ultCiclo: ult, ultMs: ses && ses.ultMs}); }
+function trabajado(){ return ses.trabajado_seg + (ses.estado === 'Produciendo' ? (Date.now() - ses._t0) / 1000 : 0); }
+function pendientesSesion(){ return ses ? leerCola().filter(e => e.sid === ses.id).length : 0; }
 function pintarProd(){
   if (!ses) return;
-  const o = ses.op, req = +o.qty_requerida || 0, prev = +o.qty_producida || 0, tot = prev + ses.ciclos;
+  const req = +ses.qty_requerida || 0, prev = +ses.qty_producida || 0, pend = pendientesSesion();
+  const tot = prev + ses.ciclos;
   $('p-cont').innerHTML = fN(ses.ciclos) + ` <small>esta sesión · ${fN(tot)} / ${fN(req)} total</small>`;
   const pct = req ? Math.min(100, tot / req * 100) : 0;
   $('p-bar').style.width = pct + '%';
   $('p-pct').textContent = Math.round(pct) + ' % del objetivo de la operación' + (req && tot >= req ? ' · objetivo alcanzado' : '');
   $('p-tiempo').textContent = dur(trabajado());
-  $('p-ciclo').textContent = (ses.ultCiclo ? fN(ses.ultCiclo) + ' s' : '—') + ' / ' + (o.tiempo_ciclo_seg ? fN(o.tiempo_ciclo_seg) + ' s' : '—');
+  $('p-ciclo').textContent = (ses.ultCiclo ? fN(ses.ultCiclo) + ' s' : '—') + ' / ' + (ses.tiempo_ciclo_seg ? fN(ses.tiempo_ciclo_seg) + ' s' : '—');
+  $('p-srv').innerHTML = `Sesión #${ses.id} · ${fN(ses.ciclos)} ciclos confirmados` +
+    (ses.duplicados ? ` · <span style="color:var(--warn)">${fN(ses.duplicados)} duplicados ignorados</span>` : '') +
+    (pend ? ` · <span style="color:var(--warn)">${pend} sin enviar</span>` : '') +
+    (ses.ultimo_evento ? `<br><span style="color:var(--mut)">último recibido ${hora(ses.ultimo_evento)}</span>` : '');
   const est = $('p-estado');
-  if (ses.pausada){ est.className = 'estado-grande pausa'; est.textContent = '⏸ EN PAUSA'; $('btn-pausa').textContent = '▶ Reanudar'; }
-  else if (!sensorOk){ est.className = 'estado-grande pausa'; est.textContent = '⚠ SIN SEÑAL DEL CONTADOR'; $('btn-pausa').textContent = '⏸ Pausar'; }
+  if (ses.estado === 'Pausada'){ est.className = 'estado-grande pausa'; est.textContent = '⏸ EN PAUSA'; $('btn-pausa').textContent = '▶ Reanudar'; }
+  else if (redCortada || !srvOk){ est.className = 'estado-grande pausa'; est.textContent = '⚠ SIN CONEXIÓN · se guarda y reenvía'; $('btn-pausa').textContent = '⏸ Pausar'; }
   else { est.className = 'estado-grande prod'; est.textContent = '● PRODUCIENDO'; $('btn-pausa').textContent = '⏸ Pausar'; }
 }
 function simCiclo(){
-  if (!ses || ses.pausada || !sensorOk) return;
+  // Pulso simulado. En la versión real lo genera el servicio que lee el
+  // contador de la máquina, no la pantalla.
+  if (!ses || ses.estado !== 'Produciendo') return;
   const now = Date.now();
   if (ses.ultMs) ses.ultCiclo = Math.round((now - ses.ultMs) / 100) / 10;
-  ses.ultMs = now; ses.ciclos++;
-  pintarProd(); const c = $('p-cont'); c.classList.remove('flash'); void c.offsetWidth; c.classList.add('flash');
+  ses.ultMs = now;
+  const c = leerCola();
+  c.push({sid: ses.id, uid: ses.id + '-' + now.toString(36) + '-' + Math.random().toString(36).slice(2, 8),
+          seq: c.length + 1, ts: new Date().toISOString()});
+  guardarCola(c);
+  const el = $('p-cont'); el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+  pintarProd(); enviarCola();
+}
+async function enviarCola(){
+  if (enviando) return; enviando = true;
+  try{
+    let c = leerCola();
+    while (c.length){
+      const ev = c[0];
+      try{
+        const r = await api('/api/hmi_test/sesiones/' + ev.sid + '/eventos', ev);
+        ultimoUid = ev;
+        if (ses && ses.id === ev.sid){ ses.ciclos = r.ciclos; ses.duplicados = r.duplicados; }
+      }catch(e){
+        if (!e.status){ srvOk = redCortada ? srvOk : false; break; }   // sin red: queda en cola
+        if (e.status === 409 || e.status === 404) aviso('Ciclo descartado: ' + e.message);
+        else break;
+      }
+      c = leerCola(); c.shift(); guardarCola(c);
+    }
+  } finally { enviando = false; pintarEstados(); pintarProd(); }
+}
+async function simDuplicado(){
+  // Reenvía el último ciclo ya confirmado, como pasaría tras un corte de red
+  // a mitad de un envío. El servidor tiene que ignorarlo.
+  if (!ultimoUid){ aviso('Todavía no se envió ningún ciclo.'); return; }
+  try{
+    const r = await api('/api/hmi_test/sesiones/' + ultimoUid.sid + '/eventos', ultimoUid);
+    if (ses && ses.id === ultimoUid.sid){ ses.ciclos = r.ciclos; ses.duplicados = r.duplicados; }
+    aviso(r.duplicado ? `Duplicado recibido e ignorado: siguen ${fN(r.ciclos)} ciclos.` : 'El servidor lo contó como nuevo (no debería pasar).');
+    pintarProd();
+  }catch(e){ aviso('No se pudo reenviar: ' + e.message); }
 }
 function toggleAuto(){
   if (autoId){ clearInterval(autoId); autoId = null; }
   else autoId = setInterval(simCiclo, 3000);
   $('btn-auto').textContent = 'Ciclos automáticos: ' + (autoId ? 'SÍ' : 'NO');
 }
-function simCaida(){ sensorOk = !sensorOk; pintarEstados(); pintarProd(); }
-function pausar(){
-  if (ses.pausada){ ses.desde = Date.now(); ses.pausada = false; }
-  else { ses.trabajadoMs = trabajado(); ses.pausada = true; }
+function toggleRed(){
+  redCortada = !redCortada;
+  $('btn-red').textContent = redCortada ? 'Volver a conectar' : 'Cortar red';
+  pintarEstados(); pintarProd();
+  if (!redCortada) enviarCola();
+}
+async function pausar(){
+  try{ actualizarSesion(await api('/api/hmi_test/sesiones/' + ses.id + (ses.estado === 'Pausada' ? '/reanudar' : '/pausa'), {})); }
+  catch(e){ aviso('No se pudo: ' + e.message); }
   pintarProd();
 }
 // ── D. Resumen ───────────────────────────────────────────────────────────────
-let nokN = 0;
-function finalizar(){
+async function finalizar(){
   if (autoId) toggleAuto();
-  if (!ses.pausada){ ses.trabajadoMs = trabajado(); ses.pausada = true; }
-  ses.fin = new Date(); nokN = 0;
-  $('r-kv').innerHTML = [
-    ['Operario', emp.nombre.trim() + ' ' + emp.apellido + ' (legajo ' + (emp.legajo || '—') + ')'],
+  await enviarCola();
+  if (pendientesSesion()){ aviso('Hay ciclos sin enviar al servidor. Reconectá la red antes de finalizar.'); return; }
+  try{
+    if (ses.estado === 'Produciendo') actualizarSesion(await api('/api/hmi_test/sesiones/' + ses.id + '/pausa', {}));
+    else actualizarSesion(await api('/api/hmi_test/sesiones/' + ses.id));
+  }catch(e){ aviso('No se pudo finalizar: ' + e.message); return; }
+  nokN = 0; pintarRes(); vista('res');
+}
+function datosRes(fin){
+  return [
+    ['Operario', nombreEmp(emp) + ' (legajo ' + (emp.legajo || '—') + ')'],
     ['Máquina', D.maquina.codigo + ' · ' + D.maquina.nombre],
-    ['OT', ses.op.ot_numero], ['Pieza', (ses.op.pieza_codigo || '') + ' ' + (ses.op.pieza_nombre || '')],
-    ['Operación', 'Paso ' + ses.op.paso + ' · ' + ses.op.nombre],
-    ['Inicio', hhmm(ses.inicio)], ['Fin', hhmm(ses.fin)], ['Tiempo trabajado', dur(ses.trabajadoMs)]
+    ['OT', ses.ot_numero], ['Pieza', (ses.pieza_codigo || '') + ' ' + (ses.pieza_nombre || '')],
+    ['Operación', 'Paso ' + ses.paso + ' · ' + ses.op_nombre],
+    ['Inicio', hora(ses.inicio)], ['Fin', fin ? hora(ses.fin) : '(al confirmar)'],
+    ['Tiempo trabajado', dur(ses.trabajado_seg)], ['Sesión', '#' + ses.id + (ses.duplicados ? ' · ' + ses.duplicados + ' duplicados ignorados' : '')]
   ].map(([k, v]) => `<b>${esc(k)}</b><span>${esc(v)}</span>`).join('');
-  pintarRes(); vista('res');
 }
 function nok(d){ nokN = Math.max(0, Math.min(ses.ciclos, nokN + d)); pintarRes(); }
-function pintarRes(){ $('r-ciclos').textContent = fN(ses.ciclos); $('r-nok').textContent = fN(nokN); $('r-ok').textContent = fN(ses.ciclos - nokN); }
-function volverProd(){ ses.pausada = false; ses.desde = Date.now(); delete ses.fin; pintarProd(); vista('prod'); }
-function confirmarRes(){
-  // Versión real: el servidor crea UNA novedad (OK, NO OK, tiempo, empleado,
-  // máquina) con la lógica actual de MetalERP. Acá no se guarda nada.
-  alertaFinal(`Modo prueba: se habría registrado una novedad de ${fN(ses.ciclos - nokN)} OK y ${fN(nokN)} NO OK en ${ses.op.ot_numero}. No se guardó nada.`);
+function pintarRes(){ $('r-kv').innerHTML = datosRes(false); $('r-ciclos').textContent = fN(ses.ciclos); $('r-nok').textContent = fN(nokN); $('r-ok').textContent = fN(ses.ciclos - nokN); }
+async function volverProd(){
+  try{ actualizarSesion(await api('/api/hmi_test/sesiones/' + ses.id + '/reanudar', {})); }catch(e){ aviso('No se pudo reanudar: ' + e.message); return; }
+  pintarProd(); vista('prod');
 }
-function alertaFinal(t){
-  $('ov-t').textContent = t; $('ov-ok').textContent = 'Listo';
-  $('ov-ok').onclick = () => { cerrarConfirm(); ses = null; opSel = null; pintarOps(); vista('sel'); };
+function confirmarRes(){
+  pedirConfirm(`¿Cerrar el trabajo con ${fN(ses.ciclos - nokN)} OK y ${fN(nokN)} NO OK?`, async () => {
+    try{ actualizarSesion(await api('/api/hmi_test/sesiones/' + ses.id + '/finalizar', {nok: nokN})); }
+    catch(e){ aviso('No se pudo cerrar: ' + e.message); return; }
+    preguntarNovedad();
+  });
+}
+function preguntarNovedad(){
+  dialogo(`Trabajo cerrado en el servidor (sesión #${ses.id}): ${fN(ses.ciclos)} ciclos, ${fN(ses.nok)} NO OK.<br><br>` +
+    `¿Crear también la <b>novedad real</b> en MetalERP? Esto descuenta material y avanza la OT como cualquier novedad.`,
+    [['No, solo prueba', terminar, ''], ['Crear novedad real', crearNovedad, 'ok']]);
+}
+async function crearNovedad(){
+  const ok = ses.ciclos - ses.nok;
+  try{
+    const n = await api('/api/novedades', {
+      orden_id: ses.orden_id, orden_operacion_id: ses.orden_operacion_id, empleado_id: ses.empleado_id,
+      maquina_id: ses.maquina_id, cantidad_producida: ok, piezas_observadas: ses.nok,
+      tiempo_real_min: Math.max(0.1, Math.round(ses.trabajado_seg / 6) / 10),
+      obs: 'HMI de prueba · sesión #' + ses.id});
+    try{ actualizarSesion(await api('/api/hmi_test/sesiones/' + ses.id + '/novedad', {novedad_id: n.id})); }catch(e){}
+    dialogo(`Novedad <b>${esc(n.numero)}</b> creada: ${fN(ok)} OK y ${fN(ses.nok)} NO OK en ${esc(ses.ot_numero)}. La podés ver en Novedades.`, [['Listo', terminar, 'ok']]);
+  }catch(e){
+    dialogo('MetalERP rechazó la novedad: ' + esc(e.message) + '<br><br>La sesión queda guardada igual.', [['Reintentar', crearNovedad, ''], ['Cerrar', terminar, 'ok']]);
+  }
+}
+async function terminar(){
+  cerrarConfirm(); ses = null; opSel = null;
+  try{ const d = await api('/api/hmi_test/datos?maquina=' + encodeURIComponent(MAQ)); D.operaciones = d.operaciones; D.por_maquina = d.por_maquina; }catch(e){}
+  pintarOps(); vista('sel');
+}
+// ── Diálogos grandes (evitan toques accidentales) ────────────────────────────
+function dialogo(html, botones){
+  $('ov-t').innerHTML = html;
+  const fila = $('ov-btns');
+  fila.innerHTML = botones.map((b, i) => `<button class="btn ${b[2] || ''}" data-i="${i}">${esc(b[0])}</button>`).join('');
+  fila.querySelectorAll('button').forEach(el => el.onclick = () => { const b = botones[+el.dataset.i]; cerrarConfirm(); b[1](); });
   $('ov').classList.add('on');
 }
-// ── Confirmaciones grandes (evitan toques accidentales) ──────────────────────
-function pedirConfirm(t, fn){ $('ov-t').textContent = t; $('ov-ok').textContent = 'Sí'; $('ov-ok').onclick = () => { cerrarConfirm(); fn(); }; $('ov').classList.add('on'); }
+function pedirConfirm(t, fn){ dialogo(esc(t), [['Cancelar', () => {}, ''], ['Sí', fn, 'acc']]); }
 function cerrarConfirm(){ $('ov').classList.remove('on'); }
-
-// ── Estado de servidor / contador / reloj ────────────────────────────────────
-function pintarEstados(){
-  $('h-srv').className = 'dot ' + (srvOk ? 'ok' : 'err'); $('h-srv-t').textContent = srvOk ? 'Servidor' : 'Sin servidor';
-  $('h-sen').className = 'dot ' + (sensorOk ? 'ok' : 'err'); $('h-sen-t').textContent = sensorOk ? 'Contador (sim.)' : 'Contador caído';
+let _avisoId = null;
+function aviso(t){
+  let el = $('aviso-flot');
+  if (!el){ el = document.createElement('div'); el.id = 'aviso-flot';
+    el.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#2b3641;color:#fff;padding:14px 22px;border-radius:12px;font-size:19px;z-index:60;max-width:90%;box-shadow:0 6px 24px rgba(0,0,0,.5)';
+    document.body.appendChild(el); }
+  el.textContent = t; el.style.display = '';
+  clearTimeout(_avisoId); _avisoId = setTimeout(() => el.style.display = 'none', 4500);
 }
-setInterval(() => { $('h-reloj').textContent = hhmm(new Date()); if (ses && !ses.fin) pintarProd(); }, 1000);
-setInterval(() => { cargar().then(d => { D.empleados = d.empleados; }).catch(() => {}); }, 10000);
+
+// ── Estado de servidor / cola / reloj ────────────────────────────────────────
+function pintarEstados(){
+  const ok = srvOk && !redCortada;
+  $('h-srv').className = 'dot ' + (ok ? 'ok' : 'err'); $('h-srv-t').textContent = redCortada ? 'Sin red (sim.)' : (srvOk ? 'Servidor' : 'Sin servidor');
+  $('h-sen').className = 'dot ok'; $('h-sen-t').textContent = 'Contador (sim.)';
+  const n = leerCola().length;
+  $('h-cola').style.display = n ? '' : 'none'; $('h-cola-t').textContent = n + ' sin enviar';
+}
+setInterval(() => { $('h-reloj').textContent = hhmm(new Date()); if (ses && $('v-prod').classList.contains('on')) pintarProd(); }, 1000);
+// Cada 2 s: reintenta la cola y relee la sesión del servidor (lo que ve el
+// operario es lo que el servidor confirmó, no lo que cree la pantalla).
+setInterval(async () => {
+  if (redCortada) return;
+  if (leerCola().length) enviarCola();
+  if (ses && $('v-prod').classList.contains('on')){
+    try{ actualizarSesion(await api('/api/hmi_test/sesiones/' + ses.id)); }
+    catch(e){ if (!e.status){ srvOk = false; pintarEstados(); } }
+  }
+}, 2000);
 $('h-reloj').textContent = hhmm(new Date());
 init();
+
 </script>
 </body>
 </html>

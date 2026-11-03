@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>MetalERP</title>
+<style>
+{% include "app/estilos.css" %}
+</style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+<div class="app">
+{% include "app/menu.html" %}
+
+  <div class="main">
+{% include "app/paginas/dash_operativo.html" %}
+{% include "app/paginas/dash_economico.html" %}
+{% include "app/paginas/ordenes.html" %}
+{% include "app/paginas/procesos.html" %}
+{% include "app/paginas/ops_sector.html" %}
+{% include "app/paginas/scheduling.html" %}
+{% include "app/paginas/novedades_ot.html" %}
+{% include "app/paginas/ott.html" %}
+{% include "app/paginas/mrp.html" %}
+{% include "app/paginas/dash_requerimientos.html" %}
+{% include "app/paginas/indicadores_compras.html" %}
+{% include "app/paginas/requerimientos_productivos.html" %}
+{% include "app/paginas/maquinas.html" %}
+{% include "app/paginas/rendimiento.html" %}
+{% include "app/paginas/inventario.html" %}
+{% include "app/paginas/movimientos.html" %}
+{% include "app/paginas/lotes.html" %}
+{% include "app/paginas/recepciones.html" %}
+{% include "app/paginas/proveedores.html" %}
+{% include "app/paginas/remitir.html" %}
+{% include "app/paginas/remitos_emitidos.html" %}
+{% include "app/paginas/presupuestos.html" %}
+{% include "app/paginas/clientes.html" %}
+{% include "app/paginas/configuracion.html" %}
+{% include "app/paginas/carga_masiva.html" %}
+{% include "app/paginas/usuarios.html" %}
+{% include "app/paginas/ia.html" %}
+{% include "app/paginas/auditoria.html" %}
+{% include "app/paginas/registro_cambios.html" %}
+{% include "app/paginas/tablets_planta.html" %}
+{% include "app/paginas/rrhh.html" %}
+{% include "app/paginas/ctrl_prod.html" %}
+{% include "app/paginas/pronostico_ventas.html" %}
+{% include "app/paginas/oc_clientes.html" %}
+{% include "app/paginas/solicitudes.html" %}
+  </div>
+</div>
+
+{% include "app/modales/sistema.html" %}
+{% include "app/modales/orden_trabajo.html" %}
+{% include "app/modales/pronosticos.html" %}
+{% include "app/modales/productos.html" %}
+{% include "app/modales/maquinas.html" %}
+{% include "app/modales/materiales_proveedores.html" %}
+{% include "app/modales/ventas.html" %}
+{% include "app/modales/requerimientos.html" %}
+{% include "app/modales/usuarios.html" %}
+{% include "app/modales/novedades.html" %}
+{% include "app/modales/pedidos_clientes.html" %}
+{% include "app/modales/compras.html" %}
+{% include "app/modales/ot_detalle.html" %}
+{% include "app/modales/lotes.html" %}
+{% include "app/modales/novedades_filtros.html" %}
+{% include "app/modales/ot_operacion.html" %}
+{% include "app/modales/copiar_producto.html" %}
+<script>
+const ROL='{{ rol }}';
+const PERMS={{ perms|tojson }};
+// El permiso lo resuelve el SERVIDOR (ver puede_ver_monetario en server.py) y
+// lo inyecta ya calculado: no se vuelve a deducir acá para que no haya dos
+// fuentes de verdad. Si el valor no llegara, se asume lo más restrictivo.
+const VER_MONETARIO = {{ ver_monetario|tojson }} === true;
+// Asistente IA: admin, o permiso "Asistente IA" dado por un admin (puede_usar_ia
+// en server.py). Es solo para mostrar el globo: el servidor vuelve a controlar.
+const IA_PERMITIDA = {{ ia|tojson }} === true;
+// Moneda del sistema (ARS / USD). Cada documento trae la suya (r.moneda): lo
+// emitido antes de un cambio de moneda se sigue mostrando en la original.
+const MONEDA = {{ moneda|tojson }} || 'ARS';
+{% include "app/js/base.js" %}
+{% include "app/js/asistente_ia.js" %}
+{% include "app/js/scheduling.js" %}
+{% include "app/js/utilidades.js" %}
+{% include "app/js/tableros.js" %}
+{% include "app/js/ordenes.js" %}
+{% include "app/js/registro_cambios.js" %}
+{% include "app/js/tablets_planta.js" %}
+{% include "app/js/auditoria.js" %}
+{% include "app/js/permisos.js" %}
+{% include "app/js/ott.js" %}
+{% include "app/js/productos.js" %}
+{% include "app/js/maquinas.js" %}
+{% include "app/js/inventario.js" %}
+{% include "app/js/proveedores.js" %}
+{% include "app/js/presupuestos.js" %}
+{% include "app/js/pronosticos.js" %}
+{% include "app/js/usuarios_roles.js" %}
+{% include "app/js/configuracion.js" %}
+{% include "app/js/rrhh.js" %}
+{% include "app/js/control_produccion.js" %}
+{% include "app/js/trabajo_no_productivo.js" %}
+{% include "app/js/pedidos_clientes.js" %}
+{% include "app/js/compras.js" %}
+{% include "app/js/mrp.js" %}
+{% include "app/js/requerimientos.js" %}
+{% include "app/js/ot_operaciones.js" %}
+{% include "app/js/datos_globales.js" %}
+{% include "app/js/materiales_movimientos.js" %}
+{% include "app/js/operaciones_tercerizadas.js" %}
+{% include "app/js/lotes.js" %}
+{% include "app/js/novedades_ot.js" %}
+{% include "app/js/rendimiento.js" %}
+{% include "app/js/remitir.js" %}
+{% include "app/js/inicio.js" %}
+</script>
+{% include "app/modales/lote_y_buscadores.html" %}
+<script>
+{% include "app/js/selector_buscador.js" %}
+</script>
+<script>
+{% include "app/js/ayudas.js" %}
+</script>
+</body>
+</html>

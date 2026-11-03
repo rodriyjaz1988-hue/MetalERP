@@ -332,6 +332,119 @@
   @media(max-width:600px){ .ia-67-escena{height:min(46vh,90vw);bottom:96px} .ia-67-mano{width:26vw} .ia-67-mano.izq{right:calc(50% + 20vw)} .ia-67-mano.der{left:calc(50% + 20vw)} .ia-67-cerrar{top:auto;bottom:40px;right:50%;transform:translateX(50%);white-space:nowrap} }
   @media(prefers-reduced-motion:reduce){ .ia-67,.ia-67 *{animation:none!important} }
   @media print{ .ia-67{display:none} }
+  /* /pingpong: partido de ping pong contra Mártin */
+  .ia-pp{position:fixed;inset:0;z-index:10050;background:rgba(10,14,28,.96);display:flex;align-items:center;justify-content:center;outline:none;touch-action:none;user-select:none;-webkit-user-select:none;animation:iaDiscoEntra .25s ease-out}
+  .ia-pp-caja{display:flex;flex-direction:column;gap:12px}
+  .ia-pp-tablero{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;color:#fff}
+  .ia-pp-lado{display:flex;align-items:center;gap:10px;min-width:0}
+  .ia-pp-lado.mar{justify-content:flex-end}
+  .ia-pp-nom{font-size:15px;font-weight:600;color:rgba(255,255,255,.85)}
+  .ia-pp-pts{font-size:40px;line-height:1;font-weight:800;font-variant-numeric:tabular-nums;min-width:1.3em;text-align:center}
+  .ia-pp-pts.sube{animation:iaPPSube .5s ease-out}
+  @keyframes iaPPSube{0%{transform:scale(1.6);color:#FFD23F}100%{transform:scale(1)}}
+  .ia-pp-pala{width:14px;height:30px;border-radius:7px;background:#D7263D;box-shadow:inset -3px 0 0 rgba(0,0,0,.25);flex:none}
+  .ia-pp-info{font-size:12.5px;color:rgba(255,255,255,.7);text-align:center;white-space:nowrap}
+  .ia-pp-cara{position:relative;width:54px;height:54px;flex:none}
+  .ia-pp-cara img{width:54px;height:54px;border-radius:50%;background:#fff;border:2px solid rgba(255,255,255,.85);display:block;object-fit:cover}
+  .ia-pp-dice{position:absolute;top:calc(100% + 10px);right:0;z-index:3;background:#fff;color:#2C2C2A;font-size:13px;line-height:1.35;padding:8px 12px;border-radius:12px;width:max-content;max-width:min(260px,70vw);box-shadow:0 6px 20px rgba(0,0,0,.35);opacity:0;transform:translateY(-4px);transition:opacity .15s,transform .15s;pointer-events:none}
+  .ia-pp-dice::before{content:'';position:absolute;top:-6px;right:20px;width:12px;height:12px;background:#fff;transform:rotate(45deg)}
+  .ia-pp-dice.ver{opacity:1;transform:none}
+  .ia-pp-mesa{position:relative;border-radius:10px;box-shadow:0 18px 50px rgba(0,0,0,.55)}
+  .ia-pp-mesa.jugando{cursor:none}
+  .ia-pp-mesa canvas{display:block;border-radius:10px}
+  .ia-pp-msg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:rgba(10,14,28,.78);color:#fff;font-size:15px;font-weight:600;padding:10px 18px;border-radius:22px;text-align:center;pointer-events:none;white-space:nowrap;display:none}
+  .ia-pp-msg.ver{display:block}
+  .ia-pp-msg.fin{pointer-events:auto;white-space:normal;padding:20px 26px;border-radius:14px;background:rgba(10,14,28,.92);min-width:240px;cursor:default}
+  .ia-pp-msg h3{margin:0 0 4px;font-size:24px;font-weight:800;color:#fff}
+  .ia-pp-res{font-size:34px;font-weight:800;font-variant-numeric:tabular-nums;margin:2px 0}
+  .ia-pp-hist{font-size:12.5px;font-weight:400;color:rgba(255,255,255,.7);margin-bottom:14px}
+  .ia-pp-bots{display:flex;gap:8px;justify-content:center}
+  .ia-pp-bots button{font:inherit;font-size:13px;font-weight:600;border:none;border-radius:20px;padding:9px 18px;cursor:pointer}
+  .ia-pp-revancha{background:#FFD23F;color:#2C2C2A}
+  .ia-pp-revancha:hover{background:#FFE07A}
+  .ia-pp-salir{background:rgba(255,255,255,.14);color:#fff}
+  .ia-pp-salir:hover{background:rgba(255,255,255,.24)}
+  .ia-pp-ayuda{font-size:12px;color:rgba(255,255,255,.6);text-align:center}
+  .ia-pp-cerrar{position:absolute;top:16px;right:16px;z-index:4;display:flex;align-items:center;gap:7px;background:#fff;color:#2C2C2A;border:none;border-radius:20px;padding:9px 16px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.35)}
+  .ia-pp-cerrar svg{width:13px;height:13px}
+  .ia-pp-cerrar:hover{background:#FCEBEB;color:#A32D2D}
+  @media(max-width:600px){ .ia-pp{align-items:flex-start;padding-top:66px} .ia-pp-pts{font-size:30px} .ia-pp-nom{font-size:13px} .ia-pp-info{display:none} .ia-pp-tablero{grid-template-columns:1fr 1fr} .ia-pp-cara,.ia-pp-cara img{width:44px;height:44px} }
+  @media print{ .ia-pp{display:none} }
+  /* /chess: partida de ajedrez contra Mártin */
+  .ia-aj{position:fixed;inset:0;z-index:10050;background:rgba(10,14,28,.96);display:flex;align-items:center;justify-content:center;outline:none;overflow:auto;user-select:none;-webkit-user-select:none;animation:iaDiscoEntra .25s ease-out;--c:64px}
+  .ia-aj-caja{display:flex;gap:24px;align-items:flex-start;padding:16px;margin:auto}
+  .ia-aj-izq{position:relative;flex:none}
+  .ia-aj-tab{display:grid;grid-template-columns:repeat(8,var(--c));grid-template-rows:repeat(8,var(--c));border-radius:4px;overflow:hidden;box-shadow:0 0 0 6px #5C3B1E,0 18px 50px rgba(0,0,0,.55);touch-action:none}
+  .ia-aj-c{position:relative;display:flex;align-items:center;justify-content:center}
+  .ia-aj-c.cla{background:#EED8B4}
+  .ia-aj-c.osc{background:#B5835A}
+  .ia-aj-c.mia{cursor:grab}
+  .ia-aj-c.va,.ia-aj-c.come{cursor:pointer}
+  .ia-aj-c.ult::before,.ia-aj-c.sel::before,.ia-aj-c.jaque::before{content:'';position:absolute;inset:0;pointer-events:none}
+  .ia-aj-c.ult::before{background:rgba(255,214,64,.42)}
+  .ia-aj-c.sel::before{background:rgba(255,196,30,.66)}
+  .ia-aj-c.jaque::before{background:radial-gradient(circle,rgba(255,40,40,.95) 0,rgba(255,40,40,.55) 45%,rgba(255,40,40,0) 72%)}
+  .ia-aj-c.va::after{content:'';position:absolute;width:30%;height:30%;border-radius:50%;background:rgba(30,40,30,.34);pointer-events:none}
+  .ia-aj-c.come::after{content:'';position:absolute;inset:5%;border-radius:50%;border:calc(var(--c)*.08) solid rgba(30,40,30,.34);pointer-events:none}
+  .ia-aj-p{position:relative;z-index:1;font-family:"Segoe UI Symbol","Noto Sans Symbols 2","DejaVu Sans",sans-serif;font-size:calc(var(--c)*.8);line-height:1;pointer-events:none}
+  .ia-aj-p.bl{color:#FFFDF7;-webkit-text-stroke:1.4px #2A1E14;text-shadow:0 2px 3px rgba(0,0,0,.35)}
+  .ia-aj-p.ne{color:#1C1A1D;-webkit-text-stroke:.6px #000;text-shadow:0 2px 3px rgba(0,0,0,.3)}
+  .ia-aj-co{position:absolute;z-index:1;font-size:calc(var(--c)*.17);font-weight:700;line-height:1;pointer-events:none}
+  .ia-aj-co.f{right:5%;bottom:4%}
+  .ia-aj-co.r{left:5%;top:5%}
+  .ia-aj-c.cla .ia-aj-co{color:#A9764C}
+  .ia-aj-c.osc .ia-aj-co{color:#F3E2C6}
+  .ia-aj-fantasma{position:fixed;z-index:10060;transform:translate(-50%,-55%);font-size:calc(var(--c)*.95)}
+  .ia-aj-aviso{position:absolute;inset:0;z-index:3;display:none;align-items:center;justify-content:center}
+  .ia-aj-aviso.ver{display:flex}
+  .ia-aj-card{background:rgba(10,14,28,.93);color:#fff;border-radius:14px;padding:20px 24px;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.5);max-width:86%}
+  .ia-aj-card h3{margin:0 0 6px;font-size:22px;font-weight:800;color:#fff}
+  .ia-aj-card p{margin:0 0 6px;font-size:13px;color:rgba(255,255,255,.8)}
+  .ia-aj-card .hist{font-size:12px;color:rgba(255,255,255,.6);margin-bottom:14px}
+  .ia-aj-card .bots{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+  .ia-aj-card button,.ia-aj-bots button{font:inherit;font-size:13px;font-weight:600;border:none;border-radius:20px;padding:9px 16px;cursor:pointer}
+  .ia-aj-pri{background:#FFD23F;color:#2C2C2A}
+  .ia-aj-pri:hover{background:#FFE07A}
+  .ia-aj-sec{background:rgba(255,255,255,.14);color:#fff}
+  .ia-aj-sec:hover{background:rgba(255,255,255,.24)}
+  .ia-aj-card .ia-aj-promo{display:flex;gap:8px;justify-content:center;margin-top:10px}
+  .ia-aj-card .ia-aj-promo button{width:calc(var(--c)*1.1);height:calc(var(--c)*1.1);border-radius:10px;background:#EED8B4;padding:0;display:flex;align-items:center;justify-content:center}
+  .ia-aj-card .ia-aj-promo button:hover{background:#FFE07A}
+  .ia-aj-lado{width:260px;display:flex;flex-direction:column;gap:12px;color:#fff}
+  .ia-aj-martin{position:relative;display:flex;align-items:center;gap:10px}
+  .ia-aj-martin b{font-size:15px}
+  .ia-aj-cara{position:relative;width:54px;height:54px;flex:none;border-radius:50%}
+  .ia-aj-cara img{width:54px;height:54px;border-radius:50%;background:#fff;border:2px solid rgba(255,255,255,.85);display:block}
+  .ia-aj-cara.piensa::after{content:'';position:absolute;inset:-6px;border-radius:50%;border:3px solid transparent;border-top-color:#FFD23F;border-right-color:#FFD23F;animation:iaAjGira .9s linear infinite}
+  @keyframes iaAjGira{to{transform:rotate(360deg)}}
+  .ia-aj-estado{font-size:12.5px;color:rgba(255,255,255,.7);margin-top:2px}
+  .ia-aj-dice-zona{min-height:54px;margin-top:-4px}
+  .ia-aj-dice{position:relative;display:inline-block;z-index:5;background:#fff;color:#2C2C2A;font-size:13px;line-height:1.35;padding:8px 12px;border-radius:12px;width:max-content;max-width:250px;box-shadow:0 6px 20px rgba(0,0,0,.35);opacity:0;transform:translateY(-4px);transition:opacity .15s,transform .15s;pointer-events:none}
+  .ia-aj-dice::before{content:'';position:absolute;top:-6px;left:21px;width:12px;height:12px;background:#fff;transform:rotate(45deg)}
+  .ia-aj-dice.ver{opacity:1;transform:none}
+  .ia-aj-caps{display:flex;flex-direction:column;gap:4px;font-size:12px;color:rgba(255,255,255,.6);background:rgba(255,255,255,.06);border-radius:10px;padding:8px 10px}
+  .ia-aj-caps>div{display:flex;justify-content:space-between;align-items:center;gap:8px;min-height:24px}
+  .ia-aj-caps>div>span:last-child{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center}
+  .ia-aj-caps .ia-aj-p{font-size:19px}
+  .ia-aj-caps .ia-aj-p.bl{-webkit-text-stroke:.8px #2A1E14}
+  .ia-aj-caps em{font-style:normal;color:#FFD23F;font-weight:700;margin-left:5px}
+  .ia-aj-jugadas{height:170px;overflow:auto;background:rgba(255,255,255,.06);border-radius:10px;padding:6px 10px;font-size:13px;display:grid;grid-template-columns:2.4em 1fr 1fr;align-content:start;row-gap:2px;font-variant-numeric:tabular-nums;user-select:text;-webkit-user-select:text}
+  .ia-aj-jugadas .n{color:rgba(255,255,255,.45)}
+  .ia-aj-jugadas .vacio{grid-column:1/-1;color:rgba(255,255,255,.45);font-size:12px;padding:4px 0}
+  .ia-aj-op{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12.5px;color:rgba(255,255,255,.7)}
+  .ia-aj-seg{display:flex;background:rgba(255,255,255,.1);border-radius:18px;padding:3px}
+  .ia-aj-seg button{font:inherit;font-size:12px;font-weight:600;border:none;background:none;color:rgba(255,255,255,.75);padding:5px 10px;border-radius:15px;cursor:pointer}
+  .ia-aj-seg button.on{background:#fff;color:#2C2C2A}
+  .ia-aj-bots{display:flex;gap:8px}
+  .ia-aj-bots button{flex:1;background:rgba(255,255,255,.14);color:#fff;padding:9px 10px}
+  .ia-aj-bots button:hover:not(:disabled){background:rgba(255,255,255,.24)}
+  .ia-aj-bots button:disabled{opacity:.4;cursor:not-allowed}
+  .ia-aj-bots button.confirma{background:#FCEBEB;color:#A32D2D}
+  .ia-aj-cerrar{position:fixed;top:16px;right:16px;z-index:6;display:flex;align-items:center;gap:7px;background:#fff;color:#2C2C2A;border:none;border-radius:20px;padding:9px 16px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.35)}
+  .ia-aj-cerrar svg{width:13px;height:13px}
+  .ia-aj-cerrar:hover{background:#FCEBEB;color:#A32D2D}
+  @media(max-width:760px){ .ia-aj{align-items:flex-start} .ia-aj-caja{flex-direction:column;align-items:center;gap:16px;padding:66px 12px 24px} .ia-aj-lado{width:calc(var(--c)*8)} .ia-aj-jugadas{height:100px} .ia-aj-cerrar{position:absolute} }
+  @media print{ .ia-aj{display:none} }
   .ia-pedo{position:fixed;z-index:96;width:0;height:0;pointer-events:none}
   .ia-pedo i{position:absolute;left:-28px;top:-28px;width:56px;height:56px;border-radius:50%;background:radial-gradient(circle,rgba(176,204,70,.8) 0,rgba(150,180,50,.4) 50%,rgba(150,180,50,0) 70%);opacity:0;animation:iaGas 2.2s ease-out forwards}
   @keyframes iaGas{0%{transform:translate(0,0) scale(.2);opacity:0}15%{opacity:1}100%{transform:translate(var(--dx),var(--dy)) scale(var(--s));opacity:0}}
@@ -612,6 +725,8 @@
     <div class="ni" data-p="carga_masiva"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="12" height="10" rx="1.5"/><path d="M5 6h6M5 9h4"/><path d="M10 12l2 2 2-2" stroke-width="1.5" stroke-linecap="round"/><path d="M12 11v3"/></svg><span>Carga masiva</span></div>
     <div id="nav-ia" style="display:none"><div class="ni" data-p="ia"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M2.5 3.5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H7l-3 2.5V11H3.5a1 1 0 0 1-1-1z"/><path d="M5.5 6.5h5M5.5 8.5h3"/></svg><span>Asistente IA</span></div></div>
     <div id="nav-aud" style="display:none"><div class="ni" data-p="auditoria"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.5" y="1.5" width="11" height="13" rx="1.5"/><path d="M5 5h6M5 8h6M5 11h3.5"/></svg><span>Bitácora de auditoría</span></div></div>
+    <div id="nav-cam" style="display:none"><div class="ni" data-p="registro_cambios"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4" cy="3.5" r="1.6"/><circle cx="4" cy="12.5" r="1.6"/><circle cx="12" cy="6" r="1.6"/><path d="M4 5.1v5.8"/><path d="M12 7.6c0 2.4-2.5 3-8 3.3"/></svg><span>Registro de cambios</span></div></div>
+    <div id="nav-tab" style="display:none"><div class="ni" data-p="tablets_planta"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="1.5" width="10" height="13" rx="1.6"/><path d="M7 12.2h2"/></svg><span>Tablets de planta</span></div></div>
     <div id="nav-usr" style="display:none"><div class="ni" data-p="usuarios"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="5" r="3"/><path d="M2 14c0-3 2.7-5 6-5s6 2 6 5"/></svg><span>Usuarios</span></div></div>
     <div class="sf"><a href="/logout">Cerrar sesión</a></div>
   </div>
@@ -1136,6 +1251,14 @@
           </div>
           <div class="vhead-row vhead-fil">
             <input type="text" id="inv-search" class="sel-fil vh-fil-wide" placeholder="🔍 Buscar por código o descripción" autocomplete="off" oninput="filtrarInv()">
+            <div class="vh-fil-cli">
+              <input type="text" id="inv-cli-fil-search" class="sel-fil" placeholder="🔍 Cliente..." autocomplete="off"
+                oninput="filtrarClienteBuscador('inv-cli-fil','— Todos los clientes —','filtrarInv');if(!this.value.trim())filtrarInv()" onfocus="filtrarClienteBuscador('inv-cli-fil','— Todos los clientes —','filtrarInv')"
+                onblur="setTimeout(function(){var c=$('inv-cli-fil-results');if(c)c.style.display='none';},150)">
+              <input type="hidden" id="inv-cli-fil">
+              <div id="inv-cli-fil-results" class="vh-pop"></div>
+            </div>
+            <label class="vh-fil-chk" title="No mostrar los artículos con stock 0"><input type="checkbox" id="inv-sin-stock0" onchange="filtrarInv()"> Ocultar stock 0</label>
             <button class="btn" id="inv-sort-btn" onclick="toggleInvSort()">Stock ⇅</button>
           </div>
         </div>
@@ -1206,6 +1329,7 @@
               <button class="btn" id="lote-b-trazar" onclick="loteSelAccion('trazar')" disabled title="Trazabilidad del lote seleccionado"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="3.6" cy="3.6" r="1.7"/><circle cx="12.4" cy="12.4" r="1.7"/><path d="M5.3 3.6h4.2a2 2 0 0 1 2 2v5.1"/></svg>Trazar</button>
               <button class="btn" id="lote-b-etiq" onclick="loteSelAccion('etiquetas')" disabled title="Embalado y etiquetado del lote seleccionado"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.2 2.2h5.4l6.2 6.2-5.4 5.4-6.2-6.2z"/><circle cx="5.3" cy="5.3" r=".9"/></svg>Embalado y etiquetado</button>
               <button class="btn" id="lote-b-gestionar" onclick="loteSelAccion('gestionar')" disabled title="Gestionar / liberar el lote seleccionado"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.4v1.7M8 12.9v1.7M1.4 8h1.7M12.9 8h1.7M3.35 3.35l1.2 1.2M11.45 11.45l1.2 1.2M12.65 3.35l-1.2 1.2M4.55 11.45l-1.2 1.2"/></svg>Gestionar</button>
+              <button class="btn btn-d" id="lote-b-del" onclick="loteSelAccion('eliminar')" disabled style="display:none" title="Eliminar el lote seleccionado, o todos los tildados en la primera columna (solo si no se usaron en OTs, remitos, compras ni producción)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4h11M6.5 4V2.5h3V4M4 4l.7 9.5h6.6L12 4M6.8 6.5v4.5M9.2 6.5v4.5"/></svg><span id="lote-b-del-txt">Eliminar lote</span></button>
             </div>
           </div>
           <div class="vhead-row vhead-fil">
@@ -1642,6 +1766,23 @@
     <div class="page" id="p-carga_masiva">
       <div class="pt">Carga masiva</div>
       <div class="ps">Importar datos desde Excel — cada hoja debe llamarse igual que la tabla. Descargá la plantilla de cada tabla con el botón ↓ Plantilla.</div>
+      <div class="card" style="margin-bottom:12px">
+        <div class="ch"><span class="ct">Cargar stock</span><button class="btn btn-s" onclick="stkPlantilla()" title="Excel con las columnas codigo, cantidad y obs">↓ Plantilla de stock</button></div>
+        <div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:10px">Excel con una hoja llamada <b>stock</b> y las columnas <b>codigo</b>, <b>cantidad</b> y <b>obs</b> (opcional). Materiales, productos terminados y semielaborados entran como un lote nuevo ya aprobado; insumos y herramientas van directo al stock. Primero se ve la vista previa y no se carga nada hasta confirmar.</div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <input type="file" id="stk-file" accept=".xlsx,.xls" onchange="stkArchivo(this)" style="font-size:12px">
+          <select id="stk-modo" class="sel-fil" onchange="stkPrevia()">
+            <option value="conteo">La cantidad es lo contado (el stock queda en ese número)</option>
+            <option value="sumar">La cantidad se suma al stock actual</option>
+          </select>
+        </div>
+        <div id="stk-res"></div>
+      </div>
+      <div class="card" style="margin-bottom:12px">
+        <div class="ch"><span class="ct">Cargas realizadas</span><button class="btn btn-s btn-d" id="cm-b-borrar" onclick="borrarCargaMasiva()" disabled title="Borra todo lo que hizo la carga seleccionada (lo que otro módulo ya usa queda y se informa)">🗑 Borrar carga</button></div>
+        <div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:8px">Elegí una carga y tocá <b>Borrar carga</b>: se borra lo que esa carga dio de alta y se devuelve el stock que movió. Lo que ya se usó en otro lado (remitos, consumos, OTs) no se toca.</div>
+        <div id="cm-lista"><div class="ld">Cargando...</div></div>
+      </div>
       <div style="display:grid;grid-template-columns:300px 1fr;gap:12px;align-items:start">
         <div class="card">
           <div style="font-size:12px;font-weight:600;margin-bottom:10px">1. Seleccionar archivo(s) Excel</div>
@@ -1652,6 +1793,7 @@
             <option value="insert">Insertar nuevos (INSERT OR IGNORE)</option>
             <option value="upsert">Insertar o reemplazar (UPSERT)</option>
           </select>
+          <div style="font-size:10.5px;color:var(--color-text-secondary);margin-bottom:10px;line-height:1.45">En vez de los números internos (que cambian de una base a otra) podés usar columnas por código o nombre: <b>producto_codigo</b> / <b>material_codigo</b> en lugar de producto_id / material_id, <b>cliente_razon</b> / <b>proveedor_razon</b> en lugar de cliente_id / proveedor_id, <b>orden_cliente_numero</b> en lugar de orden_cliente_id, y así con cualquier columna <i>algo</i>_id.</div>
           <div id="bulk-sheets" style="margin-bottom:10px"></div>
           <button class="btn btn-p" style="width:100%" onclick="runBulkImport()" id="bulk-run-btn" disabled title="Primero elegí un archivo Excel con al menos una hoja válida">Importar</button>
           <div id="bulk-log" style="margin-top:10px;font-size:11px;max-height:200px;overflow-y:auto"></div>
@@ -1749,6 +1891,61 @@
             <button class="btn btn-s" id="aud-next" onclick="audPagina(1)">Siguiente ›</button>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Registro de cambios del sistema (historial de cambios de código, solo admin) -->
+    <div class="page" id="p-registro_cambios">
+      <div class="vhead">
+        <div class="vhead-card">
+          <div class="vhead-row vhead-top">
+            <div class="vhead-tit">
+              <div class="pt">Registro de cambios</div>
+              <span class="vh-badge" id="cam-total" title="Cambios que cumplen el filtro">–</span>
+            </div>
+            <div class="vh-acciones">
+              <button class="btn btn-p" onclick="nuevoCambio()">+ Nuevo cambio</button>
+            </div>
+          </div>
+          <div class="vhead-row vhead-fil">
+            <input type="date" id="cam-desde" class="sel-fil" title="Desde" onchange="renderCambios()">
+            <input type="date" id="cam-hasta" class="sel-fil" title="Hasta" onchange="renderCambios()">
+            <input type="text" id="cam-q" class="sel-fil vh-fil-wide" placeholder="🔍 Buscar en cualquier campo" autocomplete="off" oninput="renderCambios()">
+            <button class="vh-fil-clear" onclick="clearFiltrosCambios()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.2 2.8h11.6L9.3 8.2v4.4l-2.6 1.3V8.2z"/><path d="M2 14 14 2"/></svg>Limpiar filtros</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div id="cam-list"><div class="ld">Cargando...</div></div>
+      </div>
+    </div>
+
+    <div class="page" id="p-tablets_planta">
+      <div class="vhead">
+        <div class="vhead-card">
+          <div class="vhead-row vhead-top">
+            <div class="vhead-tit">
+              <div class="pt" title="Tablets de máquina: alta, enlaces y bandeja de lo que cargan los operarios">Tablets de planta</div>
+              <span class="vh-badge" id="tab-resumen" title="Bandeja">–</span>
+            </div>
+            <div class="tabs vh-tabs" id="tab-tabs"><div class="tab active" data-t="tablets">Tablets</div><div class="tab" data-t="bandeja">Bandeja</div></div>
+            <div class="vh-acciones">
+              <button class="btn" onclick="loadTabletsPlanta()" title="Volver a leer"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.6 8A5.6 5.6 0 1 1 11.9 4"/><path d="M12.4 1.6V4.4H9.6"/></svg>Actualizar</button>
+              <button class="btn" onclick="window.open('/tablero-planta','tablero_planta')" title="Todas las máquinas en vivo: quién está, qué OT, produciendo o en pausa y por qué. Se puede dejar abierto en un televisor."><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="8.5" rx="1.2"/><path d="M5.5 14h5M8 11v3"/></svg>Tablero en vivo</button>
+              <button class="btn btn-p" id="tab-b-nueva" onclick="tabAbrir(null)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M8 3.3v9.4M3.3 8h9.4"/></svg>Nueva tablet</button>
+            </div>
+          </div>
+          <div class="vhead-row vhead-fil" id="tab-fil-bandeja" style="display:none">
+            <select id="tab-fil-estado" class="sel-fil" onchange="loadBandejaPlanta()">
+              <option value="">Todos los estados</option><option value="Error">Con error</option><option value="Esperando lote">Esperando lote</option><option value="Pendiente">Pendientes</option>
+              <option value="Procesado">Procesados</option><option value="Descartado">Descartados</option>
+            </select>
+            <select id="tab-fil-tablet" class="sel-fil" onchange="loadBandejaPlanta()"><option value="">Todas las tablets</option></select>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div id="tab-list"><div class="ld">Cargando...</div></div>
       </div>
     </div>
 
@@ -1851,10 +2048,11 @@
               <div class="pt" title="Órdenes de compra recibidas — por cliente, con explosión automática en OTs">Pedidos de clientes</div>
               <span class="vh-badge" id="occ-sel-label" title="Pedido seleccionado">–</span>
             </div>
-            <div class="tabs vh-tabs" id="occ-tabs"><div class="tab active" data-e="">Todos</div><div class="tab" data-e="Recibida">Recibidos</div><div class="tab" data-e="Confirmada">Confirmados</div><div class="tab" data-e="En proceso">En proceso</div><div class="tab" data-e="Completada">Completados</div><div class="tab" data-e="Cancelada">Cancelados</div></div>
+            <div class="tabs vh-tabs" id="occ-tabs"><div class="tab active" data-e="">Todos</div><div class="tab" data-e="Recibida">Recibidos</div><div class="tab" data-e="Confirmada">Confirmados</div><div class="tab" data-e="En proceso">En proceso</div><div class="tab" data-e="Completada">Completados</div><div class="tab" data-e="Cancelada">Cancelados</div><div class="tab" data-e="__pp" title="Pedidos con renglones cargados sin precio">Precio pendiente</div></div>
             <div class="vh-acciones" id="occ-toolbar">
               <button class="btn" id="occ-b-avance" onclick="occSelAccion('avance')" disabled title="Ver avance de entrega del pedido seleccionado"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 13.5h12"/><rect x="3" y="8" width="2.4" height="5.5" rx=".5"/><rect x="6.8" y="5" width="2.4" height="8.5" rx=".5"/><rect x="10.6" y="2.5" width="2.4" height="11" rx=".5"/></svg>Avance</button>
               <button class="btn" id="occ-b-edit" onclick="occSelAccion('edit')" disabled title="Editar el pedido seleccionado"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11.1 2.2a1.3 1.3 0 0 1 1.9 0l.8.8a1.3 1.3 0 0 1 0 1.9L5.4 13.2l-3.2.9.9-3.2z"/></svg>Editar</button>
+              <button class="btn btn-d" id="occ-b-del" onclick="occSelAccion('del')" disabled style="display:none" title="Borrar el pedido seleccionado (no se puede si ya tiene remitos)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4h11M6.5 4V2.5h3V4M4 4l.7 9.5h6.6L12 4M6.8 6.5v4.5M9.2 6.5v4.5"/></svg>Borrar</button>
               <button class="btn btn-p" id="b-occ" style="display:none" onclick="openOCC()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M8 3.3v9.4M3.3 8h9.4"/></svg>Nueva OC</button>
             </div>
           </div>
@@ -1972,6 +2170,96 @@
   <div class="mh">Detalle del cambio <span class="mx" onclick="closeMo('mo-auditoria')">×</span></div>
   <div id="aud-detalle"><div class="ld">Cargando...</div></div>
   <div class="ma"><button class="btn" onclick="closeMo('mo-auditoria')">Cerrar</button></div>
+</div></div>
+
+<div class="ov" id="mo-cambio"><div class="mo" style="width:760px;max-width:96vw">
+  <div class="mh"><span id="cam-title">Nuevo cambio</span> <span class="mx" onclick="closeMo('mo-cambio')">×</span></div>
+  <input type="hidden" id="cam-id">
+  <div class="fg2">
+    <div class="fg"><label>Fecha <span class="req">*</span></label><input type="date" id="cam-fecha"></div>
+    <div class="fg"><label>Quién lo hizo</label><input type="text" id="cam-autor" placeholder="Nombre"></div>
+    <div class="fg s2"><label>Descripción <span class="req">*</span></label><input type="text" id="cam-desc" placeholder="Resumen del cambio en una línea"></div>
+    <div class="fg s2"><label>Qué se hizo</label><textarea id="cam-detalle" rows="4" placeholder="Detalle de los cambios"></textarea></div>
+  </div>
+  <div id="cam-meta" style="font-size:11px;color:var(--color-text-secondary);margin-top:8px"></div>
+  <div class="ma">
+    <button class="btn" id="cam-borrar" style="margin-right:auto;color:var(--color-text-danger,#A32D2D)" onclick="borrarCambio()">Eliminar</button>
+    <button class="btn" onclick="closeMo('mo-cambio')">Cancelar</button>
+    <button class="btn btn-p" id="cam-guardar" onclick="guardarCambio()">Guardar</button>
+  </div>
+</div></div>
+
+<div class="ov" id="mo-tablet"><div class="mo" style="width:560px;max-width:96vw">
+  <div class="mh"><span id="tab-title">Nueva tablet</span> <span class="mx" onclick="closeMo('mo-tablet')">×</span></div>
+  <input type="hidden" id="tab-id">
+  <div class="fg2">
+    <div class="fg s2"><label>Máquina <span class="req">*</span></label><select id="tab-maq"></select></div>
+    <div class="fg s2"><label>Nombre</label><input type="text" id="tab-nombre" placeholder="Si lo dejás vacío: Tablet + código de la máquina"></div>
+    <div class="fg s2" id="tab-activa-wrap"><label><input type="checkbox" id="tab-activa" style="width:auto;margin-right:6px">Activa (si la desactivás, la tablet deja de poder cargar)</label></div>
+  </div>
+  <div class="ma">
+    <button class="btn" onclick="closeMo('mo-tablet')">Cancelar</button>
+    <button class="btn btn-p" id="tab-guardar" onclick="tabGuardar()">Guardar</button>
+  </div>
+</div></div>
+
+<div class="ov" id="mo-tablet-enlace"><div class="mo" style="width:640px;max-width:96vw">
+  <div class="mh"><span id="tab-enl-title">Enlace de la tablet</span> <span class="mx" onclick="closeMo('mo-tablet-enlace')">×</span></div>
+  <p style="font-size:13px;margin:0 0 10px">Abrí este enlace <b>una vez</b> en el navegador de la tablet (o configuralo como página de inicio en Fully Kiosk). La tablet queda habilitada para esta máquina. No lo compartas: cualquiera que lo tenga puede cargar producción en esta máquina.</p>
+  <input type="text" id="tab-enl" readonly style="width:100%;font-family:monospace;font-size:13px" onclick="this.select()">
+  <div class="ma">
+    <button class="btn" onclick="closeMo('mo-tablet-enlace')">Cerrar</button>
+    <button class="btn btn-p" onclick="tabCopiarEnlace()">Copiar enlace</button>
+  </div>
+</div></div>
+
+<div class="ov" id="mo-tablet-lector"><div class="mo" style="width:600px;max-width:96vw">
+  <div class="mh"><span id="tlec-title">Lector de huella</span> <span class="mx" onclick="closeMo('mo-tablet-lector')">×</span></div>
+  <input type="hidden" id="tlec-id">
+  <p style="font-size:13px;margin:0 0 10px">El operario apoya el dedo en el lector de la máquina y la tablet entra sola con su nombre. Las huellas se registran <b>en el lector</b> (como en el reloj de asistencia), con el <b>legajo</b> de MetalERP como número de usuario.</p>
+  <div class="fg2">
+    <div class="fg s2"><label>Número de serie del lector</label><input type="text" id="tlec-sn" placeholder="Vacío: la tablet no tiene lector"></div>
+  </div>
+  <div id="tlec-vistos" style="margin-top:10px"></div>
+  <div style="font-size:12px;color:var(--color-text-secondary);margin-top:10px;line-height:1.5">
+    <b>Lector ZKTeco:</b> en el menú del lector, Comunicación → Servidor en la nube (ADMS): dirección <b id="tlec-ip"></b>, puerto <b id="tlec-puerto"></b>. Cuando se conecta aparece arriba en "Lectores que se comunicaron" y lo elegís.<br>
+    <b>Otra marca:</b> el lector o un programa puente tiene que llamar a <code>POST /api/planta/huella</code> con <code>{"sn": "...", "legajo": "..."}</code>.
+  </div>
+  <div class="ma">
+    <button class="btn" onclick="closeMo('mo-tablet-lector')">Cancelar</button>
+    <button class="btn btn-p" id="tlec-guardar" onclick="tabGuardarLector()">Guardar</button>
+  </div>
+</div></div>
+
+<div class="ov" id="mo-tablet-huella"><div class="mo" style="width:480px;max-width:96vw">
+  <div class="mh"><span id="thue-title">Probar huella</span> <span class="mx" onclick="closeMo('mo-tablet-huella')">×</span></div>
+  <input type="hidden" id="thue-id">
+  <p style="font-size:13px;margin:0 0 10px">Hace de cuenta que este operario apoyó el dedo en el lector: la tablet entra con él en un par de segundos. Sirve para probar antes de tener el lector instalado.</p>
+  <div class="fg2"><div class="fg s2"><label>Operario</label><select id="thue-emp"></select></div></div>
+  <div class="ma">
+    <button class="btn" onclick="closeMo('mo-tablet-huella')">Cerrar</button>
+    <button class="btn btn-p" id="thue-ok" onclick="tabSimularHuella()">Simular huella</button>
+  </div>
+</div></div>
+
+<div class="ov" id="mo-bandeja"><div class="mo" style="width:620px;max-width:96vw">
+  <div class="mh"><span>Corregir y reprocesar</span> <span class="mx" onclick="closeMo('mo-bandeja')">×</span></div>
+  <input type="hidden" id="bdj-id">
+  <div id="bdj-error" style="background:#FCEBEB;color:#791F1F;border-radius:7px;padding:8px 10px;font-size:12.5px;margin-bottom:10px"></div>
+  <div class="fg2">
+    <div class="fg s2"><label>Operación</label><select id="bdj-op"></select></div>
+    <div class="fg s2"><label>Operario</label><select id="bdj-emp"></select></div>
+    <div class="fg"><label>Piezas OK</label><input type="number" id="bdj-ok" min="0" step="1"></div>
+    <div class="fg"><label>Piezas NO OK</label><input type="number" id="bdj-nok" min="0" step="1"></div>
+    <div class="fg"><label>Minutos trabajados</label><input type="number" id="bdj-min" min="0" step="any"></div>
+    <div class="fg"><label>Minutos de pausa</label><input type="number" id="bdj-pausa" min="0" step="any"></div>
+  </div>
+  <div style="font-size:11px;color:var(--color-text-secondary);margin-top:8px">Al reprocesar vuelve a la bandeja y el procesador intenta cargar la novedad otra vez, con estos datos.</div>
+  <div class="ma">
+    <button class="btn" style="margin-right:auto;color:var(--color-text-danger,#A32D2D)" onclick="bdjDescartar()">Descartar</button>
+    <button class="btn" onclick="closeMo('mo-bandeja')">Cancelar</button>
+    <button class="btn btn-p" id="bdj-guardar" onclick="bdjReprocesar()">Reprocesar</button>
+  </div>
 </div></div>
 
 <!-- OT -->
@@ -2716,7 +3004,7 @@
   <div class="mh"><span id="occ-title">Nueva OC de cliente</span> <span class="mx" onclick="closeMo('mo-occ')">×</span></div>
   <input type="hidden" id="occ-id">
   <div class="fg2" style="flex-shrink:0">
-    <div class="fg"><label>N° OC</label><input id="occ-num" readonly placeholder="Automático" title="El número se asigna solo al guardar" style="background:#f8f8f6"></div>
+    <div class="fg"><label>N° OC <span class="req">*</span></label><input id="occ-num" placeholder="N° del pedido" autocomplete="off" title="Número del pedido (se carga a mano, no se puede repetir)"></div>
     <div class="fg"><label>Estado</label><select id="occ-est"><option>Recibida</option><option>Confirmada</option><option>En proceso</option><option>Completada</option><option>Cancelada</option></select></div>
     <div class="fg" style="position:relative">
       <label>Cliente <span class="req">*</span></label>
@@ -3200,6 +3488,9 @@
 <script>
 const ROL='{{ rol }}';
 const PERMS={{ perms|tojson }};
+// Pedidos de clientes: admin/vendedor, y logística con el módulo habilitado
+// (igual que _puede_cargar_pedidos_cliente en server.py).
+const PUEDE_OCC=['admin','vendedor'].includes(ROL)||(ROL==='logistica'&&PERMS['mod_oc_clientes']==='1');
 // El permiso lo resuelve el SERVIDOR (ver puede_ver_monetario en server.py) y
 // lo inyecta ya calculado: no se vuelve a deducir acá para que no haya dos
 // fuentes de verdad. Si el valor no llegara, se asume lo más restrictivo.
@@ -3581,9 +3872,9 @@ function _iaEmpresa(){ const e=document.querySelector('.logo .emp'); return (e&&
 // del modo, de una lista cerrada) y le pone un sombrero a Mártin; /telaviv le
 // pone una kipá (solo el disfraz, el estilo no cambia); /normal lo deja como
 // siempre (y saca los Mártin de /multi); /multi suma otro Mártin; /edance arma
-// una fiesta de 20 segundos; /boom lo hace explotar; /poop se tira un pedo; /67 hace el "six seven". Recargar la página también vuelve todo a la
+// una fiesta de 20 segundos; /boom lo hace explotar; /poop se tira un pedo; /67 hace el "six seven"; /pingpong juega un partido de ping pong; /chess (o /chees, /ajedrez) juega al ajedrez. Recargar la página también vuelve todo a la
 // normalidad. Los datos y los permisos no cambian.
-const IA_COMANDOS=['/edance','/boom','/poop','/67','/pirata','/telaviv','/multi','/normal'];
+const IA_COMANDOS=['/edance','/boom','/poop','/67','/pingpong','/chess','/chees','/ajedrez','/pirata','/telaviv','/multi','/normal'];
 // svg del disfraz y dónde va [x, y, ancho, alto] en el cuerpo (148x200, el
 // tornillo bajado 24 px) y en la cara (96x96, bajada 14 px).
 const IA_SOMBREROS={
@@ -3662,6 +3953,18 @@ function _iaComando(txt){
     const m=_iaAgregar($('ia-p-msjs'),'a','Six… seven! 🤷');
     ia67(); _iaHablar('Six seven! Six seven!',m.parentNode.querySelector('.ia-av'));
     return true;
+  }
+  if(c==='/chess'||c==='/chees'||c==='/ajedrez'){
+    const sug=$('ia-p-sug'); if(sug) sug.remove();
+    _iaAgregar($('ia-p-msjs'),'u',txt.trim());
+    _iaAgregar($('ia-p-msjs'),'a',_iaAjGuardada()?'Saco el tablero y seguimos la partida que dejamos.':'¡Dale, saco el tablero! A ver qué tal movés las piezas.');
+    iaAjedrez(); return true;
+  }
+  if(c==='/pingpong'){
+    const sug=$('ia-p-sug'); if(sug) sug.remove();
+    _iaAgregar($('ia-p-msjs'),'u',txt.trim());
+    _iaAgregar($('ia-p-msjs'),'a','¡Dale, agarrá la paleta! Jugamos a 11 puntos. 🏓');
+    iaPingPong(); return true;
   }
   if(c==='/boom'){
     const sug=$('ia-p-sug'); if(sug) sug.remove();
@@ -3950,6 +4253,958 @@ function ia67Cerrar(){
   document.removeEventListener('keydown',st.tecla,true);
   st.ov.remove();
   const p=$('ia-panel'); if(p&&p.classList.contains('open')) $('ia-p-txt').focus();
+}
+
+// /pingpong: partido de ping pong contra Mártin en un canvas. Vos jugás con la
+// paleta roja (izquierda) moviendo el mouse, el dedo o ↑ ↓ / W S; Mártin juega
+// con la negra. A 11 puntos con 2 de diferencia, y el saque cambia cada 2
+// puntos (cada 1 desde el 10 a 10), como en el ping pong de verdad. Esc o el
+// botón Salir cierran; al salir, el resultado queda anotado en el chat.
+// Medidas en una mesa lógica de 800x460; el canvas se escala a la pantalla.
+const IA_PP={W:800,H:460,PW:12,PH:84,PX:26,R:8,PUNTOS:11,V0:380,VMAX:950,ANG:55*Math.PI/180,PASO:1/240};
+const IA_PP_FRASES={
+  martin:['¡Punto para el tornillo!','Ajustadito, como me gusta.','¿Viste esa? Torque perfecto.','Te faltó aceite en la muñeca.','Uno más para la planilla.','Esa salió derechita del torno.'],
+  vos:['Bien ahí, no la vi venir.','Uh, se me aflojó una tuerca.','Esa fue buena, lo reconozco.','Me distraje mirando el stock.','Ok, ok… ahora me pongo serio.','Punto tuyo. Anotalo antes de que me arrepienta.'],
+  peloteo:['¡Qué peloteo! Eso fue de campeonato.','¡Tremendo peloteo! Casi me quedo sin rosca.']
+};
+let _iaPP=null;
+function _iaPPAzar(l){ return l[Math.floor(Math.random()*l.length)]; }
+function iaPingPong(){
+  if(_iaPP) return;
+  _iaCallar(); iaDiscoCerrar(); ia67Cerrar(); iaBoomCerrar();
+  const P=IA_PP;
+  const ov=document.createElement('div');
+  ov.className='ia-pp'; ov.tabIndex=-1; ov.setAttribute('role','dialog'); ov.setAttribute('aria-label','Ping pong contra Mártin');
+  ov.innerHTML='<button type="button" class="ia-pp-cerrar">'+IA_SVG.x+'Salir</button>'
+    +'<div class="ia-pp-caja">'
+    +'<div class="ia-pp-tablero">'
+    +'<div class="ia-pp-lado vos"><span class="ia-pp-pala"></span><span class="ia-pp-nom">Vos</span><b class="ia-pp-pts">0</b></div>'
+    +'<div class="ia-pp-info"></div>'
+    +'<div class="ia-pp-lado mar"><b class="ia-pp-pts">0</b><span class="ia-pp-nom">Mártin</span><span class="ia-pp-cara"><img alt=""><span class="ia-pp-dice"></span></span></div>'
+    +'</div>'
+    +'<div class="ia-pp-mesa"><canvas></canvas><div class="ia-pp-msg"></div></div>'
+    +'<div class="ia-pp-ayuda">Mové tu paleta con el mouse, el dedo o ↑ ↓ · Clic, toque o Espacio para sacar · P pausa · Esc sale</div>'
+    +'</div>';
+  document.body.appendChild(ov);
+  const cv=ov.querySelector('canvas'), q=s=>ov.querySelector(s);
+  const st={ov,cv,ctx:cv.getContext('2d'),mesa:q('.ia-pp-mesa'),msg:q('.ia-pp-msg'),info:q('.ia-pp-info'),cara:q('.ia-pp-cara img'),dice:q('.ia-pp-dice'),
+    pts:ov.querySelectorAll('.ia-pp-pts'),a:0,b:0,primero:0,srv:0,estado:'saque',golpes:0,
+    pelota:{x:0,y:0,vx:0,vy:0},estela:[],yo:{y:P.H/2,vy:0,obj:null},ma:{y:P.H/2,err:0,saqueY:P.H/2},
+    teclas:{arriba:false,abajo:false},timers:[],resultados:[],acum:0,t:0,raf:0,ac:null};
+  _iaPP=st;
+  st.cara.src=_iaFoto(false);
+  try{ st.record=JSON.parse(localStorage.getItem('ia_pp_record')||'null'); }catch(e){}
+  if(!st.record||typeof st.record.g!=='number'||typeof st.record.p!=='number') st.record={g:0,p:0};
+  // Controles. El mouse o el dedo mandan la paleta a esa altura de la mesa.
+  st.mover=e=>{
+    const r=cv.getBoundingClientRect(); if(!r.height) return;
+    st.yo.obj=(e.clientY-r.top)/r.height*P.H;
+  };
+  st.tocar=e=>{
+    if(e.target.closest('button')) return;
+    st.mover(e);
+    if(e.target.closest('.ia-pp-mesa')) _iaPPAccion();
+  };
+  ov.addEventListener('pointermove',st.mover);
+  ov.addEventListener('pointerdown',st.tocar);
+  q('.ia-pp-cerrar').onclick=iaPingPongCerrar;
+  // En captura: estas teclas no llegan al chat ni a los modales de atrás.
+  st.tecla=e=>{
+    const k=e.key;
+    if(k==='Escape'){ iaPingPongCerrar(); }
+    else if(k==='ArrowUp'||k==='w'||k==='W'){ st.teclas.arriba=true; st.yo.obj=null; }
+    else if(k==='ArrowDown'||k==='s'||k==='S'){ st.teclas.abajo=true; st.yo.obj=null; }
+    else if(k===' '||k==='Enter'){ if(e.target.closest&&e.target.closest('button')) return; if(!e.repeat) _iaPPAccion(); }
+    else if(k==='p'||k==='P'){ _iaPPPausa(); }
+    else return;
+    e.preventDefault(); e.stopImmediatePropagation();
+  };
+  st.suelta=e=>{
+    const k=e.key;
+    if(k==='ArrowUp'||k==='w'||k==='W') st.teclas.arriba=false;
+    else if(k==='ArrowDown'||k==='s'||k==='S') st.teclas.abajo=false;
+    else return;
+    e.preventDefault(); e.stopImmediatePropagation();
+  };
+  document.addEventListener('keydown',st.tecla,true);
+  document.addEventListener('keyup',st.suelta,true);
+  st.oculta=()=>{ if(document.hidden&&st.estado==='juego') _iaPPPausa(); };
+  document.addEventListener('visibilitychange',st.oculta);
+  st.redim=()=>_iaPPMedidas(st);
+  addEventListener('resize',st.redim);
+  _iaPPMedidas(st);
+  ov.focus();
+  _iaPPPrepSaque(st);
+  _iaPPDecir(st,'¡Dale! El primero que llega a 11 gana, con 2 de diferencia. Sacás vos.',true);
+  st.t=performance.now();
+  st.raf=requestAnimationFrame(_iaPPCuadro);
+}
+function _iaPPMedidas(st){
+  const P=IA_PP, chico=innerWidth<=600;
+  const w=Math.max(240,Math.floor(Math.min(innerWidth-32,980,(innerHeight-(chico?150:190))*P.W/P.H)));
+  const h=Math.round(w*P.H/P.W), dpr=Math.min(window.devicePixelRatio||1,2);
+  st.ov.querySelector('.ia-pp-caja').style.width=w+'px';
+  st.cv.style.width=w+'px'; st.cv.style.height=h+'px';
+  st.cv.width=Math.round(w*dpr); st.cv.height=Math.round(h*dpr);
+  st.esc=st.cv.width/P.W;
+  _iaPPDibujar(st);
+}
+// Quién saca: cada 2 puntos; desde el 10 a 10, cada punto.
+function _iaPPServidor(st){
+  const tot=st.a+st.b, P=IA_PP;
+  return (st.primero+(st.a>=P.PUNTOS-1&&st.b>=P.PUNTOS-1?tot:Math.floor(tot/2)))%2;
+}
+function _iaPPPrepSaque(st){
+  st.srv=_iaPPServidor(st); st.estado='saque'; st.golpes=0; st.estela=[];
+  st.mesa.classList.add('jugando');
+  st.info.textContent='A '+IA_PP.PUNTOS+' puntos · saca '+(st.srv?'Mártin':'vos');
+  if(st.srv===0) _iaPPMensaje(st,'Sacás vos: clic, toque o Espacio');
+  else{
+    _iaPPMensaje(st,'Saca Mártin…');
+    st.ma.saqueY=IA_PP.PH+Math.random()*(IA_PP.H-2*IA_PP.PH);
+    st.timers.push(setTimeout(()=>{ if(_iaPP===st&&st.estado==='saque'&&st.srv===1) _iaPPSacar(st); },1100+Math.random()*700));
+  }
+}
+function _iaPPSacar(st){
+  const P=IA_PP, dir=st.srv===0?1:-1, ang=(Math.random()*2-1)*0.32;
+  st.pelota.vx=dir*Math.cos(ang)*P.V0; st.pelota.vy=Math.sin(ang)*P.V0;
+  st.estado='juego'; _iaPPMensaje(st,'');
+  if(dir>0) _iaPPErrorMartin(st);
+  _iaPPSonido(st,'pala');
+}
+// Espacio, Enter, clic o toque: sacar, seguir después de la pausa o revancha.
+function _iaPPAccion(){
+  const st=_iaPP; if(!st) return;
+  if(st.estado==='saque'&&st.srv===0) _iaPPSacar(st);
+  else if(st.estado==='pausa') _iaPPPausa();
+  else if(st.estado==='fin') _iaPPRevancha(st);
+}
+function _iaPPPausa(){
+  const st=_iaPP; if(!st) return;
+  if(st.estado==='juego'){ st.estado='pausa'; st.mesa.classList.remove('jugando'); _iaPPMensaje(st,'Pausa · P, clic o Espacio para seguir'); }
+  else if(st.estado==='pausa'){ st.estado='juego'; st.mesa.classList.add('jugando'); _iaPPMensaje(st,''); st.t=performance.now(); }
+}
+// Dónde va a quedar la pelota cuando llegue a la paleta de Mártin (con rebotes).
+function _iaPPPredecir(st){
+  const P=IA_PP, p=st.pelota, xm=P.W-P.PX-P.PW-P.R;
+  if(p.vx<=0) return P.H/2;
+  const span=P.H-2*P.R;
+  let y=p.y+p.vy*(xm-p.x)/p.vx-P.R;
+  y=((y%(2*span))+2*span)%(2*span);
+  if(y>span) y=2*span-y;
+  return P.R+y;
+}
+// Cada vez que la pelota va para Mártin, decide por dónde le pega. Con la
+// pelota más rápida se equivoca más seguido: así se le puede ganar.
+function _iaPPErrorMartin(st){
+  const P=IA_PP, p=st.pelota, v=Math.hypot(p.vx,p.vy), r=Math.min(Math.max((v-P.V0)/(P.VMAX-P.V0),0),1);
+  let e=(Math.random()*2-1)*P.PH*0.42;
+  if(Math.random()<0.10+0.30*r) e=(e<0?-1:1)*P.PH*(0.62+Math.random()*0.35);
+  st.ma.err=e;
+}
+function _iaPPCuadro(t){
+  const st=_iaPP; if(!st) return;
+  const dt=Math.min((t-st.t)/1000,0.05); st.t=t;
+  st.acum+=dt;
+  while(st.acum>=IA_PP.PASO){ _iaPPPaso(st,IA_PP.PASO); st.acum-=IA_PP.PASO; if(_iaPP!==st) return; }
+  _iaPPDibujar(st);
+  st.raf=requestAnimationFrame(_iaPPCuadro);
+}
+function _iaPPAcercar(y,obj,vmax,dt){ const d=obj-y, m=vmax*dt; return Math.abs(d)<=m?obj:y+Math.sign(d)*m; }
+function _iaPPPaso(st,dt){
+  const P=IA_PP, p=st.pelota, yo=st.yo, ma=st.ma, med=P.PH/2;
+  if(st.estado==='pausa'||st.estado==='fin') return;
+  // Tu paleta.
+  const antes=yo.y, dirT=(st.teclas.abajo?1:0)-(st.teclas.arriba?1:0);
+  if(dirT) yo.y+=dirT*560*dt;
+  else if(yo.obj!=null) yo.y=_iaPPAcercar(yo.y,yo.obj,1800,dt);
+  yo.y=Math.min(Math.max(yo.y,med),P.H-med);
+  yo.vy=(yo.y-antes)/dt;
+  // La de Mártin: reacciona cuando la pelota pasa el primer tercio de la mesa.
+  let obj=P.H/2, vel=300+Math.min(st.golpes,12)*12;
+  if(st.estado==='saque'&&st.srv===1){ obj=ma.saqueY; vel=220; }
+  else if(st.estado==='juego'&&p.vx>0&&p.x>P.W*0.3) obj=_iaPPPredecir(st)+ma.err;
+  else if(st.estado==='juego'&&p.vx<0) vel=160;
+  ma.y=Math.min(Math.max(_iaPPAcercar(ma.y,obj,vel,dt),med),P.H-med);
+  // Pelota.
+  if(st.estado==='saque'){
+    if(st.srv===0){ p.x=P.PX+P.PW+P.R+2; p.y=yo.y; } else { p.x=P.W-P.PX-P.PW-P.R-2; p.y=ma.y; }
+    return;
+  }
+  if(st.estado!=='juego') return;
+  p.x+=p.vx*dt; p.y+=p.vy*dt;
+  if(p.y<P.R){ p.y=P.R; p.vy=Math.abs(p.vy); _iaPPSonido(st,'borde'); }
+  else if(p.y>P.H-P.R){ p.y=P.H-P.R; p.vy=-Math.abs(p.vy); _iaPPSonido(st,'borde'); }
+  const xMa=P.W-P.PX-P.PW;
+  if(p.vx<0&&p.x-P.R<=P.PX+P.PW&&p.x+P.R>=P.PX&&Math.abs(p.y-yo.y)<=med+P.R){ p.x=P.PX+P.PW+P.R; _iaPPGolpe(st,yo.y,1,yo.vy); _iaPPErrorMartin(st); }
+  else if(p.vx>0&&p.x+P.R>=xMa&&p.x-P.R<=xMa+P.PW&&Math.abs(p.y-ma.y)<=med+P.R){ p.x=xMa-P.R; _iaPPGolpe(st,ma.y,-1,0); }
+  if(p.x<-P.R*2) _iaPPPunto(st,1);
+  else if(p.x>P.W+P.R*2) _iaPPPunto(st,0);
+}
+// La pelota sale más inclinada cuanto más lejos del centro de la paleta pega,
+// un poco más rápida en cada golpe y con algo de efecto si la paleta se movía.
+function _iaPPGolpe(st,yPala,dir,velPala){
+  const P=IA_PP, p=st.pelota;
+  const rel=Math.min(Math.max((p.y-yPala)/(P.PH/2),-1),1);
+  const v=Math.min(Math.hypot(p.vx,p.vy)*1.045+6,P.VMAX);
+  let ang=rel*P.ANG+Math.min(Math.max(velPala*0.00025,-0.15),0.15);
+  ang=Math.min(Math.max(ang,-1.08),1.08);
+  p.vx=dir*Math.cos(ang)*v; p.vy=Math.sin(ang)*v;
+  st.golpes++;
+  _iaPPSonido(st,'pala');
+}
+function _iaPPPunto(st,quien){
+  const P=IA_PP;
+  st.estado='punto'; st.mesa.classList.remove('jugando'); st.estela=[];
+  if(quien===0) st.a++; else st.b++;
+  const el=st.pts[quien];
+  el.textContent=quien===0?st.a:st.b;
+  el.classList.remove('sube'); void el.offsetWidth; el.classList.add('sube');
+  _iaPPSonido(st,quien===0?'puntoVos':'puntoMartin');
+  const max=Math.max(st.a,st.b);
+  if(max>=P.PUNTOS&&Math.abs(st.a-st.b)>=2){ st.timers.push(setTimeout(()=>{ if(_iaPP===st) _iaPPFin(st); },700)); return; }
+  let txt;
+  if(st.a===st.b&&st.a>=P.PUNTOS-1) txt='Iguales. Ahora hay que sacar 2 de ventaja.';
+  else if(max>=P.PUNTOS-1&&Math.abs(st.a-st.b)>=1) txt=(st.a>st.b)?'Punto de partido para vos… no me la hagas fácil.':'Punto de partido para mí. ¡Concentración!';
+  else if(st.golpes>=8) txt=_iaPPAzar(IA_PP_FRASES.peloteo);
+  else if(Math.random()<0.75) txt=_iaPPAzar(quien===0?IA_PP_FRASES.vos:IA_PP_FRASES.martin);
+  if(txt) _iaPPDecir(st,txt,false);
+  _iaPPMensaje(st,'');
+  st.timers.push(setTimeout(()=>{ if(_iaPP===st&&st.estado==='punto') _iaPPPrepSaque(st); },1000));
+}
+function _iaPPFin(st){
+  const gane=st.a>st.b;
+  st.estado='fin'; st.mesa.classList.remove('jugando');
+  st.resultados.push([st.a,st.b]);
+  if(gane) st.record.g++; else st.record.p++;
+  try{ localStorage.setItem('ia_pp_record',JSON.stringify(st.record)); }catch(e){}
+  st.info.textContent='Partido terminado';
+  st.msg.className='ia-pp-msg ver fin';
+  st.msg.innerHTML='<h3>'+(gane?'¡Ganaste!':'Ganó Mártin')+'</h3>'
+    +'<div class="ia-pp-res">'+st.a+' – '+st.b+'</div>'
+    +'<div class="ia-pp-hist">En total: ganaste '+st.record.g+' y Mártin '+st.record.p+'</div>'
+    +'<div class="ia-pp-bots"><button type="button" class="ia-pp-revancha">Revancha</button><button type="button" class="ia-pp-salir">Salir</button></div>';
+  st.msg.querySelector('.ia-pp-revancha').onclick=()=>_iaPPRevancha(st);
+  st.msg.querySelector('.ia-pp-salir').onclick=iaPingPongCerrar;
+  st.msg.querySelector('.ia-pp-revancha').focus();
+  _iaPPSonido(st,gane?'ganaste':'perdiste');
+  _iaPPDecir(st,gane?'¡Me ganaste! Jugás bárbaro. Revancha cuando quieras.':'¡Gané! Pero me hiciste transpirar el aceite. ¿La revancha?',true);
+}
+function _iaPPRevancha(st){
+  if(st.estado!=='fin') return;
+  st.a=st.b=0; st.pts[0].textContent='0'; st.pts[1].textContent='0';
+  st.primero^=1; st.yo.y=st.ma.y=IA_PP.H/2;
+  st.ov.focus();
+  _iaPPPrepSaque(st);
+  _iaPPDecir(st,st.srv?'¡Vamos de nuevo! Esta vez saco yo.':'¡Vamos de nuevo! Sacás vos.',false);
+}
+// Cartel en el medio de la mesa ('' lo saca).
+function _iaPPMensaje(st,txt){
+  st.msg.className='ia-pp-msg'+(txt?' ver':'');
+  st.msg.textContent=txt;
+}
+// Globito de Mártin. hablar=true además lo dice en voz alta (solo al empezar y
+// al terminar, para no gastar el cupo de voz en cada punto).
+function _iaPPDecir(st,txt,hablar){
+  clearTimeout(st.diceT); clearInterval(st.boca);
+  st.dice.textContent=txt; st.dice.classList.add('ver');
+  const ms=Math.max(1800,txt.length*60);
+  st.diceT=setTimeout(()=>{ st.dice.classList.remove('ver'); clearInterval(st.boca); st.cara.src=_iaFoto(false); },ms);
+  if(hablar&&!_iaMudo()) _iaHablar(txt,st.cara);
+  else{ let k=0; st.boca=setInterval(()=>{ k=(k+1)%4; st.cara.src=_iaFoto(false,[0,1,2,1][k]); },160); setTimeout(()=>clearInterval(st.boca),Math.min(ms,txt.length*45)); }
+}
+// Sonidos cortos con Web Audio (respetan el parlante silenciado del chat).
+function _iaPPSonido(st,tipo){
+  if(_iaMudo()) return;
+  const AC=window.AudioContext||window.webkitAudioContext; if(!AC) return;
+  try{ st.ac=st.ac||new AC(); if(st.ac.state==='suspended') st.ac.resume(); }catch(e){ return; }
+  const ac=st.ac, t0=ac.currentTime;
+  const tono=(f1,f2,dur,vol,forma,ini)=>{
+    const o=ac.createOscillator(), g=ac.createGain(), t=t0+(ini||0);
+    o.type=forma||'sine'; o.frequency.setValueAtTime(f1,t); o.frequency.exponentialRampToValueAtTime(f2,t+dur);
+    g.gain.setValueAtTime(vol,t); g.gain.exponentialRampToValueAtTime(0.001,t+dur);
+    o.connect(g); g.connect(ac.destination); o.start(t); o.stop(t+dur+0.02);
+  };
+  if(tipo==='pala'){ tono(1250,620,0.07,0.32,'sine'); tono(2600,1800,0.03,0.08,'triangle'); }
+  else if(tipo==='borde') tono(760,480,0.05,0.16,'sine');
+  else if(tipo==='puntoVos'){ tono(660,660,0.12,0.18,'triangle'); tono(880,880,0.18,0.18,'triangle',0.11); }
+  else if(tipo==='puntoMartin'){ tono(440,440,0.12,0.16,'triangle'); tono(330,330,0.2,0.16,'triangle',0.11); }
+  else if(tipo==='ganaste') [523,659,784,1047].forEach((f,i)=>tono(f,f,0.22,0.18,'triangle',i*0.12));
+  else if(tipo==='perdiste') [392,349,330,262].forEach((f,i)=>tono(f,f*0.98,0.26,0.16,'triangle',i*0.16));
+}
+function _iaPPDibujar(st){
+  const P=IA_PP, c=st.ctx, p=st.pelota;
+  c.setTransform(st.esc,0,0,st.esc,0,0);
+  // Mesa azul con bordes blancos, línea central y red.
+  const g=c.createLinearGradient(0,0,0,P.H); g.addColorStop(0,'#2468B8'); g.addColorStop(1,'#1B5296');
+  c.fillStyle=g; c.fillRect(0,0,P.W,P.H);
+  c.strokeStyle='#F4F6FA'; c.lineWidth=5; c.strokeRect(2.5,2.5,P.W-5,P.H-5);
+  c.lineWidth=2; c.beginPath(); c.moveTo(0,P.H/2); c.lineTo(P.W,P.H/2); c.stroke();
+  c.fillStyle='rgba(0,0,0,.22)'; c.fillRect(P.W/2-1,0,6,P.H);
+  c.strokeStyle='#DDE3EC'; c.lineWidth=3; c.setLineDash([5,4]); c.beginPath(); c.moveTo(P.W/2,0); c.lineTo(P.W/2,P.H); c.stroke(); c.setLineDash([]);
+  // Estela y pelota (naranja, con sombra).
+  if(st.estado==='juego'){ st.estela.push([p.x,p.y]); if(st.estela.length>7) st.estela.shift(); }
+  st.estela.forEach((e,i)=>{ c.fillStyle='rgba(255,170,70,'+(0.05+i*0.035)+')'; c.beginPath(); c.arc(e[0],e[1],P.R*(0.5+i*0.06),0,7); c.fill(); });
+  if(st.estado!=='fin'){
+    c.fillStyle='rgba(0,0,0,.25)'; c.beginPath(); c.ellipse(p.x+4,p.y+6,P.R,P.R*0.75,0,0,7); c.fill();
+    const gb=c.createRadialGradient(p.x-3,p.y-3,1,p.x,p.y,P.R); gb.addColorStop(0,'#FFE2B8'); gb.addColorStop(1,'#FF8A1C');
+    c.fillStyle=gb; c.beginPath(); c.arc(p.x,p.y,P.R,0,7); c.fill();
+  }
+  // Paletas: goma roja (vos) y negra (Mártin), con el mango de madera afuera.
+  const rr=(x,y,w,h,r,color)=>{ c.fillStyle=color; c.beginPath(); if(c.roundRect) c.roundRect(x,y,w,h,r); else c.rect(x,y,w,h); c.fill(); };
+  const pala=(x,y,goma,mangoX)=>{
+    rr(mangoX,y-8,18,16,4,'#B07A47');
+    rr(x+3,y-P.PH/2+4,P.PW,P.PH,6,'rgba(0,0,0,.25)');
+    rr(x,y-P.PH/2,P.PW,P.PH,6,goma);
+    c.fillStyle='rgba(255,255,255,.18)'; c.fillRect(x+2,y-P.PH/2+6,2,P.PH-12);
+  };
+  pala(P.PX,st.yo.y,'#D7263D',P.PX-16);
+  pala(P.W-P.PX-P.PW,st.ma.y,'#1E1E22',P.W-P.PX-2);
+}
+function iaPingPongCerrar(){
+  const st=_iaPP; if(!st) return;
+  _iaPP=null;
+  cancelAnimationFrame(st.raf); st.timers.forEach(clearTimeout); clearTimeout(st.diceT); clearInterval(st.boca);
+  document.removeEventListener('keydown',st.tecla,true);
+  document.removeEventListener('keyup',st.suelta,true);
+  document.removeEventListener('visibilitychange',st.oculta);
+  removeEventListener('resize',st.redim);
+  _iaCallar();
+  if(st.ac) try{ st.ac.close(); }catch(e){}
+  st.ov.remove();
+  // El resultado queda en el chat (si se jugó algo).
+  const box=$('ia-p-msjs'), res=st.resultados.map(r=>r[0]+' a '+r[1]+(r[0]>r[1]?' (ganaste vos)':' (gané yo)'));
+  let txt='';
+  if(res.length===1) txt='Partido de ping pong terminado: '+res[0]+'.';
+  else if(res.length>1) txt='Jugamos '+res.length+' partidos de ping pong: '+res.join(', ')+'.';
+  if(st.estado!=='fin'&&st.a+st.b>0) txt+=(txt?' ':'')+'Dejamos uno '+(st.a===st.b?'empatado ':'')+st.a+' a '+st.b+(st.a>st.b?' a tu favor':st.b>st.a?' a mi favor':'')+'. Cuando quieras jugamos otro con /pingpong.';
+  if(txt&&box) _iaAgregar(box,'a',txt+' 🏓');
+  const pn=$('ia-panel'); if(pn&&pn.classList.contains('open')) $('ia-p-txt').focus();
+}
+
+// /chess (también /chees y /ajedrez): partida de ajedrez contra Mártin.
+// Motor propio, sin librerías: tablero 10x12 (las casillas de afuera valen 7),
+// piezas 1..6 = peón, caballo, alfil, torre, dama, rey (blancas positivas,
+// negras negativas), reglas completas (enroque, al paso, coronación, jaque
+// mate, ahogado, 50 jugadas, triple repetición, material insuficiente) y una
+// búsqueda alfa-beta con profundidad creciente y tiempo máximo por jugada.
+// La función se usa en la página y también, convertida a texto, dentro de un
+// Web Worker para que Mártin piense sin trabar la pantalla.
+function _iaAjMotorFn(){
+  const AF=7, A120=[], A64=new Array(120).fill(-1);
+  for(let i=0;i<64;i++){ A120[i]=21+(i>>3)*10+(i&7); A64[A120[i]]=i; }
+  const DN=[-21,-19,-12,-8,8,12,19,21], DB=[-11,-9,9,11], DR=[-10,-1,1,10], DK=[-11,-10,-9,-1,1,9,10,11];
+  const VAL=[0,100,320,330,500,900,20000];
+  // Tablas de posición (vista de las blancas, de a8 a h1).
+  const PST=[null,
+    [0,0,0,0,0,0,0,0,50,50,50,50,50,50,50,50,10,10,20,30,30,20,10,10,5,5,10,25,25,10,5,5,0,0,0,20,20,0,0,0,5,-5,-10,0,0,-10,-5,5,5,10,10,-20,-20,10,10,5,0,0,0,0,0,0,0,0],
+    [-50,-40,-30,-30,-30,-30,-40,-50,-40,-20,0,0,0,0,-20,-40,-30,0,10,15,15,10,0,-30,-30,5,15,20,20,15,5,-30,-30,0,15,20,20,15,0,-30,-30,5,10,15,15,10,5,-30,-40,-20,0,5,5,0,-20,-40,-50,-40,-30,-30,-30,-30,-40,-50],
+    [-20,-10,-10,-10,-10,-10,-10,-20,-10,0,0,0,0,0,0,-10,-10,0,5,10,10,5,0,-10,-10,5,5,10,10,5,5,-10,-10,0,10,10,10,10,0,-10,-10,10,10,10,10,10,10,-10,-10,5,0,0,0,0,5,-10,-20,-10,-10,-10,-10,-10,-10,-20],
+    [0,0,0,0,0,0,0,0,5,10,10,10,10,10,10,5,-5,0,0,0,0,0,0,-5,-5,0,0,0,0,0,0,-5,-5,0,0,0,0,0,0,-5,-5,0,0,0,0,0,0,-5,-5,0,0,0,0,0,0,-5,0,0,0,5,5,0,0,0],
+    [-20,-10,-10,-5,-5,-10,-10,-20,-10,0,0,0,0,0,0,-10,-10,0,5,5,5,5,0,-10,-5,0,5,5,5,5,0,-5,0,0,5,5,5,5,0,-5,-10,5,5,5,5,5,0,-10,-10,0,5,0,0,0,0,-10,-20,-10,-10,-5,-5,-10,-10,-20],
+    [-30,-40,-40,-50,-50,-40,-40,-30,-30,-40,-40,-50,-50,-40,-40,-30,-30,-40,-40,-50,-50,-40,-40,-30,-30,-40,-40,-50,-50,-40,-40,-30,-20,-30,-30,-40,-40,-30,-30,-20,-10,-20,-20,-20,-20,-20,-20,-10,20,20,0,0,0,0,20,20,20,30,10,0,0,10,30,20],
+    // Rey en el final: al centro.
+    [-50,-40,-30,-20,-20,-30,-40,-50,-30,-20,-10,0,0,-10,-20,-30,-30,-10,20,30,30,20,-10,-30,-30,-10,30,40,40,30,-10,-30,-30,-10,30,40,40,30,-10,-30,-30,-10,20,30,30,20,-10,-30,-30,-30,0,0,0,0,-30,-30,-50,-30,-30,-30,-30,-30,-30,-50]];
+  // Qué derechos de enroque se pierden al mover desde o hacia cada casilla.
+  const ENR=new Array(120).fill(15); ENR[95]=12; ENR[98]=14; ENR[91]=13; ENR[25]=3; ENR[28]=11; ENR[21]=7;
+  const COLS='abcdefgh', LETRA=['','','C','A','T','D','R'];
+  const nom=s=>COLS[(s-21)%10]+(8-Math.floor((s-21)/10));
+  function nueva(){
+    const b=new Int8Array(120).fill(AF), f=[4,2,3,5,6,3,2,4];
+    for(let i=0;i<64;i++) b[A120[i]]=0;
+    for(let c=0;c<8;c++){ b[A120[c]]=-f[c]; b[A120[8+c]]=-1; b[A120[48+c]]=1; b[A120[56+c]]=f[c]; }
+    return {b,lado:1,enr:15,ep:0,medio:0};
+  }
+  function copia(p){ return {b:Int8Array.from(p.b),lado:p.lado,enr:p.enr,ep:p.ep,medio:p.medio}; }
+  function rey(b,L){ const k=6*L; for(let i=0;i<64;i++) if(b[A120[i]]===k) return A120[i]; return 0; }
+  // ¿La casilla s está atacada por el bando "por"?
+  function atacada(b,s,por){
+    if(por===1){ if(b[s+9]===1||b[s+11]===1) return true; } else if(b[s-9]===-1||b[s-11]===-1) return true;
+    for(const d of DN) if(b[s+d]===2*por) return true;
+    for(const d of DK) if(b[s+d]===6*por) return true;
+    for(const d of DB){ let t=s+d; while(b[t]===0) t+=d; if(b[t]===3*por||b[t]===5*por) return true; }
+    for(const d of DR){ let t=s+d; while(b[t]===0) t+=d; if(b[t]===4*por||b[t]===5*por) return true; }
+    return false;
+  }
+  function enJaque(p){ return atacada(p.b,rey(p.b,p.lado),-p.lado); }
+  // Jugadas pseudo-legales. m = {d: desde, a: hasta, pr: pieza coronada, f: 1 al paso, 2 enroque, 4 peón dos casillas}
+  function generar(p,soloCap){
+    const b=p.b, L=p.lado, out=[];
+    for(let i=0;i<64;i++){
+      const s=A120[i], x=b[s];
+      if(x===0||(x>0?1:-1)!==L) continue;
+      const t=x*L;
+      if(t===1){
+        const f=s-10*L, ini=L===1?(s>=81&&s<=88):(s>=31&&s<=38), ult=L===1?(f>=21&&f<=28):(f>=91&&f<=98);
+        if(b[f]===0){
+          if(ult){ for(const pr of [5,4,3,2]) out.push({d:s,a:f,pr}); }
+          else if(!soloCap){ out.push({d:s,a:f}); if(ini&&b[f-10*L]===0) out.push({d:s,a:f-10*L,f:4}); }
+        }
+        for(const k of [f-1,f+1]){
+          const y=b[k];
+          if(y!==AF&&y!==0&&(y>0?1:-1)===-L){ if(ult){ for(const pr of [5,4,3,2]) out.push({d:s,a:k,pr}); } else out.push({d:s,a:k}); }
+          else if(p.ep&&k===p.ep) out.push({d:s,a:k,f:1});
+        }
+      } else if(t===2||t===6){
+        for(const d of (t===2?DN:DK)){
+          const k=s+d, y=b[k];
+          if(y===AF) continue;
+          if(y===0){ if(!soloCap) out.push({d:s,a:k}); } else if((y>0?1:-1)===-L) out.push({d:s,a:k});
+        }
+        if(t===6&&!soloCap){
+          if(L===1&&s===95){
+            if((p.enr&1)&&b[96]===0&&b[97]===0&&b[98]===4&&!atacada(b,95,-1)&&!atacada(b,96,-1)&&!atacada(b,97,-1)) out.push({d:95,a:97,f:2});
+            if((p.enr&2)&&b[94]===0&&b[93]===0&&b[92]===0&&b[91]===4&&!atacada(b,95,-1)&&!atacada(b,94,-1)&&!atacada(b,93,-1)) out.push({d:95,a:93,f:2});
+          } else if(L===-1&&s===25){
+            if((p.enr&4)&&b[26]===0&&b[27]===0&&b[28]===-4&&!atacada(b,25,1)&&!atacada(b,26,1)&&!atacada(b,27,1)) out.push({d:25,a:27,f:2});
+            if((p.enr&8)&&b[24]===0&&b[23]===0&&b[22]===0&&b[21]===-4&&!atacada(b,25,1)&&!atacada(b,24,1)&&!atacada(b,23,1)) out.push({d:25,a:23,f:2});
+          }
+        }
+      } else {
+        for(const d of (t===3?DB:t===4?DR:DK)){
+          let k=s+d;
+          while(b[k]===0){ if(!soloCap) out.push({d:s,a:k}); k+=d; }
+          if(b[k]!==AF&&(b[k]>0?1:-1)===-L) out.push({d:s,a:k});
+        }
+      }
+    }
+    return out;
+  }
+  function hacer(p,m){
+    const b=p.b, x=b[m.d], u={cap:b[m.a],enr:p.enr,ep:p.ep,medio:p.medio};
+    b[m.a]=m.pr?m.pr*p.lado:x; b[m.d]=0;
+    if(m.f===1){ const c=m.a+10*p.lado; u.cap=b[c]; b[c]=0; }
+    else if(m.f===2){
+      if(m.a===97){ b[98]=0; b[96]=4; } else if(m.a===93){ b[91]=0; b[94]=4; }
+      else if(m.a===27){ b[28]=0; b[26]=-4; } else { b[21]=0; b[24]=-4; }
+    }
+    p.ep=m.f===4?(m.d+m.a)/2:0;
+    p.enr&=ENR[m.d]&ENR[m.a];
+    p.medio=(x===1||x===-1||u.cap)?0:p.medio+1;
+    p.lado=-p.lado;
+    return u;
+  }
+  function deshacer(p,m,u){
+    p.lado=-p.lado;
+    const b=p.b;
+    b[m.d]=m.pr?p.lado:b[m.a];
+    b[m.a]=u.cap;
+    if(m.f===1){ b[m.a]=0; b[m.a+10*p.lado]=u.cap; }
+    else if(m.f===2){
+      if(m.a===97){ b[96]=0; b[98]=4; } else if(m.a===93){ b[94]=0; b[91]=4; }
+      else if(m.a===27){ b[26]=0; b[28]=-4; } else { b[24]=0; b[21]=-4; }
+    }
+    p.enr=u.enr; p.ep=u.ep; p.medio=u.medio;
+  }
+  // Deja el rey propio en jaque = ilegal.
+  function legales(p){
+    return generar(p,false).filter(m=>{ const u=hacer(p,m), ok=!atacada(p.b,rey(p.b,-p.lado),p.lado); deshacer(p,m,u); return ok; });
+  }
+  function clave(p){ return Array.prototype.join.call(p.b,'')+'|'+p.lado+'|'+p.enr+'|'+p.ep; }
+  function insuficiente(p){
+    let menores=0;
+    for(let i=0;i<64;i++){ const t=Math.abs(p.b[A120[i]]); if(t===1||t===4||t===5) return false; if(t===2||t===3) menores++; }
+    return menores<=1;
+  }
+  // Notación algebraica en castellano (R rey, D dama, T torre, A alfil, C caballo).
+  function san(p,m,legs){
+    const x=Math.abs(p.b[m.d]); let s;
+    if(m.f===2) s=(m.a===97||m.a===27)?'O-O':'O-O-O';
+    else{
+      const cap=p.b[m.a]!==0||m.f===1;
+      if(x===1) s=(cap?nom(m.d)[0]+'x':'')+nom(m.a)+(m.pr?'='+LETRA[m.pr]:'');
+      else{
+        const otros=legs.filter(o=>o.a===m.a&&o.d!==m.d&&Math.abs(p.b[o.d])===x);
+        let dis='';
+        if(otros.length){
+          const n=nom(m.d);
+          if(!otros.some(o=>nom(o.d)[0]===n[0])) dis=n[0];
+          else if(!otros.some(o=>nom(o.d)[1]===n[1])) dis=n[1];
+          else dis=n;
+        }
+        s=LETRA[x]+dis+(cap?'x':'')+nom(m.a);
+      }
+    }
+    const u=hacer(p,m);
+    if(enJaque(p)) s+=legales(p).length?'+':'#';
+    deshacer(p,m,u);
+    return s;
+  }
+  function evaluar(p){
+    const b=p.b; let mat=0, s=0;
+    for(let i=0;i<64;i++){ const x=b[A120[i]]; if(x>1&&x<6) mat+=VAL[x]; else if(x<-1&&x>-6) mat+=VAL[-x]; }
+    const fin=mat<=2000;
+    for(let i=0;i<64;i++){
+      const x=b[A120[i]]; if(!x) continue;
+      if(x>0) s+=VAL[x]+(x===6&&fin?PST[7]:PST[x])[i];
+      else{ const t=-x, j=(7-(i>>3))*8+(i&7); s-=VAL[t]+(t===6&&fin?PST[7]:PST[t])[j]; }
+    }
+    return s*p.lado;
+  }
+  // Busca la mejor jugada para el que mueve. ms: tiempo máximo; prof: profundidad
+  // máxima; ruido: centipeones al azar que se suman en la raíz (nivel fácil);
+  // vistas: posiciones de la partida ya repetidas (para no regalar tablas, ni
+  // buscarlas si va ganando).
+  function buscar(pos,ms,prof,ruido,vistas){
+    const p=copia(pos), MATE=100000, limite=Date.now()+ms;
+    let nodos=0, corte=false;
+    const ordenar=movs=>{
+      for(const m of movs){ const y=p.b[m.a]; m.o=(y?10*VAL[y>0?y:-y]-VAL[Math.abs(p.b[m.d])]/100:0)+(m.pr?VAL[m.pr]:0)+(m.f===1?1000:0); }
+      movs.sort((x,y)=>y.o-x.o);
+    };
+    const q=(alfa,beta)=>{
+      if((++nodos&2047)===0&&Date.now()>limite) corte=true;
+      if(corte) return 0;
+      const sp=evaluar(p);
+      if(sp>=beta) return sp;
+      if(sp>alfa) alfa=sp;
+      const movs=generar(p,true); ordenar(movs);
+      for(const m of movs){
+        const u=hacer(p,m);
+        if(atacada(p.b,rey(p.b,-p.lado),p.lado)){ deshacer(p,m,u); continue; }
+        const v=-q(-beta,-alfa);
+        deshacer(p,m,u);
+        if(corte) return 0;
+        if(v>=beta) return v;
+        if(v>alfa) alfa=v;
+      }
+      return alfa;
+    };
+    const ab=(n,alfa,beta,ply)=>{
+      if((++nodos&2047)===0&&Date.now()>limite) corte=true;
+      if(corte) return 0;
+      if(p.medio>=100) return 0;
+      const jaque=atacada(p.b,rey(p.b,p.lado),-p.lado);
+      if(jaque&&ply<12) n++;
+      if(n<=0) return q(alfa,beta);
+      const movs=generar(p,false); ordenar(movs);
+      let legal=0, mejor=-2*MATE;
+      for(const m of movs){
+        const u=hacer(p,m);
+        if(atacada(p.b,rey(p.b,-p.lado),p.lado)){ deshacer(p,m,u); continue; }
+        legal++;
+        const v=-ab(n-1,-beta,-alfa,ply+1);
+        deshacer(p,m,u);
+        if(corte) return 0;
+        if(v>mejor) mejor=v;
+        if(v>alfa) alfa=v;
+        if(alfa>=beta) break;
+      }
+      if(!legal) return jaque?-MATE+ply:0;
+      return mejor;
+    };
+    const raiz=legales(p); if(!raiz.length) return null;
+    ordenar(raiz);
+    const rep=raiz.map(m=>{ const u=hacer(p,m), k=clave(p); deshacer(p,m,u); return vistas&&vistas[k]>=2; });
+    const azar=raiz.map(()=>ruido?(Math.random()*2-1)*ruido:0);
+    let elegida=raiz[0], hecha=0;
+    for(let n=1;n<=prof;n++){
+      let alfa=-2*MATE, mejor=null, mv=-2*MATE;
+      for(let i=0;i<raiz.length;i++){
+        const m=raiz[i], u=hacer(p,m);
+        // La ventana ya descuenta el azar: una jugada que no la supera no puede ganar.
+        let v=rep[i]?0:-ab(n-1,-2*MATE,-(alfa-azar[i]),1);
+        deshacer(p,m,u);
+        if(corte) break;
+        v+=azar[i];
+        if(v>mv){ mv=v; mejor=m; }
+        if(v>alfa) alfa=v;
+      }
+      if(mejor){ elegida=mejor; const k=raiz.indexOf(mejor); raiz.splice(k,1); raiz.unshift(mejor); rep.unshift(rep.splice(k,1)[0]); azar.unshift(azar.splice(k,1)[0]); }
+      if(corte) break;
+      hecha=n;
+      if(mv>MATE-1000||Date.now()>limite) break;
+    }
+    return {d:elegida.d,a:elegida.a,pr:elegida.pr||0,f:elegida.f||0,prof:hecha,nodos};
+  }
+  return {AF,A120,A64,VAL,nom,nueva,copia,rey,atacada,enJaque,generar,hacer,deshacer,legales,clave,insuficiente,san,evaluar,buscar};
+}
+// Pantalla del ajedrez. Vos elegís color (blancas por defecto) y nivel; Mártin
+// piensa en un Web Worker (si el navegador no lo deja, en la página). La
+// partida sin terminar queda guardada en este navegador (localStorage) y
+// sigue la próxima vez que escribas /chess. Al salir, el resultado queda en
+// el chat.
+const IA_AJ_NIVELES={facil:{ms:250,prof:2,ruido:60},normal:{ms:800,prof:4,ruido:3},dificil:{ms:2500,prof:10,ruido:0}};
+const IA_AJ_GLIFO=['','♟︎','♞︎','♝︎','♜︎','♛︎','♚︎'];
+const IA_AJ_FRASES={
+  comisteVos:['¡Auch! Esa me dolió.','Bien jugado, no la vi venir.','Me sacaste una pieza… anotado en la planilla.','Uh, se me escapó esa.'],
+  comioMartin:['Gracias por la pieza, la guardo en el pañol.','Esta me la quedo, ¿eh?','¿Esa la dejaste a propósito?','Una menos para vos.'],
+  jaqueMartin:['¡Jaque!','Jaque. Cuidá ese rey.','Jaque, mi amigo.'],
+  jaqueVos:['Uy, jaque. Dejame pensar…','Jaque… tranquilo, tengo salida.','¡Epa! Jaque.'],
+  nivel:{facil:'Bueno, juego tranqui.',normal:'Juego en serio, pero sin matarme.',dificil:'Uh, me pongo los anteojos. Ahora pienso de verdad.'}
+};
+let _iaAj=null, _iaAjM=null;
+function _iaAjMotor(){ return _iaAjM||(_iaAjM=_iaAjMotorFn()); }
+function _iaAjGuardada(){
+  try{ const g=JSON.parse(localStorage.getItem('ia_aj_partida')||'null'); return g&&Array.isArray(g.h)&&g.h.length?g:null; }catch(e){ return null; }
+}
+function iaAjedrez(){
+  if(_iaAj) return;
+  _iaCallar(); iaDiscoCerrar(); ia67Cerrar(); iaBoomCerrar(); iaPingPongCerrar();
+  const M=_iaAjMotor(), guard=_iaAjGuardada();
+  let nivel='normal'; try{ nivel=localStorage.getItem('ia_aj_nivel')||'normal'; }catch(e){}
+  if(!IA_AJ_NIVELES[nivel]) nivel='normal';
+  const ov=document.createElement('div');
+  ov.className='ia-aj'; ov.tabIndex=-1; ov.setAttribute('role','dialog'); ov.setAttribute('aria-label','Ajedrez contra Mártin');
+  ov.innerHTML='<button type="button" class="ia-aj-cerrar">'+IA_SVG.x+'Salir</button>'
+    +'<div class="ia-aj-caja">'
+    +'<div class="ia-aj-izq"><div class="ia-aj-tab"></div><div class="ia-aj-aviso"></div></div>'
+    +'<div class="ia-aj-lado">'
+    +'<div class="ia-aj-martin"><span class="ia-aj-cara"><img alt=""></span><div><b>Mártin</b><div class="ia-aj-estado"></div></div></div>'
+    +'<div class="ia-aj-dice-zona"><span class="ia-aj-dice"></span></div>'
+    +'<div class="ia-aj-caps"><div><span>Le comiste</span><span class="ia-aj-cap-vos"></span></div><div><span>Te comió</span><span class="ia-aj-cap-mar"></span></div></div>'
+    +'<div class="ia-aj-jugadas"></div>'
+    +'<div class="ia-aj-op"><span>Nivel</span><div class="ia-aj-seg" data-op="nivel"><button type="button" data-v="facil">Fácil</button><button type="button" data-v="normal">Normal</button><button type="button" data-v="dificil">Difícil</button></div></div>'
+    +'<div class="ia-aj-op"><span>Jugás con</span><div class="ia-aj-seg" data-op="color"><button type="button" data-v="1">Blancas</button><button type="button" data-v="-1">Negras</button></div></div>'
+    +'<div class="ia-aj-bots"><button type="button" class="ia-aj-deshacer">Deshacer jugada</button><button type="button" class="ia-aj-nueva">Nueva partida</button></div>'
+    +'</div></div>';
+  document.body.appendChild(ov);
+  const q=s=>ov.querySelector(s);
+  const st={ov,M,tab:q('.ia-aj-tab'),aviso:q('.ia-aj-aviso'),estado:q('.ia-aj-estado'),cara:q('.ia-aj-cara img'),dice:q('.ia-aj-dice'),
+    capVos:q('.ia-aj-cap-vos'),capMar:q('.ia-aj-cap-mar'),jugadas:q('.ia-aj-jugadas'),btDes:q('.ia-aj-deshacer'),btNueva:q('.ia-aj-nueva'),
+    color:guard&&guard.color===-1?-1:1,nivel,pid:0,sel:0,arr:null,promo:null,pensando:false,resultados:[],contada:false};
+  st.colorProx=st.color;
+  _iaAj=st;
+  st.cara.src=_iaFoto(false);
+  try{ st.record=JSON.parse(localStorage.getItem('ia_aj_record')||'null'); }catch(e){}
+  if(!st.record||typeof st.record.g!=='number') st.record={g:0,p:0,e:0};
+  q('.ia-aj-cerrar').onclick=iaAjedrezCerrar;
+  st.btDes.onclick=()=>_iaAjDeshacer(st);
+  st.btNueva.onclick=()=>_iaAjBotonNueva(st);
+  ov.querySelectorAll('.ia-aj-seg button').forEach(b=>b.onclick=()=>_iaAjOpcion(st,b.parentNode.dataset.op,b.dataset.v));
+  _iaAjEventosTablero(st);
+  st.tecla=e=>{
+    if(e.key!=='Escape') return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    if(st.promo){ st.promo=null; _iaAjAviso(st,''); return; }
+    iaAjedrezCerrar();
+  };
+  document.addEventListener('keydown',st.tecla,true);
+  st.redim=()=>_iaAjMedidas(st);
+  addEventListener('resize',st.redim);
+  _iaAjMedidas(st);
+  _iaAjReiniciar(st,guard?guard.h:[]);
+  if(st.fin){ _iaAjReiniciar(st,[]); }
+  _iaAjDibujar(st);
+  ov.focus();
+  if(guard&&st.hist.length) _iaAjDecir(st,'Seguimos la partida que dejamos. '+(_iaAjMiTurno(st)?'Te toca a vos.':'Me toca a mí.'),true);
+  else _iaAjDecir(st,st.color===1?'¡Dale! Jugás con blancas, así que movés vos primero.':'¡Dale! Jugás con negras, así que arranco yo.',true);
+  _iaAjPensar(st);
+}
+function _iaAjMedidas(st){
+  const chico=innerWidth<=760;
+  const lado=chico?Math.min(innerWidth-24,560):Math.min(innerHeight-48,innerWidth-370,640);
+  st.ov.style.setProperty('--c',Math.max(28,Math.floor(lado/8))+'px');
+}
+function _iaAjMiTurno(st){ return !st.fin&&!st.pensando&&st.pos.lado===st.color; }
+// Arma la posición desde el principio repitiendo las jugadas guardadas.
+function _iaAjReiniciar(st,hist){
+  const M=st.M;
+  st.pos=M.nueva(); st.hist=[]; st.san=[]; st.caps={'1':[],'-1':[]}; st.ultima=null; st.fin=null; st.sel=0;
+  st.claves={}; st.claves[M.clave(st.pos)]=1;
+  st.legs=M.legales(st.pos);
+  for(const h of hist||[]){
+    const m=Array.isArray(h)&&st.legs.find(x=>x.d===h[0]&&x.a===h[1]&&(x.pr||0)===(h[2]||0));
+    if(!m) break;
+    _iaAjAplicar(st,m);
+    if(_iaAjVerFin(st)) break;
+  }
+  _iaAjVerFin(st);
+}
+function _iaAjAplicar(st,m){
+  const M=st.M, p=st.pos, L=p.lado;
+  const san=M.san(p,m,st.legs), cap=m.f===1?1:Math.abs(p.b[m.a]);
+  if(cap) st.caps[L].push(cap);
+  M.hacer(p,m);
+  st.hist.push([m.d,m.a,m.pr||0]); st.san.push(san); st.ultima=m;
+  const k=M.clave(p); st.claves[k]=(st.claves[k]||0)+1;
+  st.legs=M.legales(p);
+  return {cap,jaque:/[+#]$/.test(san)};
+}
+function _iaAjVerFin(st){
+  const M=st.M, p=st.pos;
+  let f=null;
+  if(!st.legs.length) f=M.enJaque(p)?{tipo:'mate',gana:-p.lado}:{tipo:'ahogado'};
+  else if(p.medio>=100) f={tipo:'50'};
+  else if(st.claves[M.clave(p)]>=3) f={tipo:'rep'};
+  else if(M.insuficiente(p)) f={tipo:'mat'};
+  st.fin=f;
+  return f;
+}
+function _iaAjDibujar(st){
+  const M=st.M, p=st.pos, flip=st.color===-1, mio=_iaAjMiTurno(st);
+  const enJaque=(!st.fin||st.fin.tipo==='mate')&&M.enJaque(p)?M.rey(p.b,p.lado):0;
+  const dest=st.sel?st.legs.filter(m=>m.d===st.sel):[];
+  let h='';
+  for(let v=0;v<64;v++){
+    const i=flip?63-v:v, s=M.A120[i], r=i>>3, c=i&7, x=p.b[s];
+    let cl='ia-aj-c '+(((r+c)&1)?'osc':'cla');
+    if(st.ultima&&(s===st.ultima.d||s===st.ultima.a)) cl+=' ult';
+    if(s===st.sel) cl+=' sel';
+    if(s===enJaque) cl+=' jaque';
+    const d=dest.find(m=>m.a===s); if(d) cl+=(x||d.f===1)?' come':' va';
+    if(mio&&x&&(x>0?1:-1)===st.color&&st.legs.some(m=>m.d===s)) cl+=' mia';
+    h+='<div class="'+cl+'" data-s="'+s+'">';
+    if(x) h+='<span class="ia-aj-p '+(x>0?'bl':'ne')+'">'+IA_AJ_GLIFO[Math.abs(x)]+'</span>';
+    if((v>>3)===7) h+='<span class="ia-aj-co f">'+'abcdefgh'[c]+'</span>';
+    if((v&7)===0) h+='<span class="ia-aj-co r">'+(8-r)+'</span>';
+    h+='</div>';
+  }
+  st.tab.innerHTML=h;
+  // Piezas comidas y ventaja de material.
+  const glifos=(l,col)=>l.slice().sort((a,b)=>b-a).map(t=>'<span class="ia-aj-p '+col+'">'+IA_AJ_GLIFO[t]+'</span>').join('');
+  const suma=l=>l.reduce((a,t)=>a+M.VAL[t],0), dif=Math.round((suma(st.caps[st.color])-suma(st.caps[-st.color]))/100);
+  const colVos=st.color===1?'ne':'bl', colMar=st.color===1?'bl':'ne';
+  st.capVos.innerHTML=glifos(st.caps[st.color],colVos)+(dif>0?'<em>+'+dif+'</em>':'');
+  st.capMar.innerHTML=glifos(st.caps[-st.color],colMar)+(dif<0?'<em>+'+(-dif)+'</em>':'');
+  // Lista de jugadas.
+  let j='';
+  for(let i=0;i<st.san.length;i+=2) j+='<span class="n">'+(i/2+1)+'.</span><span>'+st.san[i]+'</span><span>'+(st.san[i+1]||'')+'</span>';
+  st.jugadas.innerHTML=j||'<span class="vacio">Todavía no hay jugadas.</span>';
+  st.jugadas.scrollTop=st.jugadas.scrollHeight;
+  // Estado y botones.
+  st.estado.textContent=st.fin?_iaAjTextoFin(st).titulo:st.pensando?'Pensando…':mio?(M.enJaque(p)?'¡Estás en jaque! Te toca':'Te toca mover'):'Le toca a Mártin';
+  st.cara.parentNode.classList.toggle('piensa',st.pensando);
+  st.ov.querySelectorAll('.ia-aj-seg[data-op="nivel"] button').forEach(b=>b.classList.toggle('on',b.dataset.v===st.nivel));
+  st.ov.querySelectorAll('.ia-aj-seg[data-op="color"] button').forEach(b=>b.classList.toggle('on',+b.dataset.v===st.colorProx));
+  st.btDes.disabled=!_iaAjPuedeDeshacer(st);
+}
+function _iaAjEventosTablero(st){
+  const tab=st.tab;
+  tab.addEventListener('pointerdown',e=>{
+    const c=e.target.closest('.ia-aj-c'); if(!c||!_iaAjMiTurno(st)||st.promo) return;
+    const s=+c.dataset.s, x=st.pos.b[s];
+    if(st.sel&&st.sel!==s&&st.legs.some(m=>m.d===st.sel&&m.a===s)){ _iaAjIntentar(st,st.sel,s); return; }
+    if(x&&(x>0?1:-1)===st.color&&st.legs.some(m=>m.d===s)){
+      const era=st.sel===s;
+      st.sel=s; _iaAjDibujar(st);
+      st.arr={s,era,x0:e.clientX,y0:e.clientY,fantasma:null};
+      try{ tab.setPointerCapture(e.pointerId); }catch(er){}
+      e.preventDefault();
+    } else if(st.sel){ st.sel=0; _iaAjDibujar(st); }
+  });
+  tab.addEventListener('pointermove',e=>{
+    const a=st.arr; if(!a) return;
+    if(!a.fantasma){
+      if(Math.hypot(e.clientX-a.x0,e.clientY-a.y0)<6) return;
+      const x=st.pos.b[a.s], f=document.createElement('span');
+      f.className='ia-aj-p ia-aj-fantasma '+(x>0?'bl':'ne'); f.innerHTML=IA_AJ_GLIFO[Math.abs(x)];
+      st.ov.appendChild(f); a.fantasma=f;
+      const orig=tab.querySelector('[data-s="'+a.s+'"] .ia-aj-p'); if(orig) orig.style.opacity='.3';
+    }
+    a.fantasma.style.left=e.clientX+'px'; a.fantasma.style.top=e.clientY+'px';
+  });
+  const soltar=(e,cancelar)=>{
+    const a=st.arr; st.arr=null; if(!a) return;
+    if(a.fantasma){
+      a.fantasma.remove();
+      const el=cancelar?null:document.elementFromPoint(e.clientX,e.clientY), c=el&&el.closest&&el.closest('.ia-aj-c'), s2=c?+c.dataset.s:0;
+      if(s2&&s2!==a.s&&st.legs.some(m=>m.d===a.s&&m.a===s2)) _iaAjIntentar(st,a.s,s2); else _iaAjDibujar(st);
+    } else if(a.era&&!cancelar){ st.sel=0; _iaAjDibujar(st); }
+  };
+  tab.addEventListener('pointerup',e=>soltar(e,false));
+  tab.addEventListener('pointercancel',e=>soltar(e,true));
+}
+// Si la jugada es una coronación, primero pregunta la pieza.
+function _iaAjIntentar(st,d,a){
+  const ops=st.legs.filter(m=>m.d===d&&m.a===a);
+  if(!ops.length) return;
+  if(ops.length===1){ _iaAjJugarYo(st,ops[0]); return; }
+  st.promo=ops;
+  const col=st.color===1?'bl':'ne';
+  _iaAjAviso(st,'<div class="ia-aj-card"><h3>Coroná el peón</h3><p>¿Qué pieza querés?</p><div class="ia-aj-promo">'
+    +[5,4,3,2].map(t=>'<button type="button" data-t="'+t+'" title="'+['','','Caballo','Alfil','Torre','Dama'][t]+'"><span class="ia-aj-p '+col+'">'+IA_AJ_GLIFO[t]+'</span></button>').join('')
+    +'</div></div>');
+  st.aviso.querySelectorAll('.ia-aj-promo button').forEach(b=>b.onclick=()=>{
+    const m=st.promo&&st.promo.find(x=>x.pr===+b.dataset.t); st.promo=null; _iaAjAviso(st,''); if(m) _iaAjJugarYo(st,m);
+  });
+}
+function _iaAjAviso(st,html){ st.aviso.innerHTML=html; st.aviso.classList.toggle('ver',!!html); }
+function _iaAjJugarYo(st,m){
+  if(!_iaAjMiTurno(st)) return;
+  st.sel=0;
+  const r=_iaAjAplicar(st,m);
+  _iaAjSonido(st,r.jaque?'jaque':r.cap?'come':'mueve');
+  _iaAjVerFin(st); _iaAjGuardar(st); _iaAjDibujar(st);
+  if(st.fin){ _iaAjTerminar(st); return; }
+  if(r.jaque&&Math.random()<0.7) _iaAjDecir(st,_iaPPAzar(IA_AJ_FRASES.jaqueVos));
+  else if(r.cap>=2&&Math.random()<0.6) _iaAjDecir(st,_iaPPAzar(IA_AJ_FRASES.comisteVos));
+  _iaAjPensar(st);
+}
+function _iaAjJugarMartin(st,m){
+  const r=_iaAjAplicar(st,m);
+  _iaAjSonido(st,r.jaque?'jaque':r.cap?'come':'mueve');
+  _iaAjVerFin(st); _iaAjGuardar(st); _iaAjDibujar(st);
+  if(st.fin){ _iaAjTerminar(st); return; }
+  if(r.jaque) _iaAjDecir(st,_iaPPAzar(IA_AJ_FRASES.jaqueMartin));
+  else if(r.cap>=2&&Math.random()<0.6) _iaAjDecir(st,_iaPPAzar(IA_AJ_FRASES.comioMartin));
+}
+// Turno de Mártin: busca la jugada en el Worker (o en la página si no hay).
+function _iaAjPensar(st){
+  if(st.fin||st.pos.lado===st.color) return;
+  st.pensando=true; _iaAjDibujar(st);
+  const M=st.M, id=++st.pid, nv=IA_AJ_NIVELES[st.nivel], pos=M.copia(st.pos), vistas=Object.assign({},st.claves), t0=performance.now();
+  const listo=r=>{
+    if(_iaAj!==st||st.pid!==id) return;
+    // Un ratito mínimo, para que no parezca que mueve antes de que veas tu jugada.
+    setTimeout(()=>{
+      if(_iaAj!==st||st.pid!==id) return;
+      st.pensando=false;
+      const m=r&&st.legs.find(x=>x.d===r.d&&x.a===r.a&&(x.pr||0)===(r.pr||0));
+      if(m) _iaAjJugarMartin(st,m); else _iaAjDibujar(st);
+    },Math.max(0,450-(performance.now()-t0)));
+  };
+  // Primera jugada con blancas: una apertura de verdad al azar (en la apertura
+  // las jugadas valen casi lo mismo para el motor y podría salir con un peón de costado).
+  if(!st.hist.length){
+    const ap=['e2e4','d2d4','c2c4','g1f3'][Math.floor(Math.random()*4)];
+    const m=st.legs.find(x=>M.nom(x.d)+M.nom(x.a)===ap);
+    if(m){ setTimeout(()=>listo(m),300); return; }
+  }
+  if(st.worker===undefined) st.worker=_iaAjCrearWorker(st);
+  if(st.worker){ st.esperando={id,listo,pos,nv,vistas}; st.worker.postMessage({id,pos,ms:nv.ms,prof:nv.prof,ruido:nv.ruido,vistas}); }
+  else setTimeout(()=>listo(M.buscar(pos,nv.ms,nv.prof,nv.ruido,vistas)),30);
+}
+function _iaAjCrearWorker(st){
+  try{
+    const src='const M=('+_iaAjMotorFn.toString()+')();onmessage=e=>{const d=e.data;postMessage({id:d.id,r:M.buscar(d.pos,d.ms,d.prof,d.ruido,d.vistas)});};';
+    st.workerUrl=URL.createObjectURL(new Blob([src],{type:'text/javascript'}));
+    const w=new Worker(st.workerUrl);
+    w.onmessage=e=>{ const q=st.esperando; if(q&&q.id===e.data.id){ st.esperando=null; q.listo(e.data.r); } };
+    w.onerror=e=>{
+      if(e&&e.preventDefault) e.preventDefault();
+      try{ w.terminate(); }catch(x){}
+      st.worker=false;
+      const q=st.esperando; st.esperando=null;
+      if(q) setTimeout(()=>q.listo(st.M.buscar(q.pos,q.nv.ms,q.nv.prof,q.nv.ruido,q.vistas)),30);
+    };
+    return w;
+  }catch(e){ return false; }
+}
+function _iaAjPuedeDeshacer(st){
+  const L0=st.hist.length;
+  for(let k=L0-1;k>=0;k--) if((k%2===0?1:-1)===st.color) return true;   // hay al menos una jugada tuya
+  return false;
+}
+// Saca tu última jugada (y la respuesta de Mártin, si ya la hizo).
+function _iaAjDeshacer(st){
+  if(!_iaAjPuedeDeshacer(st)) return;
+  st.pid++; st.pensando=false; st.esperando=null; st.promo=null;
+  const h=st.hist.slice();
+  h.pop();
+  while(h.length&&(h.length%2===0?1:-1)!==st.color) h.pop();
+  _iaAjReiniciar(st,h); _iaAjAviso(st,'');
+  _iaAjGuardar(st); _iaAjDibujar(st);
+  _iaAjPensar(st);
+}
+function _iaAjBotonNueva(st){
+  const b=st.btNueva, enJuego=!st.fin&&_iaAjPuedeDeshacer(st);
+  if(enJuego&&!b.classList.contains('confirma')){
+    b.classList.add('confirma'); b.textContent='¿Seguro? Tocá de nuevo';
+    clearTimeout(st.confT); st.confT=setTimeout(()=>{ b.classList.remove('confirma'); b.textContent='Nueva partida'; },3000);
+    return;
+  }
+  _iaAjNueva(st);
+}
+function _iaAjNueva(st){
+  clearTimeout(st.confT); st.btNueva.classList.remove('confirma'); st.btNueva.textContent='Nueva partida';
+  st.pid++; st.pensando=false; st.esperando=null; st.promo=null; st.contada=false;
+  st.color=st.colorProx;
+  _iaAjReiniciar(st,[]); _iaAjAviso(st,'');
+  _iaAjGuardar(st); _iaAjDibujar(st);
+  _iaAjDecir(st,st.color===1?'¡Partida nueva! Jugás con blancas, movés vos.':'¡Partida nueva! Jugás con negras, arranco yo.');
+  _iaAjPensar(st);
+}
+function _iaAjOpcion(st,op,v){
+  if(op==='nivel'){
+    if(!IA_AJ_NIVELES[v]||st.nivel===v) return;
+    st.nivel=v; _iaAjGuardar(st); _iaAjDibujar(st);
+    _iaAjDecir(st,IA_AJ_FRASES.nivel[v]);
+    return;
+  }
+  const c=+v===-1?-1:1;
+  if(c===st.colorProx) return;
+  st.colorProx=c;
+  // Si la partida recién empieza (o ya terminó) cambia en el acto; si no, en la próxima.
+  if(st.fin||!_iaAjPuedeDeshacer(st)) _iaAjNueva(st);
+  else{ _iaAjDibujar(st); _iaAjDecir(st,'Listo, con '+(c===1?'blancas':'negras')+' jugás la próxima. Tocá "Nueva partida" cuando quieras.'); }
+}
+function _iaAjGuardar(st){
+  try{
+    if(st.fin||!st.hist.length) localStorage.removeItem('ia_aj_partida');
+    else localStorage.setItem('ia_aj_partida',JSON.stringify({h:st.hist,color:st.color}));
+    localStorage.setItem('ia_aj_nivel',st.nivel);
+  }catch(e){}
+}
+function _iaAjTextoFin(st){
+  const f=st.fin, n=Math.ceil(st.hist.length/2);
+  if(f.tipo==='mate') return f.gana===st.color
+    ?{titulo:'¡Jaque mate! Ganaste',chat:'ganaste por jaque mate en '+n+' jugadas',frase:'¡Jaque mate! Me ganaste, sos un crack. ¿Otra?',res:'g'}
+    :{titulo:'Jaque mate. Ganó Mártin',chat:'gané yo por jaque mate en '+n+' jugadas',frase:'¡Jaque mate! Esta vez gané yo. ¿La revancha?',res:'p'};
+  const motivo={ahogado:'por rey ahogado','50':'por 50 jugadas sin capturas ni movimientos de peón',rep:'por triple repetición',mat:'por material insuficiente'}[f.tipo];
+  return {titulo:'Tablas',motivo,chat:'tablas '+motivo+' en '+n+' jugadas',frase:'Tablas. Partida pareja, ¿eh? ¿Jugamos otra?',res:'e'};
+}
+function _iaAjTerminar(st){
+  const t=_iaAjTextoFin(st);
+  if(!st.contada){
+    st.contada=true; st.record[t.res]++; st.resultados.push(t.chat);
+    try{ localStorage.setItem('ia_aj_record',JSON.stringify(st.record)); }catch(e){}
+  }
+  _iaAjAviso(st,'<div class="ia-aj-card"><h3>'+t.titulo+'</h3>'
+    +'<p>'+(t.motivo?t.motivo[0].toUpperCase()+t.motivo.slice(1)+', ':'')+'en '+Math.ceil(st.hist.length/2)+' jugadas.</p>'
+    +'<div class="hist">En total: ganaste '+st.record.g+', Mártin '+st.record.p+' y tablas '+st.record.e+'</div>'
+    +'<div class="bots"><button type="button" class="ia-aj-pri">Nueva partida</button><button type="button" class="ia-aj-sec">Ver el tablero</button></div></div>');
+  st.aviso.querySelector('.ia-aj-pri').onclick=()=>_iaAjNueva(st);
+  st.aviso.querySelector('.ia-aj-sec').onclick=()=>_iaAjAviso(st,'');
+  st.aviso.querySelector('.ia-aj-pri').focus();
+  _iaAjSonido(st,t.res==='g'?'gana':t.res==='p'?'pierde':'mueve');
+  _iaAjDecir(st,t.frase,true);
+}
+// Globito de Mártin (en voz alta solo al empezar y al terminar).
+function _iaAjDecir(st,txt,hablar){
+  clearTimeout(st.diceT); clearInterval(st.boca);
+  st.dice.textContent=txt; st.dice.classList.add('ver');
+  const ms=Math.max(2000,txt.length*65);
+  st.diceT=setTimeout(()=>{ st.dice.classList.remove('ver'); clearInterval(st.boca); st.cara.src=_iaFoto(false); },ms);
+  if(hablar&&!_iaMudo()) _iaHablar(txt,st.cara);
+  else{ let k=0; st.boca=setInterval(()=>{ k=(k+1)%4; st.cara.src=_iaFoto(false,[0,1,2,1][k]); },160); setTimeout(()=>{ clearInterval(st.boca); st.cara.src=_iaFoto(false); },Math.min(ms,txt.length*45)); }
+}
+function _iaAjSonido(st,tipo){
+  if(_iaMudo()) return;
+  const AC=window.AudioContext||window.webkitAudioContext; if(!AC) return;
+  try{ st.ac=st.ac||new AC(); if(st.ac.state==='suspended') st.ac.resume(); }catch(e){ return; }
+  const ac=st.ac, t0=ac.currentTime;
+  const tono=(f1,f2,dur,vol,forma,ini)=>{
+    const o=ac.createOscillator(), g=ac.createGain(), t=t0+(ini||0);
+    o.type=forma||'sine'; o.frequency.setValueAtTime(f1,t); o.frequency.exponentialRampToValueAtTime(f2,t+dur);
+    g.gain.setValueAtTime(vol,t); g.gain.exponentialRampToValueAtTime(0.001,t+dur);
+    o.connect(g); g.connect(ac.destination); o.start(t); o.stop(t+dur+0.02);
+  };
+  if(tipo==='mueve'){ tono(420,160,0.07,0.3,'triangle'); }
+  else if(tipo==='come'){ tono(300,90,0.11,0.38,'triangle'); tono(1400,700,0.03,0.08,'square'); }
+  else if(tipo==='jaque'){ tono(420,160,0.07,0.3,'triangle'); tono(880,880,0.12,0.14,'sine',0.08); tono(1175,1175,0.16,0.14,'sine',0.18); }
+  else if(tipo==='gana') [523,659,784,1047].forEach((f,i)=>tono(f,f,0.22,0.18,'triangle',i*0.12));
+  else if(tipo==='pierde') [392,349,330,262].forEach((f,i)=>tono(f,f*0.98,0.26,0.16,'triangle',i*0.16));
+}
+function iaAjedrezCerrar(){
+  const st=_iaAj; if(!st) return;
+  _iaAj=null;
+  st.pid++; clearTimeout(st.diceT); clearInterval(st.boca); clearTimeout(st.confT);
+  if(st.worker) try{ st.worker.terminate(); }catch(e){}
+  if(st.workerUrl) URL.revokeObjectURL(st.workerUrl);
+  document.removeEventListener('keydown',st.tecla,true);
+  removeEventListener('resize',st.redim);
+  _iaCallar();
+  if(st.ac) try{ st.ac.close(); }catch(e){}
+  st.ov.remove();
+  // El resultado queda en el chat.
+  const box=$('ia-p-msjs'), r=st.resultados;
+  let txt='';
+  if(r.length===1) txt='Partida de ajedrez terminada: '+r[0]+'.';
+  else if(r.length>1) txt='Jugamos '+r.length+' partidas de ajedrez: '+r.join('; ')+'.';
+  if(!st.fin&&_iaAjPuedeDeshacer(st)) txt+=(txt?' ':'')+'Dejamos una partida en la jugada '+Math.ceil(st.hist.length/2)+'. Te la guardé: escribí /chess y la seguimos.';
+  if(txt&&box) _iaAgregar(box,'a',txt+' ♟︎');
+  const pn=$('ia-panel'); if(pn&&pn.classList.contains('open')) $('ia-p-txt').focus();
 }
 
 // /poop: Mártin se tira un pedo (sonido sintetizado y nube verde) y frunce el
@@ -4632,6 +5887,8 @@ function load(p){
     configuracion:loadConfig,
     carga_masiva:loadCargaMasiva,
     auditoria:loadAuditoria,
+    registro_cambios:loadRegistroCambios,
+    tablets_planta:loadTabletsPlanta,
     ia:loadIA
   };
   if(map[p])map[p]();
@@ -4669,7 +5926,7 @@ function closeMo(id){
 document.querySelectorAll('.ov').forEach(el=>el.addEventListener('click',e=>{if(e.target===el)el.classList.remove('open');}));
 
 function setupRoles(){
- if(ROL==='admin'){ $('nav-usr').style.display='block'; $('nav-aud').style.display='block'; }
+ if(ROL==='admin'){ $('nav-usr').style.display='block'; $('nav-aud').style.display='block'; $('nav-cam').style.display='block'; $('nav-tab').style.display='block'; }
  if(IA_PERMITIDA){ $('nav-ia').style.display='block'; iaIniciarGlobo(); }
  
   // Apply module permissions to sidebar nav items
@@ -4693,7 +5950,7 @@ function setupRoles(){
     let next = sl.nextElementSibling;
     let hasVisible = false;
     while(next && !next.classList.contains('sl')){
-      if(next.style.display !== 'none' && next.id !== 'nav-usr' && next.id !== 'nav-aud') hasVisible = true;
+      if(next.style.display !== 'none' && next.id !== 'nav-usr' && next.id !== 'nav-aud' && next.id !== 'nav-cam' && next.id !== 'nav-tab') hasVisible = true;
       next = next.nextElementSibling;
     }
     if(!hasVisible) sl.style.display = 'none';
@@ -4716,7 +5973,7 @@ function setupRoles(){
     const el=$('b-sc');if(el)el.dataset.permitido='1';
   }
   if(['admin','almacen','vendedor'].includes(ROL)){const el=$('b-oc');if(el)el.dataset.permitido='1';}
-  if(['admin','vendedor'].includes(ROL)){const el=$('b-occ');if(el)el.style.display='inline-flex';}
+  if(PUEDE_OCC){const el=$('b-occ');if(el)el.style.display='inline-flex';}
   if(['admin','almacen','vendedor'].includes(ROL)){const el=$('b-cot');if(el)el.dataset.permitido='1';}
   // Compras arranca en Solicitudes: deja visible solo el botón de esa vista.
   if(typeof mostrarVistaCompras==='function') mostrarVistaCompras(compView||'solicitudes');
@@ -6360,6 +7617,391 @@ async function verAvanceOC(ocId, ocNumero){
   openMo('mo-avance-oc');
 }
 
+// ── Registro de cambios del sistema (solo admin) ─────────────────────────────
+// Historial de los cambios de código cargado a mano. Obligatorios: fecha y
+// descripción. Se trae todo de una vez y se filtra acá (son pocas filas).
+const CAM_NOMBRE={{ nombre|tojson }};
+let _cambios=[];
+const _camAbiertos=new Set();   // filas desplegadas en la lista
+
+function toggleCambio(id){
+  if(_camAbiertos.has(id)) _camAbiertos.delete(id); else _camAbiertos.add(id);
+  renderCambios();
+}
+
+function _camTexto(r){
+  return [r.descripcion,r.detalle,r.autor]
+    .filter(Boolean).join(' ').toLowerCase();
+}
+
+async function loadRegistroCambios(){
+  $('cam-list').innerHTML='<div class="ld">Cargando...</div>';
+  const data=await api('/api/registro-cambios');
+  if(!Array.isArray(data)){
+    $('cam-list').innerHTML='<div class="em">'+audEsc((data&&data.error)||'No se pudo leer el registro.')+'</div>';
+    return;
+  }
+  _cambios=data;
+  renderCambios();
+}
+
+function clearFiltrosCambios(){
+  ['cam-desde','cam-hasta','cam-q'].forEach(function(i){const e=$(i);if(e)e.value='';});
+  renderCambios();
+}
+
+function renderCambios(){
+  const desde=$('cam-desde').value, hasta=$('cam-hasta').value;
+  const palabras=($('cam-q').value||'').toLowerCase().split(/\s+/).filter(Boolean);
+  const filas=_cambios.filter(function(r){
+    if(desde&&r.fecha<desde) return false;
+    if(hasta&&r.fecha>hasta) return false;
+    if(palabras.length){ const t=_camTexto(r); if(!palabras.every(function(p){return t.indexOf(p)>=0;})) return false; }
+    return true;
+  });
+  $('cam-total').textContent=filas.length.toLocaleString('es-AR');
+  if(!_cambios.length){
+    $('cam-list').innerHTML='<div class="em">Todavía no hay cambios registrados. Usá "+ Nuevo cambio" para cargar el primero.</div>';
+    return;
+  }
+  if(!filas.length){
+    $('cam-list').innerHTML='<div class="em">No hay cambios que coincidan con el filtro.</div>';
+    return;
+  }
+  const vacio='<span style="color:var(--color-text-tertiary)">—</span>';
+  const corto=function(v,n){ v=v||''; return v.length>n?audEsc(v.slice(0,n))+'…':audEsc(v); };
+  let h='<table><tr><th>Fecha</th><th>Descripción</th><th>Quién</th></tr>';
+  filas.forEach(function(r){
+    const abierto=_camAbiertos.has(r.id);
+    h+='<tr style="cursor:pointer" title="'+(abierto?'Cerrar':'Ver todo el cambio')+'" onclick="toggleCambio('+r.id+')">'
+      +'<td style="white-space:nowrap"><span style="display:inline-block;width:12px;color:var(--color-text-secondary)">'+(abierto?'▾':'▸')+'</span> '+audEsc(fmtD(r.fecha))+'</td>'
+      +'<td><b>'+audEsc(r.descripcion)+'</b>'
+        +(r.detalle&&!abierto?'<div style="font-size:11px;color:var(--color-text-secondary);margin-top:2px">'+corto(r.detalle,140)+'</div>':'')+'</td>'
+      +'<td>'+(r.autor?audEsc(r.autor):vacio)+'</td>'
+      +'</tr>';
+    if(abierto){
+      h+='<tr><td></td><td colspan="2" style="background:var(--color-background-secondary);padding:10px 12px">'
+        +'<div style="font-size:11px;color:var(--color-text-secondary);margin-bottom:2px">Qué se hizo</div>'
+        +'<div style="white-space:pre-wrap;word-break:break-word;font-size:13px">'+(r.detalle?audEsc(r.detalle):vacio)+'</div>'
+        +'<div style="display:flex;align-items:center;gap:8px;margin-top:10px">'
+          +'<span style="font-size:11px;color:var(--color-text-secondary);margin-right:auto">Cargado el '+audEsc(fmtDH(r.creado_en))
+            +(r.creado_por_nombre?' por '+audEsc(r.creado_por_nombre):'')
+            +(r.actualizado_en?' · última edición '+audEsc(fmtDH(r.actualizado_en)):'')+'</span>'
+          +'<button class="btn" onclick="event.stopPropagation();editarCambio('+r.id+')">Editar</button>'
+        +'</div></td></tr>';
+    }
+  });
+  $('cam-list').innerHTML=h+'</table>';
+}
+
+const CAM_CAMPOS={fecha:'cam-fecha',descripcion:'cam-desc',detalle:'cam-detalle',autor:'cam-autor'};
+
+function _camAbrir(r){
+  $('cam-id').value=r?r.id:'';
+  Object.keys(CAM_CAMPOS).forEach(function(c){ $(CAM_CAMPOS[c]).value=(r&&r[c])||''; });
+  if(!r){
+    const d=new Date();
+    $('cam-fecha').value=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    $('cam-autor').value=CAM_NOMBRE||'';
+  }
+  $('cam-title').textContent=r?'Cambio del '+fmtD(r.fecha):'Nuevo cambio';
+  $('cam-borrar').style.display=r?'':'none';
+  $('cam-meta').textContent=r
+    ? 'Cargado el '+fmtDH(r.creado_en)+(r.creado_por_nombre?' por '+r.creado_por_nombre:'')
+      +(r.actualizado_en?' · última edición '+fmtDH(r.actualizado_en):'')
+    : 'Solo la fecha y la descripción son obligatorias.';
+  openMo('mo-cambio');
+  setTimeout(function(){ $('cam-desc').focus(); },50);
+}
+
+function nuevoCambio(){ _camAbrir(null); }
+function editarCambio(id){
+  const r=_cambios.find(function(x){return x.id===id;});
+  if(r) _camAbrir(r);
+}
+
+async function guardarCambio(){
+  const body={};
+  Object.keys(CAM_CAMPOS).forEach(function(c){ body[c]=$(CAM_CAMPOS[c]).value.trim(); });
+  if(!body.fecha){ toast('Falta la fecha','e'); $('cam-fecha').focus(); return; }
+  if(!body.descripcion){ toast('Falta la descripción','e'); $('cam-desc').focus(); return; }
+  const id=$('cam-id').value;
+  const btn=$('cam-guardar'); btn.disabled=true;
+  try{
+    const res=await api(id?'/api/registro-cambios/'+id:'/api/registro-cambios',
+      {method:id?'PUT':'POST',body:JSON.stringify(body)});
+    if(!res||res.error){ toast((res&&res.error)||'No se pudo guardar','e'); return; }
+    closeMo('mo-cambio');
+    toast(id?'Cambio actualizado':'Cambio registrado');
+    loadRegistroCambios();
+  }catch(e){
+    toast('No se pudo guardar (error de conexión)','e');
+  }finally{ btn.disabled=false; }
+}
+
+async function borrarCambio(){
+  const id=$('cam-id').value; if(!id) return;
+  if(!await confirmar('¿Eliminar este cambio del registro?')) return;
+  closeMo('mo-cambio');
+  _ultimoClicFila=null;
+  const res=await apiBorrar('/api/registro-cambios/'+id,'Cambio eliminado');
+  if(!res||res.error){ toast((res&&res.error)||'No se pudo eliminar','e'); }
+  loadRegistroCambios();
+}
+
+// ── Tablets de planta (solo admin) ───────────────────────────────────────────
+// Alta de tablets por máquina (cada una con su enlace/token) y la bandeja de lo
+// que mandan los operarios. El procesador del servidor convierte cada registro
+// en novedad; acá se ven los que fallaron y se corrigen o descartan.
+let _tabVista='tablets', _tablets=[], _bandeja=[];
+
+document.querySelectorAll('#tab-tabs .tab').forEach(function(t){t.addEventListener('click',function(){
+  document.querySelectorAll('#tab-tabs .tab').forEach(function(x){x.classList.remove('active');});
+  t.classList.add('active'); _tabVista=t.dataset.t; loadTabletsPlanta();
+});});
+
+async function loadTabletsPlanta(){
+  $('tab-fil-bandeja').style.display=_tabVista==='bandeja'?'':'none';
+  $('tab-b-nueva').style.display=_tabVista==='tablets'?'':'none';
+  const data=await api('/api/planta/tablets');
+  _tablets=Array.isArray(data)?data:[];
+  const sel=$('tab-fil-tablet'), act=sel.value;
+  sel.innerHTML='<option value="">Todas las tablets</option>'+_tablets.map(function(t){return '<option value="'+t.id+'">'+audEsc(t.nombre)+'</option>';}).join('');
+  sel.value=act;
+  if(_tabVista==='bandeja') return loadBandejaPlanta();
+  if(!Array.isArray(data)){ $('tab-list').innerHTML='<div class="em">'+audEsc((data&&data.error)||'No se pudo leer.')+'</div>'; return; }
+  const pend=_tablets.reduce(function(a,t){return a+t.pendientes;},0), err=_tablets.reduce(function(a,t){return a+t.errores;},0);
+  $('tab-resumen').textContent=err?err+' con error':(pend?pend+' pendientes':'Al día');
+  if(!_tablets.length){
+    $('tab-list').innerHTML='<div class="em">Todavía no hay tablets. Usá "Nueva tablet", elegí la máquina y abrí el enlace que te da en la tablet.</div>';
+    return;
+  }
+  const ahora=Date.now();
+  let h='<table><tr><th>Tablet</th><th>Máquina</th><th>Estado</th><th>Última conexión</th><th>Lector de huella</th><th>Último registro</th><th>Pendientes</th><th>Con error</th><th></th></tr>';
+  _tablets.forEach(function(t){
+    let con='<span style="color:var(--color-text-tertiary)">Sin datos desde el último reinicio</span>';
+    if(t.ultimo_contacto){
+      const seg=(ahora-new Date(t.ultimo_contacto.replace(' ','T')).getTime())/1000;
+      con=seg<30?'<span class="b bg">En línea</span>':audEsc(fmtDH(t.ultimo_contacto));
+    }
+    h+='<tr>'
+      +'<td><b>'+audEsc(t.nombre)+'</b></td>'
+      +'<td>'+audEsc((t.maquina_codigo||'')+' · '+(t.maquina_nombre||''))+'</td>'
+      +'<td>'+(t.activa?'<span class="b bg">Activa</span>':'<span class="b bk">Desactivada</span>')+'</td>'
+      +'<td>'+con+'</td>'
+      +'<td>'+tabLectorCelda(t,ahora)+'</td>'
+      +'<td>'+audEsc(t.ultimo_registro?fmtDH(t.ultimo_registro):'—')+'</td>'
+      +'<td>'+(t.pendientes||'—')+'</td>'
+      +'<td>'+(t.errores?'<a href="#" onclick="tabVerErrores('+t.id+');return false"><span class="b br">'+t.errores+'</span></a>':'—')+'</td>'
+      +'<td style="white-space:nowrap;text-align:right">'
+        +'<button class="btn" onclick="tabVerEnlace('+t.id+')">Enlace</button> '
+        +'<button class="btn" onclick="tabAbrir('+t.id+')">Editar</button> '
+        +'<button class="btn" onclick="tabLector('+t.id+')">Lector</button> '
+        +'<button class="btn" title="Hacer de cuenta que un operario apoyó el dedo" onclick="tabProbarHuella('+t.id+')">Probar huella</button> '
+        +'<button class="btn" title="Genera un enlace nuevo: el anterior deja de servir (tablet perdida o robada)" onclick="tabNuevoToken('+t.id+')">Nuevo enlace</button>'
+      +'</td></tr>';
+  });
+  $('tab-list').innerHTML=h+'</table>';
+}
+
+function tabLectorCelda(t,ahora){
+  if(!t.lector_sn) return '<span style="color:var(--color-text-tertiary)">Sin lector</span>';
+  let est='<span style="font-size:11px;color:var(--color-text-tertiary)">sin noticias desde el último reinicio</span>';
+  if(t.lector_visto){
+    const seg=(ahora-new Date(t.lector_visto.replace(' ','T')).getTime())/1000;
+    est=seg<60?'<span class="b bg">Conectado</span>':'<span style="font-size:11px">visto '+audEsc(fmtDH(t.lector_visto))+'</span>';
+  }
+  return audEsc(t.lector_sn)+' '+est+(t.ultima_huella?'<div style="font-size:11px;color:var(--color-text-secondary)">Última huella: '+audEsc(fmtDH(t.ultima_huella))+'</div>':'');
+}
+
+async function tabLector(id){
+  const t=_tablets.find(function(x){return x.id===id;}); if(!t) return;
+  $('tlec-id').value=id; $('tlec-sn').value=t.lector_sn||'';
+  $('tlec-title').textContent='Lector de huella de '+t.nombre;
+  const host=(t.enlace||'').replace(/^https?:\/\//,'').split('/')[0];
+  $('tlec-ip').textContent=host.split(':')[0]; $('tlec-puerto').textContent=host.split(':')[1]||'80';
+  $('tlec-vistos').innerHTML='';
+  openMo('mo-tablet-lector');
+  const ls=await api('/api/planta/lectores');
+  if(!Array.isArray(ls)||!ls.length){ $('tlec-vistos').innerHTML='<div style="font-size:12px;color:var(--color-text-tertiary)">Todavía no se comunicó ningún lector desde que arrancó el servidor.</div>'; return; }
+  $('tlec-vistos').innerHTML='<div style="font-size:12px;font-weight:600;margin-bottom:4px">Lectores que se comunicaron</div>'
+    +ls.map(function(l){
+      return '<div style="display:flex;align-items:center;gap:8px;font-size:12.5px;padding:3px 0"><b>'+audEsc(l.sn)+'</b>'
+        +'<span style="color:var(--color-text-secondary)">'+audEsc(l.ip||'')+' · '+audEsc(fmtDH(l.visto))+(l.tablet?' · asignado a '+audEsc(l.tablet):'')+'</span>'
+        +'<button class="btn" style="margin-left:auto" onclick="$(\'tlec-sn\').value=\''+audEsc(l.sn).replace(/\\/g,'')+'\'">Usar este</button></div>';
+    }).join('');
+}
+
+async function tabGuardarLector(){
+  const id=$('tlec-id').value, btn=$('tlec-guardar'); btn.disabled=true;
+  try{
+    const res=await api('/api/planta/tablets/'+id+'/lector',{method:'PUT',body:JSON.stringify({lector_sn:$('tlec-sn').value.trim()})});
+    if(!res||res.error){ toast((res&&res.error)||'No se pudo guardar','e'); return; }
+    closeMo('mo-tablet-lector'); toast('Lector guardado'); loadTabletsPlanta();
+  }finally{ btn.disabled=false; }
+}
+
+async function tabProbarHuella(id){
+  const t=_tablets.find(function(x){return x.id===id;}); if(!t) return;
+  $('thue-id').value=id; $('thue-title').textContent='Probar huella en '+t.nombre;
+  $('thue-emp').innerHTML='<option value="">Cargando...</option>';
+  openMo('mo-tablet-huella');
+  const emps=await api('/api/empleados');
+  $('thue-emp').innerHTML=(Array.isArray(emps)?emps:[]).filter(function(e){return e.activo;}).map(function(e){
+    return '<option value="'+e.id+'">'+audEsc(((e.apellido||'')+' '+(e.nombre||'')).trim()+' · leg. '+(e.legajo||'—'))+'</option>';}).join('');
+}
+
+async function tabSimularHuella(){
+  const btn=$('thue-ok'); btn.disabled=true;
+  try{
+    const res=await api('/api/planta/tablets/'+$('thue-id').value+'/huella',{method:'POST',body:JSON.stringify({empleado_id:$('thue-emp').value})});
+    if(!res||res.error){ toast((res&&res.error)||'No se pudo','e'); return; }
+    toast('Huella enviada: mirá la tablet');
+  }finally{ btn.disabled=false; }
+}
+
+function tabVerErrores(id){
+  document.querySelectorAll('#tab-tabs .tab').forEach(function(x){x.classList.toggle('active',x.dataset.t==='bandeja');});
+  _tabVista='bandeja'; $('tab-fil-estado').value='Error'; $('tab-fil-tablet').value=String(id);
+  loadTabletsPlanta();
+}
+
+const BDJ_EST={Pendiente:'ba',Procesando:'ba',Procesado:'bg',Error:'br',Descartado:'bk'};
+async function loadBandejaPlanta(){
+  $('tab-fil-bandeja').style.display='';
+  const q=[];
+  if($('tab-fil-estado').value) q.push('estado='+encodeURIComponent($('tab-fil-estado').value));
+  if($('tab-fil-tablet').value) q.push('tablet_id='+encodeURIComponent($('tab-fil-tablet').value));
+  const data=await api('/api/planta/bandeja'+(q.length?'?'+q.join('&'):''));
+  if(!data||!Array.isArray(data.registros)){ $('tab-list').innerHTML='<div class="em">'+audEsc((data&&data.error)||'No se pudo leer la bandeja.')+'</div>'; return; }
+  _bandeja=data.registros;
+  const tot=data.totales||{};
+  const espLote=tot['Esperando lote']||0;
+  $('tab-resumen').textContent=(tot.Error?tot.Error+' con error · ':'')+(espLote?espLote+' esperando lote · ':'')+((tot.Pendiente||0)+(tot.Procesando||0)-espLote)+' pendientes · '+(tot.Procesado||0)+' procesados';
+  if(!_bandeja.length){ $('tab-list').innerHTML='<div class="em">No hay registros con ese filtro.</div>'; return; }
+  let h='<table><tr><th>Cargado</th><th>Tablet</th><th>Operario</th><th>OT · operación</th><th style="text-align:right">OK</th><th style="text-align:right">NO OK</th><th style="text-align:right">Min</th><th>Estado</th><th>Resultado</th><th></th></tr>';
+  _bandeja.forEach(function(r){
+    const d=r.datos||{};
+    let res='—';
+    if(r.estado==='Procesado') res=audEsc(r.novedad_numero||d.tnp_numero||'');
+    else if(r.error) res='<span style="color:#791F1F;font-size:12px">'+audEsc(r.error)+'</span>';
+    let est=r.estado, estCls=BDJ_EST[r.estado]||'bk';
+    if(r.estado==='Pendiente'&&r.espera==='lote'){ est='Esperando lote'; res='<span style="font-size:12px">Se carga sola cuando se asigne lote a la OT (Órdenes de trabajo → Lotes asignados).</span>'; }
+    else if(r.estado==='Pendiente'&&r.intentos>0){ est='Reintento '+r.intentos; }
+    if(r.tipo==='parada') res='<b>Parada:</b> '+audEsc(d.motivo||'')+(r.estado==='Procesado'?' · '+audEsc(d.tnp_numero||''):(r.error?' · <span style="color:#791F1F">'+audEsc(r.error)+'</span>':''));
+    if(r.estado==='Descartado'&&r.resuelto_por_nombre) res+=' <span style="font-size:11px;color:var(--color-text-secondary)">('+audEsc(r.resuelto_por_nombre)+')</span>';
+    h+='<tr>'
+      +'<td style="white-space:nowrap">'+audEsc(fmtDH(r.hora_operario||r.recibido))+'</td>'
+      +'<td>'+audEsc(r.tablet_nombre)+'</td>'
+      +'<td>'+audEsc(r.empleado)+'</td>'
+      +'<td>'+audEsc(r.operacion)+'</td>'
+      +'<td style="text-align:right">'+fN(d.cantidad_ok||0)+'</td>'
+      +'<td style="text-align:right">'+fN(d.cantidad_nok||0)+'</td>'
+      +'<td style="text-align:right">'+fN(d.tiempo_min||d.minutos||0)+'</td>'
+      +'<td><span class="b '+estCls+'">'+audEsc(est)+'</span></td>'
+      +'<td style="max-width:340px">'+res+'</td>'
+      +'<td style="white-space:nowrap">'+(r.estado==='Error'||(r.estado==='Pendiente'&&(r.espera||r.intentos>0))?'<button class="btn" onclick="bdjAbrir('+r.id+')">Corregir</button>':'')+'</td>'
+      +'</tr>';
+  });
+  $('tab-list').innerHTML=h+'</table>';
+}
+
+async function tabAbrir(id){
+  const t=id?_tablets.find(function(x){return x.id===id;}):null;
+  const maqs=await api('/api/maquinas');
+  $('tab-maq').innerHTML='<option value="">Elegí la máquina</option>'+(Array.isArray(maqs)?maqs:[]).map(function(m){
+    return '<option value="'+m.id+'">'+audEsc((m.codigo||'')+' · '+(m.nombre||''))+'</option>';}).join('');
+  $('tab-id').value=t?t.id:'';
+  $('tab-maq').value=t?String(t.maquina_id):'';
+  $('tab-nombre').value=t?t.nombre:'';
+  $('tab-activa').checked=t?!!t.activa:true;
+  $('tab-activa-wrap').style.display=t?'':'none';
+  $('tab-title').textContent=t?'Editar '+t.nombre:'Nueva tablet';
+  openMo('mo-tablet');
+}
+
+async function tabGuardar(){
+  const id=$('tab-id').value;
+  const body={maquina_id:$('tab-maq').value, nombre:$('tab-nombre').value.trim(), activa:$('tab-activa').checked};
+  if(!body.maquina_id){ toast('Elegí la máquina','e'); return; }
+  const btn=$('tab-guardar'); btn.disabled=true;
+  try{
+    const res=await api(id?'/api/planta/tablets/'+id:'/api/planta/tablets',{method:id?'PUT':'POST',body:JSON.stringify(body)});
+    if(!res||res.error){ toast((res&&res.error)||'No se pudo guardar','e'); return; }
+    closeMo('mo-tablet');
+    await loadTabletsPlanta();
+    if(!id&&res.id){ toast('Tablet creada'); tabVerEnlace(res.id); } else toast('Tablet actualizada');
+  }finally{ btn.disabled=false; }
+}
+
+function tabVerEnlace(id){
+  const t=_tablets.find(function(x){return x.id===id;}); if(!t) return;
+  $('tab-enl-title').textContent='Enlace de '+t.nombre;
+  $('tab-enl').value=t.enlace;
+  openMo('mo-tablet-enlace');
+  setTimeout(function(){ $('tab-enl').select(); },50);
+}
+
+function tabCopiarEnlace(){
+  const i=$('tab-enl'); i.select();
+  const listo=function(){ toast('Enlace copiado'); };
+  if(navigator.clipboard&&window.isSecureContext){ navigator.clipboard.writeText(i.value).then(listo,function(){ document.execCommand('copy'); listo(); }); }
+  else{ document.execCommand('copy'); listo(); }
+}
+
+async function tabNuevoToken(id){
+  const t=_tablets.find(function(x){return x.id===id;}); if(!t) return;
+  if(!await confirmar('¿Generar un enlace nuevo para '+t.nombre+'? La tablet que usa el enlace actual deja de poder cargar hasta que abras el nuevo en ella.')) return;
+  const res=await api('/api/planta/tablets/'+id+'/token',{method:'POST'});
+  if(!res||res.error){ toast((res&&res.error)||'No se pudo','e'); return; }
+  await loadTabletsPlanta();
+  tabVerEnlace(id);
+}
+
+async function bdjAbrir(id){
+  const r=_bandeja.find(function(x){return x.id===id;}); if(!r) return;
+  const d=r.datos||{};
+  $('bdj-id').value=id;
+  $('bdj-error').textContent=r.error||'';
+  $('bdj-ok').value=d.cantidad_ok||0; $('bdj-nok').value=d.cantidad_nok||0;
+  $('bdj-min').value=d.tiempo_min||0; $('bdj-pausa').value=d.tiempo_perdido_min||0;
+  // La operación y el operario actuales primero; después las operaciones
+  // abiertas (el mismo listado que ve la tablet) y los empleados activos.
+  $('bdj-op').innerHTML='<option value="'+(d.orden_operacion_id||'')+'">'+audEsc(r.operacion)+' (actual)</option>';
+  $('bdj-emp').innerHTML='<option value="'+(d.empleado_id||'')+'">'+audEsc(r.empleado)+' (actual)</option>';
+  openMo('mo-bandeja');
+  const [ops, emps]=await Promise.all([api('/api/planta/operaciones'), api('/api/empleados')]);
+  if(Array.isArray(emps)){
+    $('bdj-emp').innerHTML+=emps.filter(function(e){return e.activo&&e.id!==d.empleado_id;}).map(function(e){
+      return '<option value="'+e.id+'">'+audEsc(((e.apellido||'')+' '+(e.nombre||'')).trim())+'</option>';}).join('');
+  }
+  if(Array.isArray(ops)){
+    $('bdj-op').innerHTML+=ops.filter(function(o){return o.id!==d.orden_operacion_id;}).map(function(o){
+      return '<option value="'+o.id+'">'+audEsc(o.ot_numero+' · '+o.paso+' '+o.nombre)+'</option>';}).join('');
+  }
+}
+
+async function bdjReprocesar(){
+  const id=$('bdj-id').value;
+  const datos={cantidad_ok:$('bdj-ok').value, cantidad_nok:$('bdj-nok').value, tiempo_min:$('bdj-min').value,
+               tiempo_perdido_min:$('bdj-pausa').value, orden_operacion_id:$('bdj-op').value, empleado_id:$('bdj-emp').value};
+  const btn=$('bdj-guardar'); btn.disabled=true;
+  try{
+    const res=await api('/api/planta/bandeja/'+id+'/reprocesar',{method:'POST',body:JSON.stringify({datos:datos})});
+    if(!res||res.error){ toast((res&&res.error)||'No se pudo','e'); return; }
+    closeMo('mo-bandeja'); toast('Vuelve a procesarse');
+    setTimeout(loadBandejaPlanta,1500);
+  }finally{ btn.disabled=false; }
+}
+
+async function bdjDescartar(){
+  const id=$('bdj-id').value;
+  if(!await confirmar('¿Descartar este registro? No se va a cargar ninguna novedad con él.')) return;
+  const res=await api('/api/planta/bandeja/'+id+'/descartar',{method:'POST'});
+  if(!res||res.error){ toast((res&&res.error)||'No se pudo','e'); return; }
+  closeMo('mo-bandeja'); toast('Registro descartado'); loadBandejaPlanta();
+}
+
 // ── Bitácora de auditoría (solo lectura, solo admin) ─────────────────────────
 // La vista no escribe nada: solo consulta /api/auditoria. El servidor arma los
 // asientos desde la capa de conexión, acá únicamente se filtran y se muestran.
@@ -6689,9 +8331,9 @@ function renderOTT(){
     return;
   }
   const estCol={Pendiente:'ba','Remito emitido':'bb','En proceso':'bb',Recibido:'bg',Completado:'bg',Cancelado:'bk'};
-  let h='<table><tr><th style="width:24px"></th><th>N°</th><th>OT origen</th><th>Operación</th><th>Producto</th><th>Material (insumo/retorno)</th><th>Proveedor</th><th>Precio</th><th>Nivel</th><th>Estado</th><th>En espera</th><th>SC</th></tr>';
+  let h='<table><tr><th style="width:24px"></th><th>N°</th><th>OT origen</th><th>Operación</th><th>Producto</th><th>Material (insumo/retorno)</th><th>Proveedor</th><th>Precio</th><th>Nivel</th><th>Estado</th><th>A enviar</th><th>SC</th></tr>';
   rows.forEach(function(r){
-    const enEspera=Math.max((r.cantidad_enviada||0)-(r.cantidad_recibida||0),0);
+    const aEnviar=(r.estado==='Cancelado'||r.estado==='Completado')?0:Math.max((r.cantidad_total||0)-(r.cantidad_enviada||0),0);
     const sel=_ottSel===r.id;
     h+='<tr class="'+(sel?'ot-sel':'')+'" style="cursor:pointer" onclick="selOTT('+r.id+')">'
       +'<td><input type="radio" name="ott-sel" '+(sel?'checked':'')+' onclick="event.stopPropagation();selOTT('+r.id+')"></td>'
@@ -6704,7 +8346,7 @@ function renderOTT(){
       +'<td>'+fmtM(r.precio_acordado||0,r.moneda)+'</td>'
       +'<td>'+(!r.operacion_id&&!r.proceso_op_id?'<span class="b bk" style="font-size:10px">Manual</span>':(r.es_ultimo_nivel?'<span class="b bg" style="font-size:10px">PT</span>':'<span class="b ba" style="font-size:10px">Semi</span>'))+'</td>'
       +'<td><span class="b '+(estCol[r.estado]||'bk')+'">'+r.estado+'</span></td>'
-      +'<td>'+(enEspera>0?'<b>'+fN(enEspera)+'</b>':'<span style="color:var(--color-text-secondary)">—</span>')+'</td>'
+      +'<td>'+(aEnviar>0?'<b>'+fN(aEnviar)+'</b>'+((r.cantidad_enviada||0)>0?' <span style="font-size:10px;color:var(--color-text-secondary)">de '+fN(r.cantidad_total)+'</span>':''):'<span style="color:var(--color-text-secondary)">—</span>')+'</td>'
       +'<td style="font-size:11px">'+(r.sc_numeros||'—')+(r.sc_numeros?'<br>'+(r.oc_numeros?'<span style="color:#1D9E75">'+r.oc_numeros+'</span>':'<span style="color:#D85A30">Sin OC</span>'):'')+'</td>'
       +'</tr>';
   });
@@ -8293,6 +9935,19 @@ function renderInvFiltered(){
       return cod.includes(q)||desc.includes(q);
     });
   }
+  // Filtro por cliente (solo si el buscador tiene texto: borrarlo = todos)
+  const cliTxt=$('inv-cli-fil-search')?$('inv-cli-fil-search').value.trim():'';
+  const cliId=cliTxt?($('inv-cli-fil')?$('inv-cli-fil').value:''):'';
+  if(cliId){
+    rows=rows.filter(function(r){
+      const c=(r.cliente_id_efectivo!=null?r.cliente_id_efectivo:r.cliente_id);
+      return c!=null && String(c)===String(cliId);
+    });
+  }
+  // Ocultar los que tienen stock 0
+  const sin0=$('inv-sin-stock0')&&$('inv-sin-stock0').checked;
+  if(sin0) rows=rows.filter(function(r){ return Math.abs(Number(r.stock)||0)>1e-9; });
+  const hayFiltro=!!(q||cliId||sin0);
   if(_invSortDir){
     rows=rows.slice().sort(function(a,b){
       const sa=Number(a.stock)||0, sb=Number(b.stock)||0;
@@ -8302,7 +9957,7 @@ function renderInvFiltered(){
   window._invRows=new Map(rows.map(function(r){return [r.id,r];}));
   if(_invSel && !window._invRows.has(_invSel)) _invSel=null;
   if(_invRawIsPT){
-    if(!rows.length){$('inv-list').innerHTML='<div class="em">'+(q?'No hay ítems que coincidan con la búsqueda.':'Sin stock de productos terminados. Declarar novedades de producción para generar stock.')+'</div>';actualizarToolbarInv();return;}
+    if(!rows.length){$('inv-list').innerHTML='<div class="em">'+(hayFiltro?'No hay ítems que coincidan con los filtros.':'Sin stock de productos terminados. Declarar novedades de producción para generar stock.')+'</div>';actualizarToolbarInv();return;}
     let h='<table><tr><th style="width:24px"></th><th>Código</th><th>Producto</th><th>Cliente</th><th>Stock</th><th>Mín.</th><th>Máximo</th><th>Precio unit.</th><th>Estado</th></tr>';
     rows.forEach(function(r){
       const _cod='<a href="#" onclick="event.stopPropagation();goToMatMov('+r.id+');return false;" style="color:var(--color-text-info);text-decoration:none;font-weight:500">'+r.codigo+'</a>';
@@ -8323,7 +9978,7 @@ function renderInvFiltered(){
     actualizarToolbarInv();
     return;
   }
-  if(!rows.length){$('inv-list').innerHTML='<div class="em">'+(q?'No hay ítems que coincidan con la búsqueda.':'No hay ítems. Usá «Agregar» para cargar el primero.')+'</div>';actualizarToolbarInv();return;}
+  if(!rows.length){$('inv-list').innerHTML='<div class="em">'+(hayFiltro?'No hay ítems que coincidan con los filtros.':'No hay ítems. Usá «Agregar» para cargar el primero.')+'</div>';actualizarToolbarInv();return;}
   let h='<table><tr><th style="width:24px"></th><th>Código</th><th>Descripción</th><th>Tipo</th><th>Cat. producto</th><th>Stock</th><th>Nivel</th><th>Mín.</th><th>Máximo</th><th>Precio unit.</th><th>Proveedor</th><th>Estado</th></tr>';
   rows.forEach(r=>{
     const _cod='<a href="#" onclick="event.stopPropagation();goToMatMov('+r.id+');return false;" style="color:var(--color-text-info);text-decoration:none;font-weight:500">'+r.codigo+'</a>';
@@ -8430,7 +10085,28 @@ async function loadRecOCPend(){
       && (r.items||[]).some(function(i){return !i.sc_ott_id && (i.cantidad-i.cantidad_recibida)>0.0001;});
   });
   _recOcCache=new Map(pend.map(function(r){return [r.id,r];}));
-  if(!pend.length){$('rec-oc-pend-list').innerHTML='<div class="em">No hay OC pendientes de recibir. Acá aparecen las OC aprobadas que todavía esperan mercadería.</div>';return;}
+  // OC de servicio (OTT): no se reciben acá, vuelven con el retorno de la OTT.
+  // Se listan igual con un aviso para que la OC aprobada no "desaparezca".
+  const serv=[];
+  (ocs||[]).forEach(function(r){
+    if(!['Aprobada','Enviada','Recibida parcial','Cerrada'].includes(r.estado))return;
+    (r.items||[]).forEach(function(i){
+      if(i.sc_ott_id && (i.cantidad-i.cantidad_recibida)>0.0001) serv.push({oc:r,i:i});
+    });
+  });
+  let hs='';
+  if(serv.length){
+    hs='<div style="margin-top:14px;font-weight:600">OC de servicio tercerizado</div>'
+      +'<div style="font-size:12px;color:var(--color-text-secondary);margin:2px 0 6px">No se reciben acá: primero emití el remito de envío de la OTT desde Remitir; cuando vuelvan las piezas, registrá el retorno en "OTT pendientes de retorno".</div>'
+      +'<table><tr><th>N°</th><th>Proveedor</th><th>Estado</th><th>OTT</th><th>Cantidad</th><th></th></tr>';
+    serv.forEach(function(x){
+      hs+='<tr><td><b>'+x.oc.numero+'</b></td><td>'+x.oc.proveedor_nombre+'</td><td>'+sb(x.oc.estado)+'</td>'
+        +'<td><b>'+(x.i.ott_numero||'—')+'</b></td><td>'+fN(x.i.cantidad-x.i.cantidad_recibida)+'</td>'
+        +'<td><span class="b ba" style="font-size:10px">Se recibe con el retorno de la OTT</span></td></tr>';
+    });
+    hs+='</table>';
+  }
+  if(!pend.length){$('rec-oc-pend-list').innerHTML='<div class="em">No hay OC pendientes de recibir. Acá aparecen las OC aprobadas que todavía esperan mercadería.</div>'+hs;return;}
   let h='<table><tr><th>N°</th><th>Proveedor</th><th>Estado</th><th>Pendiente</th><th></th></tr>';
   pend.forEach(function(r){
     const pendCant=(r.items||[]).reduce(function(a,i){return a+(i.sc_ott_id?0:Math.max(0,i.cantidad-i.cantidad_recibida));},0);
@@ -8438,7 +10114,7 @@ async function loadRecOCPend(){
       +'<td><b>'+fN(pendCant)+'</b></td>'
       +'<td><button class="btn btn-s btn-p" onclick="openRecOC('+r.id+')">Recibir</button></td></tr>';
   });
-  $('rec-oc-pend-list').innerHTML=h+'</table>';
+  $('rec-oc-pend-list').innerHTML=h+'</table>'+hs;
 }
 
 function openRecOC(id){
@@ -10207,6 +11883,7 @@ let _bulkWb = null;
 let _bulkSchema = null;
 
 async function loadCargaMasiva(){
+  loadCargasRealizadas();
   if(_bulkSchema) return renderBulkSchema();
   const schema = await api('/api/bulk/schema');
   _bulkSchema = schema;
@@ -10405,7 +12082,8 @@ async function runBulkImport(){
 
     const res = await api('/api/bulk/import', {
       method:'POST',
-      body: JSON.stringify({table: sheet, rows: rows, mode: mode})
+      body: JSON.stringify({table: sheet, rows: rows, mode: mode,
+        archivo: (_bulkWbs.find(function(x){return x.wb===_curWb;})||{}).nombre||''})
     });
 
     if(res.ok){
@@ -10433,6 +12111,138 @@ async function runBulkImport(){
     +'</div>';
   $('bulk-run-btn').disabled = false;
   toast(totalInserted+' filas importadas'+(totalErrors?' ('+totalErrors+' errores)':''), totalErrors?'w':'g');
+  loadCargasRealizadas();
+}
+
+// ── Cargas realizadas: borrar todo lo que hizo una carga ─────────────────────
+let _cmLista=[], _cmSel=null;
+async function loadCargasRealizadas(){
+  const rows=await api('/api/cargas_masivas');
+  _cmLista=Array.isArray(rows)?rows:[];
+  if(_cmSel && !_cmLista.some(function(c){return c.id===_cmSel&&!c.borrada;})) _cmSel=null;
+  renderCargasRealizadas();
+}
+function renderCargasRealizadas(){
+  const el=$('cm-lista'); if(!el) return;
+  $('cm-b-borrar').disabled=!_cmSel;
+  if(!_cmLista.length){ el.innerHTML='<div class="em">Todavía no hay cargas masivas registradas.</div>'; return; }
+  let h='<div style="max-height:260px;overflow-y:auto"><table><tr><th style="width:24px"></th><th>N°</th><th>Fecha</th><th>Tipo</th><th>Detalle</th><th>Usuario</th><th>Filas</th><th>Estado</th></tr>';
+  _cmLista.forEach(function(c){
+    const ok=!c.borrada;
+    h+='<tr class="'+(_cmSel===c.id?'ot-sel':'')+'" style="'+(ok?'cursor:pointer':'opacity:.55')+'"'+(ok?' onclick="selCargaMasiva('+c.id+')"':'')+'>'
+      +'<td>'+(ok?'<input type="radio" name="cm-sel"'+(_cmSel===c.id?' checked':'')+' onclick="event.stopPropagation();selCargaMasiva('+c.id+')">':'')+'</td>'
+      +'<td><b>'+c.id+'</b></td><td>'+schEsc((c.fecha||'').slice(0,16))+'</td><td>'+schEsc(c.tipo||'')+'</td>'
+      +'<td style="font-size:11px">'+schEsc(c.detalle||'')+'</td><td>'+schEsc(c.usuario_nombre||'—')+'</td><td>'+fN(c.filas||0)+'</td>'
+      +'<td>'+(ok?'<span style="color:var(--color-status-success)">Vigente</span>':'<span style="color:#c62828">Borrada '+schEsc((c.borrada||'').slice(0,16))+'</span>')+'</td></tr>';
+  });
+  el.innerHTML=h+'</table></div>';
+}
+function selCargaMasiva(id){ _cmSel=id; renderCargasRealizadas(); }
+async function borrarCargaMasiva(){
+  const c=_cmLista.find(function(x){return x.id===_cmSel;});
+  if(!c){ toast('Seleccioná una carga de la lista','w'); return; }
+  const pv=await api('/api/cargas_masivas/'+c.id+'/vista_previa');
+  if(!pv||pv.error){ toast((pv&&pv.error)||'No se pudo revisar la carga','e'); return; }
+  if(pv.nada){
+    toast('No queda nada de la carga N° '+c.id+' para borrar'+(pv.bloqueados.length?': lo que queda está en uso ('+pv.bloqueados.slice(0,3).join(' | ')+')':'')+'.','w');
+    return;
+  }
+  const lineas=[];
+  Object.keys(pv.resumen_borrar).forEach(function(k){ lineas.push('• Se borran '+fN(pv.resumen_borrar[k])+' '+k); });
+  Object.keys(pv.resumen_revertir).forEach(function(k){ lineas.push('• Se vuelven atrás '+fN(pv.resumen_revertir[k])+' '+k+(k==='artículos'||k==='lotes'?' (stock)':'')); });
+  let msg='¿Borrar la carga N° '+c.id+' ('+c.tipo+', '+(c.fecha||'').slice(0,16)+')?\n'+(c.detalle||'')+'\n\n'+lineas.join('\n');
+  if(pv.bloqueados.length){
+    msg+='\n\nNo se borran porque ya se usan en otro lado ('+pv.bloqueados.length+'):\n'
+      +pv.bloqueados.slice(0,8).map(function(x){return '• '+x;}).join('\n')+(pv.bloqueados.length>8?'\n… y '+(pv.bloqueados.length-8)+' más':'');
+  }
+  if(pv.omitidos.length) msg+='\n\n'+pv.omitidos.length+' registro(s) de esta carga ya no estaban o los volvió a cargar otra carga: no se tocan.';
+  msg+='\n\nEsta acción no se puede deshacer.';
+  if(!await confirmar(msg)) return;
+  const res=await api('/api/cargas_masivas/'+c.id+'/borrar',{method:'POST'});
+  if(!res||!res.ok){ toast((res&&res.error)||'No se pudo borrar la carga','e'); }
+  else {
+    toast('Carga N° '+c.id+' borrada: '+res.borrados+' registro(s) borrados'+(res.revertidos?', '+res.revertidos+' vueltos atrás':'')
+      +(res.quedaron.length?' — quedaron '+res.quedaron.length+' en uso':''), res.quedaron.length?'w':'g');
+    _cmSel=null;
+  }
+  loadCargasRealizadas();
+}
+
+// ── Carga masiva de stock ─────────────────────────────────────────────────────
+let _stkFilas=null;
+function stkPlantilla(){
+  const ws=XLSX.utils.aoa_to_sheet([['codigo','cantidad','obs']]);
+  ws['!cols']=[{wch:24},{wch:12},{wch:30}];
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'stock');
+  XLSX.writeFile(wb,'plantilla_stock.xlsx');
+}
+function stkArchivo(input){
+  _stkFilas=null; $('stk-res').innerHTML='';
+  const f=input.files&&input.files[0];
+  if(!f) return;
+  const rd=new FileReader();
+  rd.onload=function(e){
+    let wb;
+    try{ wb=XLSX.read(e.target.result,{type:'array'}); }
+    catch(err){ $('stk-res').innerHTML='<div class="em">No se pudo leer el archivo: '+audEsc(err.message)+'</div>'; return; }
+    const hoja=wb.SheetNames.find(function(s){return s.trim().toLowerCase()==='stock';})||(wb.SheetNames.length===1?wb.SheetNames[0]:null);
+    if(!hoja){ $('stk-res').innerHTML='<div class="em">El archivo no tiene una hoja llamada "stock".</div>'; return; }
+    const norm=function(s){return String(s).trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');};
+    _stkFilas=XLSX.utils.sheet_to_json(wb.Sheets[hoja],{defval:null}).map(function(r,i){
+      const o={_fila:i+2};
+      Object.keys(r).forEach(function(k){ const n=norm(k); if(n==='codigo'||n==='cantidad'||n==='obs') o[n]=r[k]; });
+      return o;
+    });
+    stkPrevia();
+  };
+  rd.readAsArrayBuffer(f);
+}
+async function stkPrevia(confirmar){
+  if(!_stkFilas) return;
+  const modo=$('stk-modo').value;
+  if(!confirmar) $('stk-res').innerHTML='<div class="ld">Armando la vista previa...</div>';
+  const res=await api('/api/bulk/stock',{method:'POST',body:JSON.stringify({filas:_stkFilas,modo:modo,confirmar:!!confirmar,
+    archivo:(($('stk-file').files||[])[0]||{}).name||''})});
+  if(confirmar && res && res.ok) loadCargasRealizadas();
+  if(res.error){ $('stk-res').innerHTML='<div class="em" style="color:#D85A30">'+audEsc(res.error)+'</div>'; return; }
+  const filas=res.filas||[];
+  const errores=filas.filter(function(p){return p.error;}).length;
+  const cambios=filas.filter(function(p){return !p.error&&p.accion&&p.accion!=='Sin cambios';}).length;
+  let h='';
+  if(confirmar){
+    h+='<div style="font-size:13px;font-weight:600;color:var(--color-status-success);margin-bottom:8px">✓ Stock cargado: '+res.aplicadas+' artículo'+(res.aplicadas===1?'':'s')+(res.con_error?' · '+res.con_error+' fila'+(res.con_error===1?'':'s')+' con error no se cargaron':'')+'</div>';
+    _stkFilas=null; $('stk-file').value='';
+    toast('Stock cargado: '+res.aplicadas+' artículos', res.con_error?'w':'g');
+  } else {
+    h+='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:12px">'
+      +'<span><b>'+filas.length+'</b> filas</span><span><b>'+cambios+'</b> con cambios</span>'
+      +(errores?'<span style="color:#D85A30"><b>'+errores+'</b> con error (no se cargan)</span>':'')
+      +'<button class="btn btn-p" style="margin-left:auto" onclick="stkConfirmar()"'+(cambios?'':' disabled')+'>Confirmar carga</button></div>';
+  }
+  h+='<div style="max-height:420px;overflow:auto"><table style="width:100%"><tr>'
+    +['Fila','Código','Descripción','Tipo','Actual','Nuevo','Diferencia','Qué hace'].map(function(t){return '<th style="text-align:left;font-size:11px;padding:3px 6px;position:sticky;top:0;background:var(--color-background-primary)">'+t+'</th>';}).join('')+'</tr>';
+  filas.forEach(function(p){
+    const dif=p.diferencia;
+    const que=p.error?'<span style="color:#D85A30">'+audEsc(p.error)+'</span>'
+      :audEsc(p.accion||'')+(p.lotes?' <span style="color:var(--color-text-secondary)">('+audEsc(p.lotes)+')</span>':'')+(p.aviso?' <span class="b ba" style="font-size:10px">'+audEsc(p.aviso)+'</span>':'');
+    h+='<tr style="font-size:12px'+(p.error?';background:rgba(216,90,48,.07)':'')+'">'
+      +'<td style="padding:3px 6px">'+p.fila+'</td>'
+      +'<td style="padding:3px 6px">'+audEsc(p.codigo)+'</td>'
+      +'<td style="padding:3px 6px">'+audEsc(p.descripcion||'')+'</td>'
+      +'<td style="padding:3px 6px">'+audEsc(p.categoria||'')+'</td>'
+      +'<td style="padding:3px 6px">'+(p.actual==null?'':fN(p.actual))+'</td>'
+      +'<td style="padding:3px 6px">'+(p.nuevo==null?'':fN(p.nuevo))+'</td>'
+      +'<td style="padding:3px 6px;color:'+(dif>0?'var(--color-status-success)':dif<0?'#D85A30':'inherit')+'">'+(dif==null?'':(dif>0?'+':'')+fN(dif))+'</td>'
+      +'<td style="padding:3px 6px">'+que+'</td></tr>';
+  });
+  h+='</table></div>';
+  $('stk-res').innerHTML=h;
+}
+async function stkConfirmar(){
+  const modo=$('stk-modo').value;
+  if(!await confirmar(modo==='conteo'?'¿Dejar el stock en las cantidades contadas?\nSe crean lotes por lo que sobra y se dan de baja de los lotes libres las diferencias en menos.':'¿Sumar estas cantidades al stock?\nSe crea un lote aprobado por cada material, producto o semielaborado.')) return;
+  stkPrevia(true);
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -11651,7 +13461,7 @@ function clearFiltrosOCC(skipRender){
 async function loadOCClientes(){
   try {
     if(!_cli.length)_cli=await api('/api/clientes');
-    const url='/api/ordenes_cliente'+(_occF?'?estado='+encodeURIComponent(_occF):'');
+    const url='/api/ordenes_cliente'+(_occF&&_occF!=='__pp'?'?estado='+encodeURIComponent(_occF):'');
     let rows;
     try {
       rows=await api(url);
@@ -11681,6 +13491,7 @@ function renderOCC(){
   const qCod=($('occ-fil-codigo')?$('occ-fil-codigo').value:'').toLowerCase().trim();
 
   let rows=_occRawRows.slice();
+  if(_occF==='__pp') rows=rows.filter(function(r){return (r.precios_pendientes||0)>0;});
   if(cliId) rows=rows.filter(function(r){return String(r.cliente_id||'')===String(cliId);});
   if(qNum) rows=rows.filter(function(r){return (r.numero||'').toLowerCase().includes(qNum);});
   if(qCod) rows=rows.filter(function(r){return (r.items||[]).some(function(i){return (i.producto_codigo||'').toLowerCase().includes(qCod);});});
@@ -11734,7 +13545,7 @@ function renderOCC(){
       .map(function(i){return String(i.fecha_deseada).slice(0,10);}).sort()[0]||r.fecha_entrega;
     h+='<tr id="occ-row-'+r.id+'" class="'+(sel?'ot-sel':'')+venceFila(occVence,occAbierta)+'" style="cursor:pointer" title="Doble clic: ver el detalle de renglones" onclick="selOCC('+r.id+')">'
       +'<td><input type="radio" name="occ-sel" '+(sel?'checked':'')+' onclick="event.stopPropagation();selOCC('+r.id+')"></td>'
-      +'<td><b>'+r.numero+'</b></td>'
+      +'<td><b>'+r.numero+'</b>'+((r.precios_pendientes||0)>0?' <span class="b ba" title="'+r.precios_pendientes+' renglón(es) cargados sin precio: los valoriza alguien con permiso para ver importes (Editar)">Precio pendiente</span>':'')+'</td>'
       +'<td>'+r.cliente_nombre+'</td>'
       +'<td title="'+detalle.replace(/"/g,'&quot;')+'">Total pedido: <b>'+r._total+'</b> ('+r.items.length+' artículo'+(r.items.length!==1?'s':'')+')</td>'
       +'<td>'+fmtD(r.creado)+'</td>'
@@ -11785,8 +13596,9 @@ function occDetalleHTML(r,avancePct){
       +'<td>'+i.producto_codigo+'</td>'
       +'<td>'+i.producto_nombre+'</td>'
       +'<td>'+fN(i.cantidad)+' '+(i.unidad||'unid')+'</td>'
-      +'<td>'+fmtM(i.precio_unit,r.moneda)+'</td>'
-      +'<td><b>'+fmtM((parseFloat(i.precio_unit)||0)*(parseFloat(i.cantidad)||0))+'</b></td>'
+      +(i.precio_pendiente?'<td colspan="2"><span class="b ba" title="Cargado sin precio">Precio pendiente</span></td>'
+        :'<td>'+fmtM(i.precio_unit,r.moneda)+'</td>'
+      +'<td><b>'+fmtM((parseFloat(i.precio_unit)||0)*(parseFloat(i.cantidad)||0))+'</b></td>')
       +'<td>'+(i.fecha_deseada?fmtD(i.fecha_deseada):'—')+'</td>'
       +'<td>'+otCell+'</td>'
       +'<td><span class="b '+(completo?'bg':(cubierto>0?'ba':'br'))+'">'+(completo?'Explotada':(cubierto>0?'Parcial ('+itAvPct+'%)':'Pendiente'))+'</span></td>'
@@ -11818,18 +13630,33 @@ function selOCC(id){
 }
 function actualizarToolbarOCC(){
   const r=_occSel&&_occ_cache?_occ_cache.get(_occSel):null;
-  const puedeEditar=['admin','vendedor'].includes(ROL);
+  const puedeEditar=PUEDE_OCC;
   $('occ-sel-label').textContent=r?r.numero:'–';
   $('occ-b-avance').disabled=!r;
   const be=$('occ-b-edit');
   be.style.display=puedeEditar?'':'none';
   be.disabled=!r||!puedeEditar;
+  const bd=$('occ-b-del');
+  bd.style.display=puedeEditar?'':'none';
+  bd.disabled=!r||!puedeEditar;
 }
 function occSelAccion(a){
   const r=_occSel&&_occ_cache?_occ_cache.get(_occSel):null;
   if(!r){toast('Seleccioná un pedido de la lista','w');return;}
   if(a==='avance') verAvanceOC(r.id,r.numero);
   else if(a==='edit') editOCC(r.id);
+  else if(a==='del') borrarOCC(r);
+}
+async function borrarOCC(r){
+  const conOT=(r.items||[]).some(function(i){return (i.ots&&i.ots.length)||i.ot_id;});
+  if(!await confirmar('¿Borrar el pedido '+r.numero+' de '+(r.cliente_nombre||'—')+' con sus '+(r.items||[]).length+' renglón(es)?'
+    +(conOT?' Las OTs vinculadas no se borran: quedan sin pedido.':''))) return;
+  _ultimoClicFila=$('occ-row-'+r.id);
+  const det=$('occ-det-'+r.id); if(det) det.style.display='none';
+  const res=await apiBorrar('/api/ordenes_cliente/'+r.id,'Pedido '+r.numero+' borrado');
+  if(!res||res.error){ toast((res&&res.error)||'No se pudo borrar','e'); }
+  else { if(_occSel===r.id){_occSel=null;_occExpandido=null;} }
+  loadOCClientes();
 }
 
 function openVincularOT(itemId,productoId,productoLabel,cantidad,cubierto){
@@ -11958,7 +13785,7 @@ async function loadOCCProductos(existingItems){
         return;
       }
       if(!_occItems[it.producto_id]) _occItems[it.producto_id]=[];
-      _occItems[it.producto_id].push({id:it.id,qty:it.cantidad,precio:it.precio_unit,fecha:it.fecha_deseada||'',obs:it.obs||''});
+      _occItems[it.producto_id].push({id:it.id,qty:it.cantidad,precio:it.precio_pendiente?'':it.precio_unit,pend:!!it.precio_pendiente,fecha:it.fecha_deseada||'',obs:it.obs||''});
       // Producto que ya no está asignado al cliente: igual se muestra, si no
       // el renglón quedaba fuera de la grilla y se borraba al guardar.
       if(!_occProd.some(function(p){return String(p.id)===String(it.producto_id);}))
@@ -11982,6 +13809,12 @@ function renderOCCGrid(){
   h+='style="width:100%;font-size:12px;padding:7px 10px;border:1px solid #ddd;border-radius:7px">';
   h+='</div>';
 
+  if(!VER_MONETARIO){
+    h+='<div style="margin-bottom:8px;padding:6px 10px;font-size:12px;background:#fff8e6;border:1px solid #f0d9a8;border-radius:7px;color:#7a5a12">Los renglones nuevos se guardan sin precio («Precio pendiente»). Después los valoriza alguien con permiso para ver importes.</div>';
+  }else{
+    let _np=0; Object.keys(_occItems).forEach(function(k){(_occItems[k]||[]).forEach(function(x){if(x.pend)_np++;});});
+    if(_np) h+='<div style="margin-bottom:8px;padding:6px 10px;font-size:12px;background:#fff8e6;border:1px solid #f0d9a8;border-radius:7px;color:#7a5a12">'+_np+' renglón(es) cargados sin precio (resaltados). Escribí el precio para valorizarlos; los que queden vacíos siguen pendientes.</div>';
+  }
   h+='<table class="occ-grid-table" style="width:100%;border-collapse:collapse;font-size:12px">';
   h+='<thead><tr style="background:#f7f7f4">';
   h+='<th style="padding:6px 8px;text-align:left;font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.04em">Producto</th>';
@@ -12001,7 +13834,7 @@ function renderOCCGrid(){
     rows.forEach(function(row,ri){
       const isFirst=ri===0;
       const rowId='occr_'+p.id+'_'+ri;
-      h+='<tr id="'+rowId+'" data-prod="'+p.id+'" data-ri="'+ri+'"'+(row.id?' data-item-id="'+row.id+'"':'')+' style="border-bottom:1px solid #f0f0ec">';
+      h+='<tr id="'+rowId+'" data-prod="'+p.id+'" data-ri="'+ri+'"'+(row.id?' data-item-id="'+row.id+'"':'')+(row.pend?' data-pend="1"':'')+' style="border-bottom:1px solid #f0f0ec">';
       if(isFirst){
         h+='<td rowspan="'+rows.length+'" style="padding:8px;vertical-align:top;border-right:1px solid #e8e8e3;background:#fafaf8">';
         h+='<div style="font-weight:600;color:#1a1a1a">'+p.codigo+'</div>';
@@ -12009,7 +13842,9 @@ function renderOCCGrid(){
         h+='</td>';
       }
       h+='<td style="padding:5px 4px"><input data-f="qty" type="number" value="'+row.qty+'" min="0" step="1" style="'+st+';width:100%;max-width:74px" placeholder="0"></td>';
-      h+=tdM('<input data-f="precio" type="number" value="'+row.precio+'" min="0" step="0.01" style="'+st+';width:100%;max-width:94px" placeholder="0.00">','style="padding:5px 4px"');
+      h+=tdM(row.pend
+        ?'<input data-f="precio" type="number" value="'+row.precio+'" min="0" step="0.01" style="'+st+';width:100%;max-width:94px;border-color:#e0a030;background:#fff8e6" placeholder="'+(p.precio_venta?'Sug. '+p.precio_venta:'A asignar')+'" title="Cargado sin precio. Escribí el precio para valorizarlo; si lo dejás vacío sigue pendiente.'+(p.precio_venta?' Precio de venta del producto: '+p.precio_venta:'')+'">'
+        :'<input data-f="precio" type="number" value="'+row.precio+'" min="0" step="0.01" style="'+st+';width:100%;max-width:94px" placeholder="0.00">','style="padding:5px 4px"');
       h+='<td style="padding:5px 4px"><input data-f="fecha" type="date" value="'+row.fecha+'" style="'+st+';width:100%;max-width:128px"></td>';
       h+='<td style="padding:5px 4px"><input data-f="obs" type="text" value="'+row.obs+'" style="'+st+';width:100%;max-width:136px" placeholder="Obs..."></td>';
       h+='<td style="padding:5px 4px;white-space:nowrap">';
@@ -12067,6 +13902,7 @@ function readOCCGrid(){
       const pr=row.querySelector('[data-f="precio"]');
       result[p.id].push({
         id:row.dataset.itemId?parseInt(row.dataset.itemId):null,
+        pend:row.dataset.pend==='1',
         qty:row.querySelector('[data-f="qty"]').value,
         precio:pr?pr.value:'',
         fecha:row.querySelector('[data-f="fecha"]').value,
@@ -12094,6 +13930,7 @@ function renderOCCGridPreserve(){
 
 async function saveOCC(){
   const eid=$('occ-id').value;
+  if(!$('occ-num').value.trim()){toast('Cargá el N° de pedido','w');$('occ-num').focus();return;}
   if(!$('occ-cli').value){toast('Seleccioná un cliente','w');return;}
 
   // Merge current on-screen values (only products currently rendered, since the
@@ -12119,7 +13956,8 @@ async function saveOCC(){
       };
       // Sin permiso monetario el precio no se manda: el servidor conserva el
       // guardado (o usa el de venta del producto en un renglón nuevo).
-      if(VER_MONETARIO) it.precio_unit=parseFloat(row.precio)||0;
+      // Renglón con precio pendiente y el campo vacío: no se manda, sigue pendiente.
+      if(VER_MONETARIO && !(row.pend && String(row.precio).trim()==='')) it.precio_unit=parseFloat(row.precio)||0;
       items.push(it);
       // El precio de venta del producto se sincroniza en el propio backend
       // (ver _sync_precio_venta_producto en /api/ordenes_cliente) cuando el
@@ -12138,6 +13976,7 @@ async function saveOCC(){
   // "Vincular OT") o generar con "Explotar".
 
   const body={
+    numero:$('occ-num').value.trim(),
     cliente_id:parseInt($('occ-cli').value),
     fecha:$('occ-fec').value,
     estado:$('occ-est').value,
@@ -12397,7 +14236,7 @@ function renderSC(){
       rcots.forEach(function(c){
         const best=c.precio_unit===minP;
         h+='<tr style="'+(best?'background:#EAF3DE':'')+'">';
-        h+='<td>'+c.proveedor_nombre+'</td>';
+        h+='<td>'+c.proveedor_nombre+(!VER_MONETARIO&&c.es_menor?' <span class="b bg" style="font-size:9px">✓ Mejor</span>':'')+(c.sin_precio?' <span class="b ba" style="font-size:9px">Precio pendiente</span>':'')+'</td>';
         h+='<td>'+(best?'<b>':'')+ fmtM(c.precio_unit)+(best?'</b> <span class="b bg" style="font-size:9px">✓ Mejor</span>':'') +'</td>';
         h+='<td>'+(c.plazo_entrega_dias||'—')+'d</td>';
         h+='<td>'+(c.condicion_pago||'—')+'</td>';
@@ -12564,7 +14403,7 @@ async function loadCot(){
         : `<span style="color:var(--color-text-secondary)">—</span>`;
       h+=`<tr data-cot="${c.id}" class="${esMenor?'cot-row-menor':''}${sel?' ot-sel':''}" style="cursor:pointer" onclick="selCotFila(${c.id})"${circuitoCerrado?'':` ondblclick="selCotFila(${c.id});cotSelAccion('edit')"`}>
         <td><input type="radio" name="cot-sel" ${sel?'checked':''} onclick="event.stopPropagation();selCotFila(${c.id})"></td>
-        <td>${c.proveedor_nombre}</td><td>${fmtMD(c.precio_unit)} ${esMenor?'<span class="b bg">Menor</span>':''}</td>
+        <td>${c.proveedor_nombre}${!VER_MONETARIO&&c.es_menor?' <span class="b bg" title="Cotización de menor precio">Menor</span>':''}${c.sin_precio?' <span class="b ba" title="Cargada sin precio: la completa alguien con permiso para ver importes">Precio pendiente</span>':''}</td><td>${fmtMD(c.precio_unit)} ${esMenor&&!c.sin_precio?'<span class="b bg">Menor</span>':''}</td>
         <td>${c.plazo_entrega_dias}d</td><td>${c.condicion_pago||'—'}</td>
         <td>${fmtM(c.precio_unit*g.qty)}</td>
         <td>${elegida}</td></tr>`;
@@ -12591,7 +14430,7 @@ async function openCotModalForSC(scId, scDesc){
   // Populate proveedores
   if(!_prov.length)_prov=await api('/api/proveedores');
   provCotSet(null);
-  $('cot-pre').value='';$('cot-pla').value='3';$('cot-cond').value='';$('cot-obs').value='';
+  if($('cot-pre'))$('cot-pre').value='';$('cot-pla').value='3';$('cot-cond').value='';$('cot-obs').value='';
   openMo('mo-cot');
   setTimeout(function(){$('cot-prv-search').focus();},80);
 }
@@ -12617,7 +14456,7 @@ async function editCot(c){
   ss.innerHTML='<option value="'+c.solicitud_id+'">'+(c.solicitud_desc||'')+'</option>';
   if(!_prov.length)_prov=await api('/api/proveedores');
   provCotSet(c.proveedor_id);
-  $('cot-pre').value=c.precio_unit;
+  if($('cot-pre'))$('cot-pre').value=c.precio_unit;
   $('cot-pla').value=c.plazo_entrega_dias||3;
   $('cot-cond').value=c.condicion_pago||'';
   $('cot-obs').value=c.obs||'';
@@ -12649,10 +14488,10 @@ async function filtrarProvCot(){
 
 async function saveCot(){
   const body={solicitud_id:$('cot-sol').value,proveedor_id:$('cot-prv').value,
-    precio_unit:$('cot-pre').value,plazo_entrega_dias:$('cot-pla').value||3,
+    precio_unit:$('cot-pre')?$('cot-pre').value:undefined,plazo_entrega_dias:$('cot-pla').value||3,
     condicion_pago:$('cot-cond').value,obs:$('cot-obs').value};
   if(!body.proveedor_id&&$('cot-prv-search').value.trim()){toast('Elegí un proveedor de la lista de resultados','w');return;}
-  if(!body.solicitud_id||!body.proveedor_id||!body.precio_unit){toast('Solicitud, proveedor y precio requeridos','w');return;}
+  if(!body.solicitud_id||!body.proveedor_id||(VER_MONETARIO&&!body.precio_unit)){toast('Solicitud, proveedor y precio requeridos','w');return;}
   const editing=_cotEditId;
   const res=editing
     ? await api('/api/cotizaciones_compra/'+editing,{method:'PUT',body:JSON.stringify(body)})
@@ -14671,6 +16510,10 @@ function renderLotesTable(){
 
   // Si el lote seleccionado ya no está visible (filtros / recarga), se deselecciona.
   if(_loteSel && !data.some(function(r){return r.id===_loteSel;})) _loteSel=null;
+  // Los tildados que dejaron de verse (filtros / recarga) se destildan, para
+  // no eliminar nunca un lote que no está a la vista.
+  const _visibles=new Set(data.map(function(r){return r.id;}));
+  _lotesMarcados.forEach(function(id){ if(!_visibles.has(id)) _lotesMarcados.delete(id); });
   if(!data.length){
     actualizarToolbarLotes();
     $('lote-list').innerHTML='<div class="em">No hay lotes para mostrar'+($('lote-oculta-agot')&&$('lote-oculta-agot').checked?' (todos están agotados — desmarcá "Ocultar agotados" para verlos)':'')+'.</div>';
@@ -14679,7 +16522,12 @@ function renderLotesTable(){
 
   // Header
   const thStyle='cursor:pointer;user-select:none;white-space:nowrap;';
-  let h='<table><tr><th style="width:24px"></th>';
+  const puedeBorrar=(ROL==='admin'||ROL==='almacen');
+  const todosMarc=puedeBorrar && data.length>0 && data.every(function(r){return _lotesMarcados.has(r.id);});
+  let h='<table><tr>'
+    +(puedeBorrar?'<th style="width:24px"><input type="checkbox" title="Tildar / destildar todos los lotes de la lista"'+(todosMarc?' checked':'')+' onclick="event.stopPropagation();marcarTodosLotes(this.checked)"></th>':'')
+    +'<th style="width:24px"></th>';
+  _lotesVisiblesIds=data.map(function(r){return r.id;});
   cols.forEach(function(c){
     const arrow = _lotesSortCol===c.key ? (_lotesSortAsc?' ▲':' ▼') : ' ⇅';
     const arrowColor = _lotesSortCol===c.key ? '' : ';opacity:0.35';
@@ -14691,6 +16539,7 @@ function renderLotesTable(){
   // Rows
   data.forEach(function(r){
     h+='<tr class="'+(_loteSel===r.id?'ot-sel':'')+'" style="cursor:pointer" onclick="selLote('+r.id+')">'
+      +(puedeBorrar?'<td><input type="checkbox" class="lote-marca" title="Tildar para eliminar varios"'+(_lotesMarcados.has(r.id)?' checked':'')+' onclick="event.stopPropagation();marcarLote('+r.id+',this.checked)"></td>':'')
       +'<td><input type="radio" name="lote-sel"'+(_loteSel===r.id?' checked':'')+' onclick="event.stopPropagation();selLote('+r.id+')"></td>'
       +'<td><b>'+r.numero+'</b></td>'
       +'<td>'+(r.mat_codigo||'')+' — '+(r.mat_descripcion||'')+'</td>'
@@ -14711,7 +16560,14 @@ function renderLotesTable(){
 
 // ── Selección de lote + barra de herramientas de Lotes ────────────────────
 let _loteSel=null;
+const _lotesMarcados=new Set();   // lotes tildados para eliminar varios juntos
+let _lotesVisiblesIds=[];
 function selLote(id){ _loteSel=id; renderLotesTable(); }
+function marcarLote(id,on){ if(on) _lotesMarcados.add(id); else _lotesMarcados.delete(id); renderLotesTable(); }
+function marcarTodosLotes(on){
+  _lotesVisiblesIds.forEach(function(id){ if(on) _lotesMarcados.add(id); else _lotesMarcados.delete(id); });
+  renderLotesTable();
+}
 function actualizarToolbarLotes(){
   const r=_loteSel?(_lotesData||[]).find(function(x){return x.id===_loteSel;}):null;
   const lbl=$('lote-sel-label'); if(lbl) lbl.textContent=r?r.numero:'–';
@@ -14719,13 +16575,61 @@ function actualizarToolbarLotes(){
   const be=$('lote-b-etiq'); if(be) be.disabled=!r;
   const bg=$('lote-b-gestionar');
   if(bg){ bg.style.display=(ROL==='logistica')?'none':''; bg.disabled=!r; }
+  const bd=$('lote-b-del');
+  if(bd){ bd.style.display=(ROL==='admin'||ROL==='almacen')?'':'none'; bd.disabled=!r&&!_lotesMarcados.size; }
+  const bdt=$('lote-b-del-txt');
+  if(bdt) bdt.textContent=_lotesMarcados.size?('Eliminar '+_lotesMarcados.size+' lote'+(_lotesMarcados.size>1?'s':'')):'Eliminar lote';
 }
 function loteSelAccion(a){
+  if(a==='eliminar' && _lotesMarcados.size){ eliminarLotesMarcados(); return; }
   const r=_loteSel?(_lotesData||[]).find(function(x){return x.id===_loteSel;}):null;
   if(!r){toast('Seleccioná un lote de la lista','w');return;}
   if(a==='trazar') openTrazabilidadById(r.id);
   else if(a==='etiquetas') etiquetasLote(r.id);
   else if(a==='gestionar') openLiberacion(r.id);
+  else if(a==='eliminar') eliminarLote(r);
+}
+async function eliminarLote(r){
+  const chk=await api('/api/lotes/'+r.id+'/puede_eliminar');
+  if(!chk||chk.error){ toast((chk&&chk.error)||'No se pudo verificar el lote','e'); return; }
+  if(!chk.puede){ toast('No se puede eliminar el lote '+r.numero+': '+chk.motivos.join('; ')+'.','e'); return; }
+  const uni=r.unidad||'';
+  if(!await confirmar('¿Eliminar el lote '+r.numero+' ('+(r.mat_codigo||'')+' — '+(r.mat_descripcion||'')+')?'
+    +(chk.stock>0?'\n\nSe descuentan '+fN(chk.stock)+' '+uni+' del stock del artículo.':'')
+    +'\n\nLos movimientos anteriores quedan en el historial.')) return;
+  _ultimoClicFila=document.querySelector('#lote-list tr.ot-sel');
+  const res=await apiBorrar('/api/lotes/'+r.id,'Lote '+r.numero+' eliminado');
+  if(!res||res.error){ toast((res&&res.error)||'No se pudo eliminar el lote','e'); }
+  else { if(_loteSel===r.id) _loteSel=null; }
+  loadLotes();
+}
+
+async function eliminarLotesMarcados(){
+  const ids=[..._lotesMarcados];
+  if(!ids.length) return;
+  const chk=await api('/api/lotes/puede_eliminar?ids='+ids.join(','));
+  if(!Array.isArray(chk)){ toast((chk&&chk.error)||'No se pudieron verificar los lotes','e'); return; }
+  const no=chk.filter(function(x){return !x.puede;});
+  if(no.length){
+    toast('No se puede eliminar '+(no.length>1?'estos lotes':'este lote')+' — destildalo'+(no.length>1?'s':'')+' y probá de nuevo: '
+      +no.map(function(x){return x.numero+' ('+x.motivos.join('; ')+')';}).join(' | '),'e');
+    return;
+  }
+  const porId={}; (_lotesData||[]).forEach(function(r){porId[r.id]=r;});
+  const lista=chk.slice(0,15).map(function(x){
+    const r=porId[x.id]||{};
+    return '• '+x.numero+' ('+(r.mat_codigo||'')+')'+(x.stock>0?' — se descuentan '+fN(x.stock)+' '+(r.unidad||''):'');
+  }).join('\n')+(chk.length>15?'\n… y '+(chk.length-15)+' más':'');
+  if(!await confirmar('¿Eliminar '+chk.length+' lote'+(chk.length>1?'s':'')+'?\n\n'+lista
+    +'\n\nLo que cada lote sumaba sale del stock. Los movimientos anteriores quedan en el historial.')) return;
+  _ultimoClicFila=null;
+  const res=await apiBorrar('/api/lotes?ids='+ids.join(','),chk.length+' lote'+(chk.length>1?'s eliminados':' eliminado'));
+  if(!res||res.error){ toast((res&&res.error)||'No se pudieron eliminar los lotes','e'); }
+  else {
+    ids.forEach(function(id){ _lotesMarcados.delete(id); if(_loteSel===id) _loteSel=null; });
+    toast(res.eliminados.length+' lote'+(res.eliminados.length>1?'s eliminados':' eliminado'));
+  }
+  loadLotes();
 }
 
 function etiquetasLote(id){
