@@ -12457,23 +12457,6 @@ def _lote_stock_que_sale(lote):
     return max(0.0, float(lote["cantidad_activa"] or 0))
 
 
-@app.route("/api/lotes/puede_eliminar", methods=["GET"])
-@login_required(roles=["admin","almacen"])
-def lotes_puede_eliminar_varios():
-    """Verificación previa para eliminar varios lotes (?ids=1,2,3)."""
-    try:
-        ids = sorted({int(x) for x in (request.args.get("ids") or "").split(",") if x.strip()})
-    except ValueError:
-        return jsonify({"error": "Lista de lotes inválida"}), 400
-    if not ids: return jsonify([])
-    out = []
-    for lote in query(f"SELECT * FROM lotes WHERE id IN ({','.join('?' * len(ids))})", ids):
-        motivos = _lote_motivos_no_eliminar(lote)
-        out.append({"id": lote["id"], "numero": lote["numero"], "puede": not motivos,
-                    "motivos": motivos, "stock": _lote_stock_que_sale(lote)})
-    return jsonify(out)
-
-
 @app.route("/api/lotes/<int:lid>/puede_eliminar", methods=["GET"])
 @login_required(roles=["admin","almacen"])
 def lote_puede_eliminar(lid):
@@ -12496,42 +12479,6 @@ def delete_lote(lid):
     motivos = _lote_motivos_no_eliminar(lote)
     if motivos:
         return jsonify({"error": f"No se puede eliminar el lote {lote['numero']}: " + "; ".join(motivos) + "."}), 409
-    sale = _eliminar_lote(lote)
-    return jsonify({"ok": True, "numero": lote["numero"], "stock_descontado": sale})
-
-
-@app.route("/api/lotes", methods=["DELETE"])
-@login_required(roles=["admin","almacen"])
-def delete_lotes_varios():
-    """Elimina varios lotes de una vez (?ids=1,2,3). Todo o nada: si alguno
-    no se puede eliminar (ver _lote_motivos_no_eliminar) no se elimina
-    ninguno y se dice cuáles y por qué."""
-    try:
-        ids = sorted({int(x) for x in (request.args.get("ids") or "").split(",") if x.strip()})
-    except ValueError:
-        return jsonify({"error": "Lista de lotes inválida"}), 400
-    if not ids:
-        return jsonify({"error": "Seleccioná al menos un lote"}), 400
-    lotes = query(f"SELECT * FROM lotes WHERE id IN ({','.join('?' * len(ids))})", ids)
-    if len(lotes) != len(ids):
-        return jsonify({"error": "Alguno de los lotes ya no existe. Actualizá la lista."}), 404
-    bloqueados = []
-    for lote in lotes:
-        motivos = _lote_motivos_no_eliminar(lote)
-        if motivos:
-            bloqueados.append(f"{lote['numero']}: " + "; ".join(motivos))
-    if bloqueados:
-        return jsonify({"error": "No se eliminó ningún lote. No se pueden eliminar: " + " | ".join(bloqueados) + "."}), 409
-    with transaccion():
-        for lote in lotes:
-            _eliminar_lote(lote)
-    return jsonify({"ok": True, "eliminados": [l["numero"] for l in lotes]})
-
-
-def _eliminar_lote(lote):
-    """Borra el lote (ya verificado con _lote_motivos_no_eliminar) y saca del
-    stock lo que sumaba. Devuelve la cantidad descontada del stock."""
-    lid = lote["id"]
     sale = _lote_stock_que_sale(lote)
     with transaccion():
         execute("DELETE FROM cajones WHERE lote_id=? AND orden_id IS NULL", (lid,))
@@ -12547,7 +12494,7 @@ def _eliminar_lote(lote):
              f"aprobado {float(lote['cantidad_activa'] or 0):g})",
              session.get("user_id")))
         execute("DELETE FROM lotes WHERE id=?", (lid,))
-    return sale
+    return jsonify({"ok": True, "numero": lote["numero"], "stock_descontado": sale})
 
 
 @app.route("/api/lotes/<int:lid>", methods=["PUT"])
@@ -17749,25 +17696,15 @@ Reglas:
 9. Tus respuestas también se escuchan en voz alta: empezá con una o dos oraciones completas que digan lo importante, y dejá las tablas y listas largas para después.
 10. Cada usuario ve solo los módulos que tiene habilitados, y algunos no ven importes. Si una herramienta dice que no hay permiso o un dato no viene, decilo así y no intentes conseguirlo por otro camino."""
 
-# Modos de personalidad de los comandos de broma del chat (/pirata). Lista
-# cerrada: el cliente solo elige la clave; el texto de estilo es del servidor.
-IA_MODOS = {
-    "pirata": "Respondé con el estilo de un pirata simpático, en español rioplatense (por ejemplo \"¡Ahoy, grumete!\", "
-              "\"por las barbas de Neptuno\", \"el botín de la OT\"), con tono divertido pero informativo. "
-              "Es solo el estilo: no cambies ningún dato, número ni regla, y nunca inventes datos por seguir el personaje.",
-}
-
 _IA_DIAS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
 
 
-def _ia_sistema(modo="normal"):
+def _ia_sistema():
     hoy = date.today()
     rol = session.get("rol_nombre") or session.get("rol") or ""
     usuario = (session.get("nombre") or session.get("username") or "el usuario") + (f" (rol {rol})" if rol else "")
     texto = IA_SISTEMA.format(empresa=get_config_valor("empresa_nombre", "la empresa"), usuario=usuario,
                               hoy=f"{_IA_DIAS[hoy.weekday()]} {hoy.strftime('%d/%m/%Y')}")
-    if modo in IA_MODOS:
-        texto += "\n\nEstilo pedido por el usuario: " + IA_MODOS[modo]
     return texto
 
 
@@ -17815,13 +17752,13 @@ def _ia_llamar(cliente, mensajes):
             raise _IAError(_ia_error_api(e)) from e
 
 
-def _ia_conversar(historial, pregunta, modo="normal"):
+def _ia_conversar(historial, pregunta):
     """Pregunta → (respuesta, herramientas usadas, tokens entrada, tokens salida)."""
     try:
         cliente = _ia_cliente()
     except ImportError:
         raise _IAError("Falta instalar el paquete groq en el servidor (pip install groq).")
-    mensajes = [{"role": "system", "content": _ia_sistema(modo)}] + historial + [{"role": "user", "content": pregunta}]
+    mensajes = [{"role": "system", "content": _ia_sistema()}] + historial + [{"role": "user", "content": pregunta}]
     usadas, t_in, t_out, inicio = [], 0, 0, _ia_time.time()
     for _ in range(IA_MAX_VUELTAS):
         if _ia_time.time() - inicio > IA_MAX_SEGUNDOS:
@@ -17951,8 +17888,6 @@ def ia_chat():
         return jsonify({"error": "Escribí una pregunta."}), 400
     if len(pregunta) > IA_MAX_LARGO_PREGUNTA:
         return jsonify({"error": f"La pregunta es muy larga (máximo {IA_MAX_LARGO_PREGUNTA} caracteres)."}), 400
-    modo = d.get("modo")
-    modo = modo if isinstance(modo, str) and modo in IA_MODOS else "normal"   # cualquier otro valor = normal
     uid = session["user_id"]
     cid = d.get("conversacion_id")
     if cid:
@@ -17977,7 +17912,7 @@ def ia_chat():
     respuesta, error, usadas, t_in, t_out = None, None, [], 0, 0
     try:
         historial = _ia_historial(cid) if cid else []
-        respuesta, usadas, t_in, t_out = _ia_conversar(historial, pregunta, modo)
+        respuesta, usadas, t_in, t_out = _ia_conversar(historial, pregunta)
     except _IAError as e:
         error = str(e)
     except Exception as e:
