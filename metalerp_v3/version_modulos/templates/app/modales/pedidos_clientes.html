@@ -1,0 +1,43 @@
+<!-- PEDIDO DE CLIENTE -->
+<div class="ov" id="mo-occ"><div class="mo" style="width:780px;max-height:90vh;display:flex;flex-direction:column">
+  <div class="mh"><span id="occ-title">Nueva OC de cliente</span> <span class="mx" onclick="closeMo('mo-occ')">×</span></div>
+  <input type="hidden" id="occ-id">
+  <div class="fg2" style="flex-shrink:0">
+    <div class="fg"><label>N° OC</label><input id="occ-num" readonly placeholder="Automático" title="El número se asigna solo al guardar" style="background:#f8f8f6"></div>
+    <div class="fg"><label>Estado</label><select id="occ-est"><option>Recibida</option><option>Confirmada</option><option>En proceso</option><option>Completada</option><option>Cancelada</option></select></div>
+    <div class="fg" style="position:relative">
+      <label>Cliente <span class="req">*</span></label>
+      <input type="text" id="occ-cli-search" placeholder="Buscar cliente..." autocomplete="off"
+        oninput="filtrarOCCClientes()" onfocus="filtrarOCCClientes()"
+        onblur="setTimeout(function(){var c=$('occ-cli-results');if(c)c.style.display='none';},150)">
+      <input type="hidden" id="occ-cli">
+      <div id="occ-cli-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:7px;margin-top:3px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.14);z-index:10"></div>
+    </div>
+    <div class="fg"><label>Fecha de emisión</label><input type="date" id="occ-fec"></div>
+    <div class="fg s2"><label>Observaciones</label><textarea id="occ-obs" style="min-height:36px"></textarea></div>
+  </div>
+
+  <!-- Product grid: loads when client selected -->
+  <div id="occ-prod-grid" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--color-border-tertiary);overflow-y:auto;flex:1">
+    <div style="font-size:12px;color:var(--color-text-secondary)">Seleccioná un cliente para ver sus productos.</div>
+  </div>
+
+  <div class="ma" style="flex-shrink:0">
+    <button class="btn" onclick="closeMo('mo-occ')">Cancelar</button>
+    <button class="btn btn-p" onclick="saveOCC()">Guardar pedido</button>
+  </div>
+</div></div>
+
+<!-- VINCULAR OT A ÍTEM DE OC -->
+<div class="ov" id="mo-vincular-ot"><div class="mo" style="width:640px">
+  <div class="mh">Vincular OT existente <span class="mx" onclick="closeMo('mo-vincular-ot')">×</span></div>
+  <input type="hidden" id="vot-item-id">
+  <input type="hidden" id="vot-producto-id">
+  <div id="vot-item-info" style="font-size:12px;color:var(--color-text-secondary);margin-bottom:10px"></div>
+  <div class="ma" style="margin-bottom:10px"><button class="btn btn-p" onclick="buscarOTsVincular()">Buscar</button></div>
+  <div id="vot-results" style="max-height:320px;overflow-y:auto"><div class="em">Ingresá filtros y buscá OTs disponibles.</div></div>
+  <div class="ma">
+    <button class="btn" onclick="closeMo('mo-vincular-ot')">Cerrar</button>
+  </div>
+</div></div>
+

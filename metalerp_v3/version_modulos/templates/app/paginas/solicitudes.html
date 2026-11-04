@@ -1,0 +1,61 @@
+    <div class="page" id="p-solicitudes">
+      <div class="vhead">
+        <div class="vhead-card">
+          <div class="vhead-row vhead-top">
+            <div class="vhead-tit"><div class="pt">Compras</div><span class="vh-badge" id="cmp-sel-label" title="Fila seleccionada">–</span></div>
+            <div class="tabs vh-tabs" id="comp-tabs">
+              <div class="tab active" data-cv="solicitudes">Solicitudes</div>
+              <div class="tab" data-cv="cotizaciones">Cotizaciones</div>
+              <div class="tab" data-cv="ocs">OC emitidas</div>
+            </div>
+            <div class="vh-acciones">
+              <button class="btn" id="sc-b-edit" data-cvsel="solicitudes" onclick="scSelAccion('edit')" disabled title="Editar la solicitud seleccionada"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11.1 2.2a1.3 1.3 0 0 1 1.9 0l.8.8a1.3 1.3 0 0 1 0 1.9L5.4 13.2l-3.2.9.9-3.2z"/></svg>Editar</button>
+              <button class="btn" id="sc-b-cot" data-cvsel="solicitudes" onclick="scSelAccion('cot')" disabled title="Agregar una cotización a la solicitud seleccionada"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M8 3.3v9.4M3.3 8h9.4"/></svg>Cotización</button>
+              <button class="btn btn-warn" id="sc-b-cancel" data-cvsel="solicitudes" onclick="scSelAccion('cancel')" disabled title="Cancelar la solicitud seleccionada"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="5.8"/><path d="M4 12 12 4"/></svg>Cancelar</button>
+              <button class="btn" id="sc-b-reabrir" data-cvsel="solicitudes" onclick="scSelAccion('reabrir')" disabled title="Reabrir la solicitud cancelada seleccionada"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.6 8A5.6 5.6 0 1 1 11.9 4"/><path d="M12.4 1.6V4.4H9.6"/></svg>Reabrir</button>
+              <button class="btn btn-p" id="cot-b-sel" data-cvsel="cotizaciones" onclick="cotSelAccion('sel')" disabled title="Marcar como elegida la cotización seleccionada"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.4l3.2 3.2L13 4.8"/></svg>Elegir cotización</button>
+              <button class="btn" id="cot-b-desel" data-cvsel="cotizaciones" onclick="cotSelAccion('desel')" disabled title="Quitar la elección de la cotización seleccionada"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>Quitar elección</button>
+              <button class="btn" id="cot-b-edit" data-cvsel="cotizaciones" onclick="cotSelAccion('edit')" disabled title="Editar la cotización seleccionada"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11.1 2.2a1.3 1.3 0 0 1 1.9 0l.8.8a1.3 1.3 0 0 1 0 1.9L5.4 13.2l-3.2.9.9-3.2z"/></svg>Editar</button>
+              <button class="btn btn-p" id="oc-b-aprobar" data-cvsel="ocs" onclick="ocSelAccion('aprobar')" disabled title="Aprobar la OC seleccionada"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.4l3.2 3.2L13 4.8"/></svg>Aprobar</button>
+              <button class="btn" id="oc-b-emitir" data-cvsel="ocs" onclick="ocSelAccion('emitir')" disabled title="Imprimir la OC seleccionada"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4.6 6V2.2h6.8V6"/><path d="M4.6 12H3.1A1.1 1.1 0 0 1 2 10.9V7.3c0-.6.5-1.1 1.1-1.1h9.8c.6 0 1.1.5 1.1 1.1v3.6c0 .6-.5 1.1-1.1 1.1h-1.5"/><path d="M4.6 10h6.8v3.8H4.6z"/></svg>Emitir OC</button>
+              <button class="btn" id="oc-b-completar" data-cvsel="ocs" onclick="ocSelAccion('completar')" disabled title="Completar la OC seleccionada (las directas piden vincular el remito)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.4l3.2 3.2L13 4.8"/></svg>Completar OC</button>
+              <button class="btn" id="oc-b-cerrar" data-cvsel="ocs" onclick="ocSelAccion('cerrar')" disabled title="Cerrar la OC seleccionada sin esperar el saldo pendiente"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="7" width="9" height="6.8" rx="1.2"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg>Cerrar OC</button>
+              <button class="btn btn-warn" id="oc-b-dev" data-cvsel="ocs" onclick="ocSelAccion('dev')" disabled title="Devolver al proveedor las piezas rechazadas de la OC seleccionada"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 3.2L2.4 6.3l3.1 3.1"/><path d="M2.4 6.3h7a3.8 3.8 0 0 1 0 7.6H6.6"/></svg>Devolver piezas</button>
+              <button class="btn btn-warn" id="oc-b-anular" data-cvsel="ocs" onclick="ocSelAccion('anular')" disabled title="Anular la OC seleccionada (solo si no recibió mercadería)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="5.8"/><path d="M4 12 12 4"/></svg>Anular OC</button>
+              <button class="btn btn-p" id="b-sc" style="display:none" onclick="openSCModal()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M8 3.3v9.4M3.3 8h9.4"/></svg>Nueva solicitud</button>
+              <button class="btn btn-p" id="b-cot" style="display:none" onclick="openCotModal()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M8 3.3v9.4M3.3 8h9.4"/></svg>Nueva cotización</button>
+              <button class="btn btn-p" id="b-oc" style="display:none" onclick="openOCModal()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M8 3.3v9.4M3.3 8h9.4"/></svg>Nueva OC</button>
+            </div>
+          </div>
+          <div class="vhead-row vhead-fil" id="cf-solicitudes">
+            <div class="tabs vh-tabs" id="sc-tabs"><div class="tab active" data-st="">Todas</div><div class="tab" data-st="Productiva">Productivas</div><div class="tab" data-st="Indirecta">Indirectas</div></div>
+            <input type="text" id="sc-buscar" class="sel-fil vh-fil-wide" placeholder="🔍 Buscar por N° o material" oninput="renderSC()" autocomplete="off">
+            <label class="vh-fil-chk"><input type="checkbox" id="sc-ocultar-canc" checked onchange="loadSC()"> Ocultar canceladas/emitidas</label>
+          </div>
+          <div class="vhead-row vhead-fil" id="cf-cotizaciones" style="display:none">
+            <div class="tabs vh-tabs" id="cot-tabs"><div class="tab active" data-ct="">Todas</div><div class="tab" data-ct="Productiva">Productivas</div><div class="tab" data-ct="Indirecta">Indirectas</div></div>
+            <label class="vh-fil-chk"><input type="checkbox" id="cot-ocultar-canc" checked onchange="loadCot()"> Ocultar canceladas/emitidas</label>
+          </div>
+          <div class="vhead-row vhead-fil" id="cf-ocs" style="display:none">
+            <div class="tabs vh-tabs" id="oc-tabs">
+              <div class="tab active" data-oct="">Todas</div>
+              <div class="tab" data-oct="Productiva">Directas</div>
+              <div class="tab" data-oct="Indirecta">Indirectas</div>
+            </div>
+            <input type="text" id="oc-fil-prod" class="sel-fil" placeholder="🔍 Producto" oninput="loadOCs()" autocomplete="off">
+            <select id="oc-fil-prov" class="sel-fil" onchange="loadOCs()"><option value="">Todos los proveedores</option></select>
+            <button class="vh-fil-clear" onclick="clearFiltrosOC()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.2 2.8h11.6L9.3 8.2v4.4l-2.6 1.3V8.2z"/><path d="M2 14 14 2"/></svg>Limpiar filtros</button>
+          </div>
+        </div>
+      </div>
+      <div id="cv-solicitudes">
+        <div class="card"><div id="sc-list"><div class="ld">Cargando...</div></div></div>
+      </div>
+      <div id="cv-cotizaciones" style="display:none">
+        <div class="card"><div id="cot-list"><div class="ld">Cargando...</div></div></div>
+      </div>
+      <div id="cv-ocs" style="display:none">
+        <div class="card"><div id="oc-list"><div class="ld">Cargando...</div></div></div>
+      </div>
+    </div>
+
