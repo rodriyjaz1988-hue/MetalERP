@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monitor de planta</title>
+<style>
+:root{
+  --bg:#EEF1F4; --panel:#FFFFFF; --sunk:#E3E8ED; --line:#CDD5DD;
+  --fg:#17222C; --muted:#5A6875; --accent:#1F5F8B; --accent-fg:#FFFFFF;
+  --ok:#1E7A46; --ok-bg:#DDF1E4; --warn:#9A5B00; --warn-bg:#FBEBCF; --bad:#B23A2E; --bad-bg:#F8DEDA; --idle:#6B7783; --idle-bg:#E4E8EC;
+  --f-display:"Arial Narrow","Roboto Condensed","Segoe UI",Arial,sans-serif;
+  --f-body:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;
+  --f-mono:Consolas,"Cascadia Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#121A21; --panel:#1A242D; --sunk:#0F161C; --line:#2C3A46; --fg:#E4EAF0; --muted:#93A2AF; --accent:#6FB3E0; --accent-fg:#0E1A23;
+  --ok:#5DCB8A; --ok-bg:#163526; --warn:#F0B35A; --warn-bg:#3A2A12; --bad:#F08A7E; --bad-bg:#3D1C19; --idle:#93A2AF; --idle-bg:#24303A; color-scheme:dark}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:14px;line-height:1.45}
+.wrap{max-width:1400px;margin:0 auto;padding:12px 16px 40px}
+header.top{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+.brand{font-family:var(--f-display);font-weight:700;font-size:22px;margin-right:auto}
+.brand small{display:block;font-family:var(--f-body);font-weight:400;font-size:12px;color:var(--muted)}
+.conn{display:flex;flex-wrap:wrap;gap:8px}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:4px 10px;font-size:12.5px;white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--idle)}
+.dot.ok{background:var(--ok)} .dot.bad{background:var(--bad)} .dot.warn{background:var(--warn)}
+nav.tabs{display:flex;gap:4px;margin-top:12px;border-bottom:1px solid var(--line);overflow-x:auto}
+nav.tabs button{font:600 13.5px var(--f-body);background:none;border:0;border-bottom:2px solid transparent;color:var(--muted);padding:9px 12px;cursor:pointer;white-space:nowrap}
+nav.tabs button[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--accent)}
+.btn{font:500 13px var(--f-body);border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:6px;padding:6px 11px;cursor:pointer}
+.btn:hover{border-color:var(--accent)} .btn:disabled{opacity:.5;cursor:default}
+.btn.p{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.btn.on{background:var(--ok-bg);color:var(--ok);border-color:var(--ok)}
+.bar-top{display:flex;flex-wrap:wrap;align-items:center;gap:8px 22px;margin:14px 0 12px;font-size:13px;color:var(--muted)}
+.bar-top b{font-family:var(--f-mono);color:var(--fg)}
+.bar-top .btn{margin-left:auto}
+.aviso{font-size:13px;border-radius:8px;padding:10px 12px;margin:12px 0}
+.aviso.bad{background:var(--bad-bg);color:var(--bad)} .aviso.ok{background:var(--ok-bg);color:var(--ok)} .aviso.warn{background:var(--warn-bg);color:var(--warn)}
+.buscar{font:14px var(--f-body);padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--fg);width:100%;max-width:380px;margin:0 0 12px;box-sizing:border-box}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;position:relative;overflow:hidden;min-width:0}
+.card::before{content:"";position:absolute;inset:0 auto 0 0;width:4px;background:var(--idle)}
+.card.s-prod::before{background:var(--ok)} .card.s-par::before{background:var(--warn)} .card.s-sin::before{background:var(--bad)}
+.c-head{display:flex;align-items:baseline;gap:8px}
+.code{font-family:var(--f-display);font-weight:700;font-size:20px}
+.mname{color:var(--muted);font-size:13px;margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pill{font-size:11.5px;font-weight:600;border-radius:999px;padding:2px 8px;white-space:nowrap}
+.pill.prod{color:var(--ok);background:var(--ok-bg)} .pill.par{color:var(--warn);background:var(--warn-bg)} .pill.sin{color:var(--bad);background:var(--bad-bg)} .pill.idle{color:var(--idle);background:var(--idle-bg)}
+.k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.07em;display:block}
+.counter{display:flex;align-items:flex-end;justify-content:space-between;gap:8px}
+.cnt{font-family:var(--f-mono);font-size:34px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
+.cnt small{font-size:13px;color:var(--muted);font-weight:400}
+.meta{font-size:12px;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+.prog{height:6px;background:var(--sunk);border-radius:3px;overflow:hidden} .prog i{display:block;height:100%;background:var(--accent)}
+.warnline{font-size:12px;color:var(--bad)} .waitline{font-size:12px;color:var(--warn)}
+.tbl{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:8px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap;font-variant-numeric:tabular-nums}
+tr:last-child td{border-bottom:0}
+td.num{text-align:right;font-family:var(--f-mono)}
+.empty{padding:22px;text-align:center;color:var(--muted)}
+.form{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;max-width:640px;display:flex;flex-direction:column;gap:12px}
+.form label{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted)}
+.form input{font:14px var(--f-body);padding:8px 9px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--fg)}
+.form .row{display:flex;gap:8px;flex-wrap:wrap}
+.help{font-size:12.5px;color:var(--muted)}
+code{font-family:var(--f-mono);font-size:12.5px;background:var(--sunk);padding:1px 5px;border-radius:4px}
+.sim-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));gap:8px}
+.sim-item{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.sim-item .sim-n{width:64px;font:14px var(--f-body);padding:5px 6px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--fg)}
+.sim-item b{font-family:var(--f-display);font-size:16px;margin-right:auto}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:13px;z-index:30;max-width:90vw}
+#tb-lec input,#tb-lec select{font:13px var(--f-body);padding:5px 6px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--fg)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">Monitor de planta<small>Recibe las piezas del router y las manda a MetalERP en paquetes</small></div>
+    <div class="conn" id="conn"></div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" id="t-maquinas" aria-selected="true" onclick="ir('maquinas')">Máquinas</button>
+    <button role="tab" id="t-paquetes" aria-selected="false" onclick="ir('paquetes')">Paquetes enviados</button>
+    <button role="tab" id="t-piezas" aria-selected="false" onclick="ir('piezas')">Últimas piezas</button>
+    <button role="tab" id="t-lectores" aria-selected="false" onclick="ir('lectores')">Lectores</button>
+    <button role="tab" id="t-backup" aria-selected="false" onclick="ir('backup')">Backup</button>
+    <button role="tab" id="t-simulador" aria-selected="false" onclick="ir('simulador')">Simulador</button>
+    <button role="tab" id="t-config" aria-selected="false" onclick="ir('config')">Configuración</button>
+  </nav>
+
+  <div id="aviso"></div>
+
+  <section id="v-maquinas">
+    <div class="bar-top" id="resumen"></div>
+    <input type="search" id="buscar" class="buscar" placeholder="Buscar OT, máquina, producto u operario" oninput="renderGrid()" autocomplete="off">
+    <div class="grid" id="grid"><div class="empty">Cargando...</div></div>
+  </section>
+
+  <section id="v-paquetes" hidden>
+    <p class="help">Cada paquete junta las piezas de un período y se manda a MetalERP de una vez. Si MetalERP no responde, el paquete queda guardado y se vuelve a intentar cada 5 minutos con el mismo código, así nunca se carga dos veces.</p>
+    <div class="tbl"><table><thead><tr><th>Armado</th><th>Piezas desde</th><th>hasta</th><th style="text-align:right">Piezas</th><th>Estado</th><th>Enviado</th><th>Respuesta de MetalERP</th></tr></thead><tbody id="tb-paq"></tbody></table></div>
+  </section>
+
+  <section id="v-piezas" hidden>
+    <p class="help">Las últimas 300 piezas que llegaron del router, de todas las máquinas.</p>
+    <div class="tbl"><table><thead><tr><th>Hora</th><th>Máquina</th><th style="text-align:right">Ciclo</th><th style="text-align:right">Contador</th><th>Origen</th><th>Paquete</th></tr></thead><tbody id="tb-pz"></tbody></table></div>
+  </section>
+
+  <section id="v-simulador" hidden>
+    <div class="aviso warn">Las piezas del simulador son piezas reales para MetalERP: entran en el próximo paquete y se cargan como novedades. Usalo solo para probar, con una OT de prueba asignada a la máquina.</div>
+    <div class="sim-grid" id="sim"></div>
+  </section>
+
+  <section id="v-backup" hidden>
+    <div class="help" style="max-width:80ch;margin:14px 0 10px">Baja a esta PC todos los programas que tiene guardados el control (memoria del CNC), uno por archivo <code>O0001.NC</code>, más <code>TODOS.NC</code> con todos juntos y <code>LISTA.txt</code> con el detalle. No cambia nada en la máquina y se puede hacer con la máquina trabajando. Aparecen las máquinas Fanuc cargadas en la pestaña Lectores.</div>
+    <div id="bk-lista"></div>
+    <div class="row" style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><button class="btn" id="bk-abrir" onclick="bkAbrir('')">Abrir carpeta de backups</button></div>
+    <div id="bk-msg" class="aviso" hidden></div>
+    <div class="help" id="bk-carpeta"></div>
+  </section>
+
+  <section id="v-lectores" hidden>
+    <div class="help" style="max-width:80ch;margin:14px 0 10px">Máquinas que la app lee sola por la red, sin router: cada 5 segundos le pregunta el contador de piezas al control y carga las piezas nuevas. La primera lectura solo toma el número de referencia. La máquina va con el código que tiene en MetalERP.</div>
+    <div class="tbl"><table>
+      <thead><tr><th>Máquina</th><th>Control</th><th>IP</th><th>Puerto</th><th title="Piezas que salen en cada ciclo">Pzs/ciclo</th><th>Activo</th><th>Última lectura</th><th></th></tr></thead>
+      <tbody id="tb-lec"></tbody>
+    </table></div>
+    <div class="row" style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+      <button class="btn" id="l-agregar" onclick="lecAgregar()">+ Agregar máquina</button>
+      <button class="btn p" id="l-guardar" onclick="lecGuardar()">Guardar lectores</button>
+    </div>
+    <div id="l-msg" class="aviso" hidden></div>
+    <div class="help" id="l-local"></div>
+    <h3 style="margin:22px 0 6px;font-family:var(--f-display)">Qué hay que hacer en la máquina</h3>
+    <div class="help" style="max-width:80ch">
+      <p><b>Fanuc</b> (tornos y centros con control Fanuc): cable de red al control, IP cargada en SYSTEM → EMBED PORT → COMMON, y en FOCAS2 el puerto TCP <code>8193</code>. Se lee la variable <code>#3901</code> (PARTS COUNT de la pantalla SETTING); si no, el parámetro <code>6711</code>.</p>
+      <p><b>Haas</b>: cable de red, IP en Settings → Network y el Setting 143 (Machine Data Collect) activado. Se lee el contador M30 #1 por el puerto <code>5051</code>.</p>
+      <p>Con <b>Probar</b> se lee una vez el contador sin cargar piezas: sirve para saber si la conexión anda.</p>
+    </div>
+  </section>
+
+  <section id="v-config" hidden>
+    <div class="form">
+      <b>Conectar con MetalERP</b>
+      <div class="help">Poné la dirección de MetalERP y un usuario administrador de MetalERP. La app pide su clave sola; no hay que copiar nada.</div>
+      <label for="c-url">Dirección de MetalERP<input id="c-url" type="text" placeholder="http://localhost:5000"></label>
+      <div class="row">
+        <label for="c-usr" style="flex:1">Usuario de MetalERP<input id="c-usr" type="text" autocomplete="off" placeholder="admin"></label>
+        <label for="c-pw" style="flex:1">Contraseña<input id="c-pw" type="password" autocomplete="off"></label>
+      </div>
+      <div class="row"><button class="btn p" id="c-conectar" onclick="conectar()">Conectar</button><button class="btn" onclick="probar()">Probar conexión</button></div>
+      <div id="c-msg" class="aviso" hidden></div>
+      <div class="help" id="c-local"></div>
+    </div>
+    <div class="form" style="margin-top:14px">
+      <b>Otros ajustes</b>
+      <label for="c-key">Clave a mano (solo si no usaste Conectar)<input id="c-key" type="password" placeholder="Dejala vacía para no cambiarla" autocomplete="off"></label>
+      <div class="row">
+        <label for="c-int" style="flex:1">Mandar el paquete cada (minutos)<input id="c-int" type="number" min="1" max="1440"></label>
+        <label for="c-par" style="flex:1">Máquina parada sin piezas durante (segundos)<input id="c-par" type="number" min="30" max="7200"></label>
+      </div>
+      <label for="c-tok">Código del router (opcional; si lo ponés, el router tiene que mandar <code>&amp;token=...</code>)<input id="c-tok" type="text" autocomplete="off"></label>
+      <div class="row"><button class="btn" id="c-guardar" onclick="guardarConfig()">Guardar ajustes</button></div>
+    </div>
+    <h3 style="margin:22px 0 6px;font-family:var(--f-display)">Cómo manda las piezas el router</h3>
+    <div class="help" style="max-width:75ch">
+      <p>Por cada pieza terminada, el router (o el programa que lee las máquinas) llama a esta dirección:</p>
+      <p><code id="ej1"></code> una pieza.</p>
+      <p><code id="ej2"></code> con el contador de piezas del CNC: la app calcula cuántas salieron desde la última lectura.</p>
+      <p>También acepta <code>POST /senal</code> con <code>{"maquina": "T16", "contador": 18452}</code> o una lista de esos. La máquina se nombra con el código que tiene en MetalERP.</p>
+    </div>
+  </section>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+let E=null, vista='maquinas', autos={};
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fN=n=>n==null?'—':Number(n).toLocaleString('es-AR',{maximumFractionDigits:1});
+const hm=s=>s?s.slice(11,16):'—';
+const dh=s=>s?s.slice(8,10)+'/'+s.slice(5,7)+' '+s.slice(11,16):'—';
+function toast(t){const e=$('toast');e.textContent=t;e.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(()=>e.hidden=true,3000);}
+async function api(u,o){try{const r=await fetch(u,Object.assign({headers:{'Content-Type':'application/json'}},o||{}));return await r.json();}catch(e){return {error:'La app no responde'};}}
+function ir(v){vista=v;['maquinas','paquetes','piezas','lectores','backup','simulador','config'].forEach(x=>{$('v-'+x).hidden=x!==v;$('t-'+x).setAttribute('aria-selected',x===v);});
+  if(v==='paquetes')cargarPaquetes(); if(v==='piezas')cargarPiezas(); if(v==='config')cargarConfig(); if(v==='simulador')renderSim(); if(v==='lectores')cargarLectores(); if(v==='backup')cargarBackup();}
+function segDesde(h){if(!h)return null;const t=new Date(h.replace(' ','T'));return Math.round((Date.now()-t.getTime())/1000);}
+
+async function cargarEstado(){
+  const d=await api('/api/estado'); if(d.error&&!d.maquinas){$('conn').innerHTML='<span class="chip"><span class="dot bad"></span>'+esc(d.error)+'</span>';return;}
+  E=d; renderConn(); renderGrid(); if(vista==='simulador')renderSim(); if(vista==='lectores')lecEstados();
+}
+function renderConn(){
+  const ok=E.metalerp_ok;
+  $('conn').innerHTML='<span class="chip"><span class="dot '+(ok===true?'ok':ok===false?'bad':'')+'"></span>MetalERP '+(ok===true?'conectado':ok===false?'sin conexión':'sin probar')+'</span>'
+    +'<span class="chip"><span class="dot '+(E.sin_enviar?'warn':'ok')+'"></span>'+(E.sin_enviar?fN(E.sin_enviar)+' piezas por enviar':'Todo enviado')+'</span>'
+    +'<span class="chip">Próximo paquete '+hm(E.proximo_envio)+'</span>';
+  let av='';
+  if(!E.tiene_clave) av='<div class="aviso warn">Falta conectar con MetalERP. Andá a Configuración, poné tu usuario de MetalERP y tocá Conectar.</div>';
+  else if(ok===false) av='<div class="aviso bad">'+esc(E.metalerp_error||'MetalERP no responde')+'. La app sigue guardando las piezas y las manda cuando vuelva la conexión.</div>';
+  $('aviso').innerHTML=av;
+}
+function estadoMaq(m){
+  const s=m.local||{}, seg=segDesde(s.ultima), lim=(E.config.parada_seg||180);
+  if(seg!=null&&seg<=lim) return ['prod','Produciendo'];
+  if(m.operacion) return seg==null?['idle','Sin piezas hoy']:['par','Parada'];
+  return ['idle','Sin trabajo'];
+}
+function renderGrid(){
+  const ms=(E.maquinas||[]).filter(m=>m.operacion||(m.local&&(m.local.hoy||m.local.sin_paquete))||m.desconocida);
+  const hoy=(E.maquinas||[]).reduce((a,m)=>a+((m.local&&m.local.hoy)||0),0);
+  const prod=ms.filter(m=>estadoMaq(m)[0]==='prod').length, par=ms.filter(m=>estadoMaq(m)[0]==='par').length;
+  $('resumen').innerHTML='<span><b>'+prod+'</b> produciendo</span><span><b>'+par+'</b> paradas</span><span><b>'+fN(hoy)+'</b> piezas hoy</span><span>Último envío <b>'+hm(E.ultimo_envio)+'</b></span>'
+    +'<button class="btn" id="b-enviar" onclick="enviarAhora()"'+(E.enviando?' disabled':'')+'>'+(E.enviando?'Enviando...':'Enviar ahora')+'</button>';
+  if(!ms.length){$('grid').innerHTML='<div class="empty">'+(E.tiene_clave?'Ninguna máquina tiene operación asignada en MetalERP ni mandó piezas hoy. Asignalas en MetalERP → Máquinas en planta.':'Conectá la app con MetalERP en Configuración.')+'</div>';return;}
+  const pal=($('buscar').value||'').toLowerCase().split(/\s+/).filter(Boolean);
+  const vis=pal.length?ms.filter(m=>{const op=m.operacion||{};
+    const t=[m.codigo,m.nombre,op.ot,op.nombre,op.producto,op.descripcion,m.operario&&m.operario.nombre,m.operario&&m.operario.legajo].join(' ').toLowerCase();
+    return pal.every(p=>t.indexOf(p)>=0);}):ms;
+  if(!vis.length){$('grid').innerHTML='<div class="empty">Ninguna máquina coincide con la búsqueda.</div>';return;}
+  $('grid').innerHTML=vis.map(m=>{
+    const [cls,txt]=m.desconocida?['sin','No está en MetalERP']:estadoMaq(m), s=m.local||{}, op=m.operacion;
+    const pct=op&&op.pedidas?Math.min(100,Math.round(op.hechas/op.pedidas*100)):0;
+    let extra='';
+    if(m.desconocida) extra='<div class="warnline">El router manda este código pero no existe en MetalERP: sus piezas van a quedar rechazadas.</div>';
+    else if(!op) extra='<div class="warnline">Sin operación asignada en MetalERP: las piezas quedan en espera.</div>';
+    else if(!m.operario) extra='<div class="warnline">Sin operario elegido en MetalERP (Máquinas en planta): las piezas quedan en espera.</div>';
+    const lec=(E.lectores||[]).find(l=>String(l.maquina).toUpperCase()===String(m.codigo).toUpperCase()&&l.activo!==false);
+    if(lec&&lec.estado&&lec.estado.error) extra+='<div class="warnline">Lector: '+esc(lec.estado.error)+'</div>';
+    else if(lec&&lec.estado&&lec.estado.leido) extra+='<div class="help" style="font-size:12px">Lector '+esc(lec.tipo)+': contador '+fN(lec.estado.contador)+' a las '+hm(lec.estado.leido)+'</div>';
+    if(m.esperando) extra+='<div class="waitline">'+fN(m.esperando)+' piezas esperando en MetalERP</div>';
+    if(m.errores) extra+='<div class="warnline">'+fN(m.errores)+' piezas con error en MetalERP</div>';
+    return '<div class="card s-'+cls+'"><div class="c-head"><span class="code">'+esc(m.codigo)+'</span><span class="mname">'+esc(m.nombre)+'</span><span class="pill '+cls+'">'+txt+'</span></div>'
+      +'<div><span class="k">Operario (de MetalERP)</span>'+(m.operario?esc(m.operario.nombre)+' <span style="color:var(--muted)">('+esc(m.operario.legajo)+')</span>':'—')+'</div>'
+      +'<div><span class="k">Trabajo</span>'+(op?esc(op.ot)+' · paso '+esc(op.paso)+' '+esc(op.nombre)+'<br><span style="color:var(--muted)">'+esc(op.producto||op.descripcion||'')+'</span>':'—')+'</div>'
+      +'<div class="counter"><div class="cnt">'+fN(s.hoy||0)+'<small> hoy</small></div><div class="meta">'+(op?fN(op.hechas)+' / '+fN(op.pedidas)+' en MetalERP':'')+'<br>'
+      +(s.ciclo_prom?'ciclo '+fN(s.ciclo_prom)+' s · ':'')+'última '+hm(s.ultima)+(s.sin_paquete?'<br>'+fN(s.sin_paquete)+' para el próximo paquete':'')+'</div></div>'
+      +(op?'<div class="prog"><i style="width:'+pct+'%"></i></div>':'')+extra+'</div>';
+  }).join('');
+}
+async function enviarAhora(){await api('/api/enviar_ahora',{method:'POST'});toast('Mandando las piezas a MetalERP...');setTimeout(cargarEstado,1500);setTimeout(()=>{cargarEstado();if(vista==='paquetes')cargarPaquetes();},5000);}
+async function cargarPaquetes(){
+  const d=await api('/api/paquetes'); const tb=$('tb-paq');
+  if(!Array.isArray(d)||!d.length){tb.innerHTML='<tr><td colspan="7" class="empty">Todavía no se armó ningún paquete.</td></tr>';return;}
+  const col={'Enviado':'prod','Por enviar':'idle','Error':'sin'};
+  tb.innerHTML=d.map(k=>{const r=k.respuesta||{};
+    const resp=k.estado==='Enviado'?(fN(r.nuevas)+' nuevas'+(r.duplicadas?' · '+fN(r.duplicadas)+' repetidas':'')+(r.rechazadas?' · <span style="color:var(--bad)">'+fN(r.rechazadas)+' rechazadas</span>':'')):esc(k.error||'');
+    return '<tr><td>'+dh(k.creado)+'</td><td>'+dh(k.desde)+'</td><td>'+dh(k.hasta)+'</td><td class="num">'+fN(k.piezas)+'</td><td><span class="pill '+(col[k.estado]||'idle')+'">'+esc(k.estado)+'</span>'+(k.estado==='Error'?' <span class="help">reintenta '+hm(k.proximo_intento)+'</span>':'')+'</td><td>'+dh(k.enviado)+'</td><td style="white-space:normal">'+resp+'</td></tr>';}).join('');
+}
+async function cargarPiezas(){
+  const d=await api('/api/piezas'); const tb=$('tb-pz');
+  if(!Array.isArray(d)||!d.length){tb.innerHTML='<tr><td colspan="6" class="empty">Todavía no llegó ninguna pieza del router.</td></tr>';return;}
+  tb.innerHTML=d.map(p=>'<tr><td>'+esc(p.hora)+'</td><td>'+esc(p.maquina)+'</td><td class="num">'+(p.ciclo_seg?fN(p.ciclo_seg)+' s':'—')+'</td><td class="num">'+(p.contador==null?'—':p.contador)+'</td><td>'+esc(p.origen||'')+'</td><td>'+(p.paquete?esc(p.paquete_estado||''):'Próximo')+'</td></tr>').join('');
+}
+function renderSim(){
+  if(!E){return;}
+  const ms=(E.maquinas||[]).filter(m=>!m.desconocida);
+  if(!ms.length){$('sim').innerHTML='<div class="empty">Conectá la app con MetalERP para ver las máquinas.</div>';return;}
+  // Se rearma solo si cambian las máquinas o el automático, así no se pierde lo que se está escribiendo.
+  const clave=ms.map(m=>m.codigo+(autos[m.codigo]?'*':'')).join(',');
+  if(clave===_simClave&&$('sim').children.length)return; _simClave=clave;
+  $('sim').innerHTML=ms.map(m=>'<div class="sim-item"><b>'+esc(m.codigo)+'</b><button class="btn" onclick="simPieza(\''+esc(m.codigo)+'\')">+1 pieza</button>'
+    +'<input type="number" class="sim-n" id="simn-'+esc(m.codigo)+'" min="1" max="500" value="'+(simCant[m.codigo]||10)+'" oninput="simCant[\''+esc(m.codigo)+'\']=this.value" title="Cuántas piezas mandar de una vez">'
+    +'<button class="btn" onclick="simVarias(\''+esc(m.codigo)+'\')">Mandar</button><button class="btn'+(autos[m.codigo]?' on':'')+'" onclick="simAuto(\''+esc(m.codigo)+'\')" title="Una pieza cada 10 segundos">'+(autos[m.codigo]?'Parar':'Automático')+'</button></div>').join('');
+}
+let _simClave='', simCant={};
+async function simVarias(c){
+  const n=Math.max(1,Math.min(500,parseInt(($('simn-'+c)||{}).value,10)||0));
+  const r=await api('/senal?maquina='+encodeURIComponent(c)+'&piezas='+n+'&origen=simulador');
+  if(r.error)toast(r.error);else toast(fN(r.piezas)+' piezas de '+c+' registradas');cargarEstado();}
+async function simPieza(c){const r=await api('/senal?maquina='+encodeURIComponent(c)+'&origen=simulador');if(r.error)toast(r.error);else toast('Pieza de '+c+' registrada');cargarEstado();}
+function simAuto(c){if(autos[c]){clearInterval(autos[c]);delete autos[c];}else{autos[c]=setInterval(()=>api('/senal?maquina='+encodeURIComponent(c)+'&origen=simulador'),10000);}renderSim();}
+// ── Backup de programas ──
+let BK=null, BK_T=null;
+const fTam=b=>b==null?'—':(b<1024?b+' B':(b<1048576?(b/1024).toFixed(1)+' KB':(b/1048576).toFixed(1)+' MB'));
+async function cargarBackup(){
+  const r=await api('/api/backup'); if(r.error){toast(r.error);return;}
+  BK=r; renderBackup();
+  clearTimeout(BK_T); if(vista==='backup'&&(r.maquinas||[]).some(m=>m.estado&&m.estado.en_curso)) BK_T=setTimeout(cargarBackup,1500);
+}
+function bkEstadoTxt(e){
+  if(!e)return '';
+  if(e.en_curso)return '<div class="aviso warn" style="margin:8px 0">Haciendo backup... '+(e.total?(e.hechos+' de '+e.total+' programas'+(e.actual?' (bajando O'+String(e.actual).padStart(4,'0')+')':'')):'leyendo la lista de programas')+'</div>';
+  if(e.error)return '<div class="aviso bad" style="margin:8px 0">No se pudo hacer el backup: '+esc(e.error)+'</div>';
+  return '<div class="aviso ok" style="margin:8px 0">Backup listo a las '+hm(e.fin)+': '+fN(e.programas)+' programas.'+(e.errores&&e.errores.length?' No se pudieron bajar '+e.errores.length+': '+esc(e.errores.slice(0,5).join(' · ')):'')+'</div>';
+}
+function renderBackup(){
+  const ms=BK.maquinas||[], loc=BK.es_local;
+  $('bk-carpeta').textContent='Carpeta: '+(BK.carpeta||'');
+  $('bk-abrir').hidden=!loc;
+  $('bk-lista').innerHTML=ms.length?ms.map(m=>{const e=m.estado||{}, q=encodeURIComponent;
+    return '<div style="background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-bottom:12px">'
+    +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b style="font-size:16px">'+esc(m.maquina)+'</b><span class="help">Fanuc '+esc(m.ip)+':'+esc(m.puerto||8193)+'</span>'
+    +'<span style="flex:1"></span><button class="btn p" onclick="bkHacer(\''+esc(m.maquina)+'\')"'+(e.en_curso?' disabled':'')+'>'+(e.en_curso?'Haciendo backup...':'Hacer backup')+'</button></div>'
+    +bkEstadoTxt(m.estado)
+    +'<div class="tbl" style="margin-top:8px"><table><thead><tr><th>Fecha</th><th style="text-align:right">Programas</th><th style="text-align:right">Tamaño</th><th></th></tr></thead><tbody>'
+    +((m.backups||[]).length?m.backups.map(b=>'<tr><td>'+esc(b.fecha)+'</td><td style="text-align:right">'+fN(b.programas)+'</td><td style="text-align:right">'+fTam(b.tam)+'</td><td>'
+      +'<a class="btn" style="text-decoration:none;display:inline-block" href="/api/backup/zip?carpeta='+q(b.carpeta)+'">Descargar .zip</a>'+(loc?' <button class="btn" onclick="bkAbrir(\''+esc(b.carpeta)+'\')">Abrir carpeta</button>':'')+'</td></tr>').join('')
+      :'<tr><td colspan="4" class="empty">Todavía no hay backups de esta máquina.</td></tr>')
+    +'</tbody></table></div></div>';}).join('')
+    :'<div class="empty" style="padding:18px 0">No hay máquinas Fanuc cargadas. Agregalas en la pestaña Lectores (con su IP) y volvé acá.</div>';
+}
+function bkMsg(ok,t){const e=$('bk-msg');e.hidden=false;e.className='aviso '+(ok?'ok':'bad');e.textContent=t;}
+async function bkHacer(m){
+  if(!confirm('¿Hacer backup de todos los programas de '+m+'? Baja los programas a esta PC, no cambia nada en la máquina.'))return;
+  const r=await api('/api/backup',{method:'POST',body:JSON.stringify({maquina:m})});
+  if(r.error){bkMsg(false,r.error);return;}
+  $('bk-msg').hidden=true; cargarBackup();
+}
+async function bkAbrir(c){const r=await api('/api/backup/abrir',{method:'POST',body:JSON.stringify({carpeta:c})}); if(r.error)bkMsg(false,r.error);}
+// ── Lectores ──
+let LEC=[], LEC_LOCAL=false;
+const LEC_PUERTO={fanuc:8193,haas:5051};
+async function cargarLectores(){
+  const r=await api('/api/lectores'); if(r.error){toast(r.error);return;}
+  LEC=(r.lectores||[]).map(x=>Object.assign({},x)); LEC_LOCAL=r.es_local; lecRender();
+  $('l-local').textContent=LEC_LOCAL?'':'Los lectores solo se cambian desde la PC donde corre la app.';
+  ['l-agregar','l-guardar'].forEach(id=>$(id).disabled=!LEC_LOCAL);
+}
+function lecLeerFilas(){
+  document.querySelectorAll('#tb-lec tr[data-i]').forEach(tr=>{const i=+tr.dataset.i, q=s=>tr.querySelector(s);
+    Object.assign(LEC[i],{maquina:q('.l-maq').value.trim().toUpperCase(),tipo:q('.l-tipo').value,ip:q('.l-ip').value.trim(),
+      puerto:q('.l-puerto').value,multiplo:q('.l-mult').value,activo:q('.l-act').checked});});
+}
+function lecEstadoTxt(e){
+  if(!e)return '<span class="help">Todavía no leyó</span>';
+  if(e.error)return '<span style="color:var(--bad);white-space:normal">'+esc(e.error)+'</span>'+(e.leido?'<br><span class="help">última buena '+hm(e.leido)+'</span>':'');
+  return '<b>'+fN(e.contador)+'</b> <span class="help">('+esc(e.origen||'')+') '+hm(e.leido)+(e.piezas?' · '+fN(e.piezas)+' pzs cargadas':'')+'</span>';
+}
+function lecRender(){
+  const opts=(E&&E.maquinas||[]).filter(m=>!m.desconocida).map(m=>'<option value="'+esc(m.codigo)+'">'+esc(m.nombre||'')+'</option>').join('');
+  const dis=LEC_LOCAL?'':' disabled';
+  $('tb-lec').innerHTML=LEC.length?LEC.map((l,i)=>'<tr data-i="'+i+'">'
+    +'<td><input class="l-maq" list="l-maqs" value="'+esc(l.maquina||'')+'" style="width:90px"'+dis+'></td>'
+    +'<td><select class="l-tipo" onchange="lecTipo(this)"'+dis+'><option value="fanuc"'+(l.tipo==='fanuc'?' selected':'')+'>Fanuc (FOCAS)</option><option value="haas"'+(l.tipo==='haas'?' selected':'')+'>Haas</option></select></td>'
+    +'<td><input class="l-ip" value="'+esc(l.ip||'')+'" placeholder="192.168.1.200" style="width:130px"'+dis+'></td>'
+    +'<td><input class="l-puerto" type="number" value="'+esc(l.puerto||LEC_PUERTO[l.tipo||'fanuc'])+'" style="width:75px"'+dis+'></td>'
+    +'<td><input class="l-mult" type="number" min="1" max="100" value="'+esc(l.multiplo||1)+'" style="width:55px"'+dis+'></td>'
+    +'<td><input class="l-act" type="checkbox"'+(l.activo!==false?' checked':'')+dis+'></td>'
+    +'<td class="l-est" style="white-space:normal;min-width:180px">'+lecEstadoTxt(l.estado)+'</td>'
+    +'<td><button class="btn" onclick="lecProbar('+i+')"'+dis+'>Probar</button> <button class="btn" onclick="lecQuitar('+i+')"'+dis+'>Quitar</button></td></tr>').join('')
+    :'<tr><td colspan="8" class="empty">No hay máquinas con lector. Tocá "+ Agregar máquina".</td></tr>';
+  if(!$('l-maqs')){const dl=document.createElement('datalist');dl.id='l-maqs';document.body.appendChild(dl);} $('l-maqs').innerHTML=opts;
+}
+function lecEstados(){
+  const por={}; (E.lectores||[]).forEach(l=>por[String(l.maquina).toUpperCase()]=l.estado);
+  document.querySelectorAll('#tb-lec tr[data-i]').forEach(tr=>{const l=LEC[+tr.dataset.i]; if(l&&l.maquina) tr.querySelector('.l-est').innerHTML=lecEstadoTxt(por[String(l.maquina).toUpperCase()]);});
+}
+function lecTipo(sel){const p=sel.closest('tr').querySelector('.l-puerto'); if(!p.value||Object.values(LEC_PUERTO).includes(+p.value)) p.value=LEC_PUERTO[sel.value];}
+function lecAgregar(){lecLeerFilas(); LEC.push({maquina:'',tipo:'fanuc',ip:'',puerto:8193,multiplo:1,activo:true}); lecRender();}
+function lecQuitar(i){lecLeerFilas(); LEC.splice(i,1); lecRender();}
+function lecMsg(ok,t){const e=$('l-msg');e.hidden=false;e.className='aviso '+(ok?'ok':'bad');e.textContent=t;}
+async function lecGuardar(){
+  lecLeerFilas();
+  const r=await api('/api/lectores',{method:'PUT',body:JSON.stringify({lectores:LEC})});
+  if(r.error){lecMsg(false,r.error);return;}
+  lecMsg(true,'Guardado. La app empieza a leer en unos segundos.'); LEC=(r.lectores||[]).map(x=>Object.assign({},x)); lecRender();
+}
+async function lecProbar(i){
+  lecLeerFilas(); const l=LEC[i]; lecMsg(true,'Probando '+(l.ip||'')+'...');
+  const r=await api('/api/lectores/probar',{method:'POST',body:JSON.stringify(l)});
+  if(r.ok){const c=r.sysinfo&&Object.keys(r.sysinfo).length?' Control: '+[r.sysinfo.cnc,r.sysinfo.tipo,r.sysinfo.serie,r.sysinfo.version].filter(Boolean).join(' ')+'.':'';
+    lecMsg(true,'Conecta. Contador de piezas: '+fN(r.contador)+' ('+(r.origen||'')+').'+c+' Si está bien, tocá Guardar lectores.');}
+  else lecMsg(false,'No conecta: '+(r.error||'error desconocido'));
+}
+async function cargarConfig(){
+  const c=await api('/api/config');
+  $('c-url').value=c.metalerp_url||''; $('c-int').value=c.intervalo_min; $('c-par').value=c.parada_seg; $('c-tok').value=c.senal_token||''; $('c-key').value='';
+  $('c-key').placeholder=c.api_key_fin?'Guardada (termina en '+c.api_key_fin+'). Dejala vacía para no cambiarla':'Pegá la clave que te da MetalERP';
+  const loc=c.es_local; ['c-url','c-usr','c-pw','c-conectar','c-key','c-int','c-par','c-tok','c-guardar'].forEach(id=>$(id).disabled=!loc);
+  $('c-local').textContent=loc?(c.api_key_fin?'Conectada con la clave que termina en '+c.api_key_fin+'.':'Todavía no está conectada.'):'La configuración solo se cambia desde la PC donde corre la app.';
+  const base=location.protocol+'//'+location.host;
+  $('ej1').textContent=base+'/senal?maquina=T16'; $('ej2').textContent=base+'/senal?maquina=T16&contador=18452';
+}
+function msg(ok,t){const e=$('c-msg');e.hidden=false;e.className='aviso '+(ok?'ok':'bad');e.textContent=t;}
+async function conectar(){
+  msg(true,'Conectando...');
+  const r=await api('/api/vincular',{method:'POST',body:JSON.stringify({metalerp_url:$('c-url').value,username:$('c-usr').value,password:$('c-pw').value})});
+  $('c-pw').value='';
+  if(r.ok){msg(true,'Conectada con MetalERP. Ya puede mandar las piezas.');cargarConfig();cargarEstado();}
+  else msg(false,'No se pudo conectar: '+(r.error||'error desconocido'));
+}
+async function guardarConfig(){
+  const r=await api('/api/config',{method:'PUT',body:JSON.stringify({metalerp_url:$('c-url').value,api_key:$('c-key').value,intervalo_min:$('c-int').value,parada_seg:$('c-par').value,senal_token:$('c-tok').value})});
+  if(r.error){msg(false,r.error);return;} toast('Guardado'); cargarConfig(); probar();
+}
+async function probar(){
+  const r=await api('/api/probar',{method:'POST'});
+  msg(r.ok, r.ok?'Conectada con MetalERP ('+(r.app||'')+').':'No conecta: '+(r.error||''));
+  cargarEstado();
+}
+cargarEstado(); setInterval(cargarEstado,5000);
+</script>
+</body>
+</html>
