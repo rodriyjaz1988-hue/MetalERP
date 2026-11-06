@@ -37,7 +37,21 @@ CONFIG_DEFECTO = {
     "ftp_activo": True,
     "ftp_puerto": 21,
     "ftp_clave": "",
+    # Paradas cargadas por el operario en el torno: variable de macro y códigos.
+    # El operario carga en la variable 9500 + código (9516 = baño) y 0 al volver.
+    "variable_parada": 500,
+    "base_parada": 9500,
+    "codigos_parada": [],         # vacío: los de Trabajo no productivo de CNC de MetalERP
 }
+# Códigos de parada de CNC de Trabajo no productivo (CODIGOS_PARADA_MAQUINA['CNC']
+# de MetalERP): el código es la posición, empezando en 1. El texto va igual a
+# MetalERP para que el TNP quede con el motivo que reconoce.
+CODIGOS_PARADA_CNC = ["MANTENIMIENTO", "PUESTA EN MARCHA", "ALMUERZO - CENA", "LIMPIEZA DEL SECTOR",
+    "LIMPIEZA INTERIOR", "CAMBIAR INSERTO", "GIRAR INSERTO", "CORREGIR MEDIDA", "CAMBIAR BARRA", "AGREGAR SOLUBLE",
+    "CAMBIO DE OPERADOR", "FALTA DE OPERADOR", "PROBLEMAS CON ALIMENTADOR", "CAMBIO DE PREPARACION",
+    "CORTE Y DESPUNTE DE BARRAS", "BAÑO", "ROTURA DE HTAS", "CAMBIO DE INSERTO EN OTRA MAQUINA",
+    "EXPLICACION / REUNION", "FALTA DE PREPARACION", "MOVER PIEZAS", "FALTA DE MATERIAL",
+    "ESPERAR AL ENCARGADO / PEDIR INSERTO", "REPASAR PIEZAS", "DESCARGAR MATERIAL"]
 LECTOR_SEG = 5                    # cada cuánto se lee el contador de cada máquina
 TIPOS_LECTOR = {"fanuc": 8193, "haas": 5051}
 REINTENTO_MIN = 5
@@ -117,6 +131,29 @@ CREATE TABLE IF NOT EXISTS contadores (
 );
 CREATE TABLE IF NOT EXISTS ultima_pieza (
     maquina TEXT PRIMARY KEY,
+    hora TEXT
+);
+CREATE TABLE IF NOT EXISTS paradas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid TEXT UNIQUE NOT NULL,
+    maquina TEXT NOT NULL,
+    codigo INTEGER,
+    motivo TEXT,
+    valor INTEGER,
+    inicio TEXT NOT NULL,
+    fin TEXT,                     -- NULL: la parada sigue
+    duracion_seg REAL,
+    cerrada_por TEXT,             -- operario (cargó 0) / cambio (otro código) / piezas (volvió a producir)
+    estado TEXT DEFAULT 'Abierta',  -- Abierta / Por enviar / Enviada / Error / Rechazada
+    intentos INTEGER DEFAULT 0,
+    enviado TEXT,
+    respuesta TEXT,
+    error TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_paradas_maq ON paradas(maquina, fin);
+CREATE TABLE IF NOT EXISTS parada_variable (
+    maquina TEXT PRIMARY KEY,
+    valor INTEGER,
     hora TEXT
 );
 """
@@ -315,9 +352,39 @@ def enviar_pendientes(forzar=False):
                 db.commit()
                 _estado.update(metalerp_ok=False, metalerp_error=str(e))
                 break           # si uno falla, los siguientes esperan (van en orden)
+        enviar_paradas(db)
     finally:
         _estado["enviando"] = False
         db.close()
+
+
+def enviar_paradas(db):
+    """Manda a MetalERP las paradas terminadas (cada una queda como Trabajo no productivo)."""
+    filas = db.execute("""SELECT * FROM paradas WHERE fin IS NOT NULL AND estado IN ('Por enviar','Error')
+        ORDER BY id LIMIT 500""").fetchall()
+    if not filas:
+        return
+    lista = [{"uuid": f["uuid"], "maquina": f["maquina"], "codigo": f["codigo"], "motivo": f["motivo"],
+              "inicio": f["inicio"], "fin": f["fin"], "minutos": round((f["duracion_seg"] or 0) / 60.0, 2)}
+             for f in filas]
+    try:
+        r = llamar_metalerp("POST", "/api/planta/v1/paradas", {"paradas": lista}, timeout=60)
+    except Exception as e:
+        db.executemany("UPDATE paradas SET estado='Error', error=?, intentos=intentos+1 WHERE uuid=?",
+                       [(str(e)[:500], f["uuid"]) for f in filas])
+        db.commit()
+        return
+    errores = {x.get("uuid"): x.get("error") for x in (r.get("errores") or []) if isinstance(x, dict)}
+    hora = ahora()
+    for f in filas:
+        if f["uuid"] in errores:
+            db.execute("UPDATE paradas SET estado='Rechazada', error=?, intentos=intentos+1, enviado=? WHERE uuid=?",
+                       (str(errores[f["uuid"]])[:500], hora, f["uuid"]))
+        else:
+            res = (r.get("resultado") or {}).get(f["uuid"])
+            db.execute("""UPDATE paradas SET estado='Enviada', error=NULL, intentos=intentos+1, enviado=?, respuesta=?
+                WHERE uuid=?""", (hora, json.dumps(res, ensure_ascii=False)[:500] if res else None, f["uuid"]))
+    db.commit()
 
 
 def proximo_envio(desde=None):
@@ -344,6 +411,8 @@ def hilo_envios():
                 # Reintentos de paquetes que fallaron (cada 5 min), sin esperar la hora.
                 db = conectar()
                 hay = db.execute("SELECT 1 FROM paquetes WHERE estado='Error' AND proximo_intento<=?", (ahora(),)).fetchone()
+                if not hay and datetime.now().minute % REINTENTO_MIN == 0 and datetime.now().second < 30:
+                    hay = db.execute("SELECT 1 FROM paradas WHERE estado='Error'").fetchone()
                 db.close()
                 if hay:
                     enviar_pendientes()
@@ -394,7 +463,16 @@ def leer_lector(lec, timeout=5):
     if tipo == "fanuc":
         import fanuc_focas
         try:
-            return fanuc_focas.leer_piezas(lec["ip"], lec.get("puerto") or 8193, timeout)
+            with fanuc_focas.Fanuc(lec["ip"], lec.get("puerto") or 8193, timeout) as f:
+                n, origen = f.piezas()
+                r = {"contador": n, "origen": origen, "sysinfo": f.sysinfo}
+                var = int(cfg().get("variable_parada") or 0)
+                if var:
+                    try:
+                        r["parada_valor"] = f.leer_macro(var)
+                    except fanuc_focas.ErrorFanuc as e:
+                        r["parada_error"] = f"No se pudo leer #{var}: {e}"
+                return r
         except fanuc_focas.ErrorFanuc as e:
             raise RuntimeError(str(e))
     if tipo == "haas":
@@ -426,8 +504,70 @@ def _leer_y_registrar(lec):
                                  origen=lec.get("tipo"))
                 est["piezas"] = est.get("piezas", 0) + n * mult
             db.commit()
+        if "parada_valor" in r or "parada_error" in r:
+            est["parada_error"] = r.get("parada_error")
+            if "parada_valor" in r:
+                procesar_parada(db, maq, r["parada_valor"], n or 0, hora)
+            ab = db.execute("SELECT codigo, motivo, inicio FROM paradas WHERE maquina=? AND fin IS NULL", (maq,)).fetchone()
+            est["parada"] = dict(ab) if ab else None
+            est["parada_valor"] = r.get("parada_valor")
     finally:
         db.close()
+
+
+# ── Paradas que carga el operario en el torno (variable de macro) ────────────
+def codigos_parada():
+    c = cfg().get("codigos_parada") or []
+    return [str(x) for x in c] if c else CODIGOS_PARADA_CNC
+
+
+def codigo_de_valor(valor):
+    """9516 -> (16, 'BAÑO'). 0 o vacío -> (0, None). Otro valor -> (None, None)."""
+    if valor is None:
+        return 0, None
+    try:
+        v = int(round(float(valor)))
+    except (TypeError, ValueError):
+        return None, None
+    if v == 0:
+        return 0, None
+    base = int(cfg().get("base_parada") or 0)
+    cods = codigos_parada()
+    if 1 <= v - base <= len(cods):
+        return v - base, cods[v - base - 1]
+    return None, None
+
+
+def _cerrar_parada(db, fila, hora, por):
+    ini = datetime.strptime(fila["inicio"], "%Y-%m-%d %H:%M:%S")
+    fin = datetime.strptime(hora, "%Y-%m-%d %H:%M:%S")
+    db.execute("""UPDATE paradas SET fin=?, duracion_seg=?, cerrada_por=?, estado='Por enviar'
+        WHERE id=?""", (hora, max(0.0, (fin - ini).total_seconds()), por, fila["id"]))
+
+
+def procesar_parada(db, maq, valor, piezas_nuevas, hora):
+    """Abre o cierra la parada de la máquina según lo que el operario cargó.
+    Solo se actúa cuando el valor cambia (el último valor queda guardado, así
+    un reinicio del Monitor no repite paradas). Si la máquina vuelve a sacar
+    piezas con la parada abierta, se cierra sola."""
+    try:
+        v = int(round(float(valor))) if valor is not None else 0
+    except (TypeError, ValueError):
+        return
+    r = db.execute("SELECT valor FROM parada_variable WHERE maquina=?", (maq,)).fetchone()
+    anterior = r["valor"] if r else 0
+    abierta = db.execute("SELECT * FROM paradas WHERE maquina=? AND fin IS NULL ORDER BY id DESC", (maq,)).fetchone()
+    codigo, motivo = codigo_de_valor(v)
+    if v != anterior:
+        if abierta:
+            _cerrar_parada(db, abierta, hora, "operario" if v == 0 else "cambio")
+        if codigo:
+            db.execute("""INSERT INTO paradas (uuid, maquina, codigo, motivo, valor, inicio)
+                VALUES (?,?,?,?,?,?)""", (str(uuid.uuid4()), maq, codigo, motivo, v, hora))
+        db.execute("INSERT OR REPLACE INTO parada_variable (maquina, valor, hora) VALUES (?,?,?)", (maq, v, hora))
+    elif abierta and piezas_nuevas > 0:
+        _cerrar_parada(db, abierta, hora, "piezas")
+    db.commit()
 
 
 def hilo_lectores():
@@ -904,6 +1044,14 @@ def api_envio_ftp():
     guardar_cfg(nuevo)
     ftp_reiniciar()
     return jsonify({"ok": True})
+
+
+@app.route("/api/paradas")
+def api_paradas():
+    filas = get_db().execute("SELECT * FROM paradas ORDER BY id DESC LIMIT 300").fetchall()
+    c = cfg()
+    return jsonify({"paradas": [dict(r) for r in filas], "variable": c.get("variable_parada"),
+                    "base": c.get("base_parada"), "codigos": codigos_parada()})
 
 
 @app.route("/api/paquetes")

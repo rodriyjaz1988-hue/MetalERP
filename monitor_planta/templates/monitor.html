@@ -93,6 +93,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
     <button role="tab" id="t-lectores" aria-selected="false" onclick="ir('lectores')">Lectores</button>
     <button role="tab" id="t-backup" aria-selected="false" onclick="ir('backup')">Backup</button>
     <button role="tab" id="t-envio" aria-selected="false" onclick="ir('envio')">Enviar programa</button>
+    <button role="tab" id="t-paradas" aria-selected="false" onclick="ir('paradas')">Paradas</button>
     <button role="tab" id="t-simulador" aria-selected="false" onclick="ir('simulador')">Simulador</button>
     <button role="tab" id="t-config" aria-selected="false" onclick="ir('config')">Configuración</button>
   </nav>
@@ -151,6 +152,12 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
     </div>
     <h3 style="margin:22px 0 6px;font-family:var(--f-display)">Movimientos</h3>
     <div class="tbl"><table><thead><tr><th>Hora</th><th>Máquina</th><th>Programa</th><th>Qué pasó</th><th>Detalle</th></tr></thead><tbody id="tb-env"></tbody></table></div>
+  </section>
+
+  <section id="v-paradas" hidden>
+    <div class="help" style="max-width:82ch;margin:14px 0 10px" id="pa-ayuda"></div>
+    <div class="tbl"><table><thead><tr><th>Máquina</th><th>Código</th><th>Motivo</th><th>Desde</th><th>Hasta</th><th style="text-align:right">Duración</th><th>Cerró</th><th>MetalERP</th></tr></thead><tbody id="tb-pa"></tbody></table></div>
+    <details style="margin-top:16px"><summary class="help" style="cursor:pointer">Ver la lista de códigos</summary><div id="pa-cods" class="help" style="columns:2;max-width:760px;margin-top:8px"></div></details>
   </section>
 
   <section id="v-lectores" hidden>
@@ -216,13 +223,13 @@ const hm=s=>s?s.slice(11,16):'—';
 const dh=s=>s?s.slice(8,10)+'/'+s.slice(5,7)+' '+s.slice(11,16):'—';
 function toast(t){const e=$('toast');e.textContent=t;e.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(()=>e.hidden=true,3000);}
 async function api(u,o){try{const r=await fetch(u,Object.assign({headers:{'Content-Type':'application/json'}},o||{}));return await r.json();}catch(e){return {error:'La app no responde'};}}
-function ir(v){vista=v;['maquinas','paquetes','piezas','lectores','backup','envio','simulador','config'].forEach(x=>{$('v-'+x).hidden=x!==v;$('t-'+x).setAttribute('aria-selected',x===v);});
-  if(v==='paquetes')cargarPaquetes(); if(v==='piezas')cargarPiezas(); if(v==='config')cargarConfig(); if(v==='simulador')renderSim(); if(v==='lectores')cargarLectores(); if(v==='backup')cargarBackup(); if(v==='envio')cargarEnvio();}
+function ir(v){vista=v;['maquinas','paquetes','piezas','lectores','backup','envio','paradas','simulador','config'].forEach(x=>{$('v-'+x).hidden=x!==v;$('t-'+x).setAttribute('aria-selected',x===v);});
+  if(v==='paquetes')cargarPaquetes(); if(v==='piezas')cargarPiezas(); if(v==='config')cargarConfig(); if(v==='simulador')renderSim(); if(v==='lectores')cargarLectores(); if(v==='backup')cargarBackup(); if(v==='envio')cargarEnvio(); if(v==='paradas')cargarParadas();}
 function segDesde(h){if(!h)return null;const t=new Date(h.replace(' ','T'));return Math.round((Date.now()-t.getTime())/1000);}
 
 async function cargarEstado(){
   const d=await api('/api/estado'); if(d.error&&!d.maquinas){$('conn').innerHTML='<span class="chip"><span class="dot bad"></span>'+esc(d.error)+'</span>';return;}
-  E=d; renderConn(); renderGrid(); if(vista==='simulador')renderSim(); if(vista==='lectores')lecEstados();
+  E=d; renderConn(); renderGrid(); if(vista==='simulador')renderSim(); if(vista==='lectores')lecEstados(); if(vista==='paradas')cargarParadas();
 }
 function renderConn(){
   const ok=E.metalerp_ok;
@@ -234,8 +241,10 @@ function renderConn(){
   else if(ok===false) av='<div class="aviso bad">'+esc(E.metalerp_error||'MetalERP no responde')+'. La app sigue guardando las piezas y las manda cuando vuelva la conexión.</div>';
   $('aviso').innerHTML=av;
 }
+function paradaDe(m){const l=(E.lectores||[]).find(x=>String(x.maquina).toUpperCase()===String(m.codigo).toUpperCase()&&x.activo!==false);return l&&l.estado&&l.estado.parada;}
 function estadoMaq(m){
-  const s=m.local||{}, seg=segDesde(s.ultima), lim=(E.config.parada_seg||180);
+  const s=m.local||{}, seg=segDesde(s.ultima), lim=(E.config.parada_seg||180), pa=paradaDe(m);
+  if(pa) return ['par','Parada P-'+pa.codigo];
   if(seg!=null&&seg<=lim) return ['prod','Produciendo'];
   if(m.operacion) return seg==null?['idle','Sin piezas hoy']:['par','Parada'];
   return ['idle','Sin trabajo'];
@@ -262,6 +271,9 @@ function renderGrid(){
     const lec=(E.lectores||[]).find(l=>String(l.maquina).toUpperCase()===String(m.codigo).toUpperCase()&&l.activo!==false);
     if(lec&&lec.estado&&lec.estado.error) extra+='<div class="warnline">Lector: '+esc(lec.estado.error)+'</div>';
     else if(lec&&lec.estado&&lec.estado.leido) extra+='<div class="help" style="font-size:12px">Lector '+esc(lec.tipo)+': contador '+fN(lec.estado.contador)+' a las '+hm(lec.estado.leido)+'</div>';
+    if(lec&&lec.estado&&lec.estado.parada) extra+='<div class="warnline"><b>Parada P-'+esc(lec.estado.parada.codigo)+' '+esc(lec.estado.parada.motivo)+'</b> desde las '+hm(lec.estado.parada.inicio)+'</div>';
+    else if(lec&&lec.estado&&lec.estado.parada_error) extra+='<div class="help" style="font-size:12px">'+esc(lec.estado.parada_error)+'</div>';
+    else if(lec&&lec.estado&&lec.estado.parada_valor&&!lec.estado.parada) extra+='<div class="help" style="font-size:12px">La variable de parada tiene '+esc(lec.estado.parada_valor)+', que no es un código válido</div>';
     if(m.esperando) extra+='<div class="waitline">'+fN(m.esperando)+' piezas esperando en MetalERP</div>';
     if(m.errores) extra+='<div class="warnline">'+fN(m.errores)+' piezas con error en MetalERP</div>';
     return '<div class="card s-'+cls+'"><div class="c-head"><span class="code">'+esc(m.codigo)+'</span><span class="mname">'+esc(m.nombre)+'</span><span class="pill '+cls+'">'+txt+'</span></div>'
@@ -342,6 +354,19 @@ async function bkHacer(m){
   $('bk-msg').hidden=true; cargarBackup();
 }
 async function bkAbrir(c){const r=await api('/api/backup/abrir',{method:'POST',body:JSON.stringify({carpeta:c})}); if(r.error)bkMsg(false,r.error);}
+// ── Paradas (variable de macro que carga el operario) ──
+function durTxt(seg){if(seg==null)return '—';seg=Math.round(seg);const h=Math.floor(seg/3600),m=Math.floor(seg%3600/60),s=seg%60;return h?h+' h '+String(m).padStart(2,'0')+' min':(m?m+' min '+String(s).padStart(2,'0')+' s':s+' s');}
+async function cargarParadas(){
+  const r=await api('/api/paradas'); if(r.error){toast(r.error);return;}
+  const b=r.base||0;
+  $('pa-ayuda').innerHTML='El operario, al parar, carga en la variable <b>#'+esc(r.variable)+'</b> el número '+esc(b)+' + código (por ejemplo baño = <b>'+(b+16)+'</b>) y al volver la pone en <b>0</b>. El Monitor la lee junto con el contador. Si la máquina vuelve a sacar piezas con la parada abierta, la parada se cierra sola. Las paradas terminadas viajan a MetalERP con el paquete y quedan como Trabajo no productivo del operario de la máquina.';
+  $('pa-cods').innerHTML=(r.codigos||[]).map((c,i)=>'<div><b>'+(b+i+1)+'</b> · P-'+(i+1)+' '+esc(c)+'</div>').join('');
+  const cerro={operario:'Operario (0)',cambio:'Otro código',piezas:'Volvió a producir'};
+  $('tb-pa').innerHTML=(r.paradas||[]).length?r.paradas.map(p=>{const ab=!p.fin; const dur=ab?segDesde(p.inicio):p.duracion_seg;
+    const est=ab?'<span style="color:var(--warn)">En curso</span>':(p.estado==='Enviada'?'<span style="color:var(--ok)">Enviada</span>':(p.estado==='Por enviar'?'Por enviar':'<span style="color:var(--bad)" title="'+esc(p.error||'')+'">'+esc(p.estado)+'</span>'));
+    return '<tr><td><b>'+esc(p.maquina)+'</b></td><td>P-'+esc(p.codigo)+'</td><td>'+esc(p.motivo)+'</td><td>'+esc(p.inicio)+'</td><td>'+(p.fin?esc(p.fin.slice(11)):'—')+'</td><td style="text-align:right">'+durTxt(dur)+'</td><td>'+esc(cerro[p.cerrada_por]||'')+'</td><td>'+est+(p.error&&p.estado!=='Enviada'?'<br><span class="help" style="white-space:normal">'+esc(p.error)+'</span>':'')+'</td></tr>';}).join('')
+    :'<tr><td colspan="8" class="empty">Todavía no hay paradas cargadas desde las máquinas.</td></tr>';
+}
 // ── Enviar programa (carpeta FTP) ──
 let EN=null, EN_TXT='', EN_NOM='';
 async function cargarEnvio(){
