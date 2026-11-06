@@ -680,6 +680,123 @@ def api_backup_abrir():
     return jsonify({"ok": True, "ruta": ruta})
 
 
+# ── Envío de programas a la máquina (PC -> CNC) ───────────────────────────────
+# Escribe en el control con la librería oficial de Fanuc (fanuc_envio.py).
+# Resguardos: solo desde la PC de la app; el control rechaza un número que ya
+# existe; reemplazar pide confirmación, no toca el programa en ejecución o
+# principal, guarda antes una copia del actual y lo restaura si el envío falla;
+# después de mandar, se vuelve a leer y se compara. Todo queda en la tabla envios.
+_lock_envio = threading.Lock()
+
+
+def _db_envios(db):
+    db.execute("""CREATE TABLE IF NOT EXISTS envios (id INTEGER PRIMARY KEY AUTOINCREMENT,
+        hora TEXT, maquina TEXT, programa INTEGER, archivo TEXT, bytes INTEGER, reemplazo INTEGER,
+        copia TEXT, resultado TEXT, verificado INTEGER, detalle TEXT, desde TEXT)""")
+
+
+def _lectores_fanuc():
+    return [l for l in cfg().get("lectores") or [] if l.get("tipo") == "fanuc" and l.get("ip")]
+
+
+@app.route("/api/envio", methods=["GET", "POST"])
+def api_envio():
+    import fanuc_envio
+    db = get_db()
+    _db_envios(db)
+    if request.method == "GET":
+        filas = db.execute("SELECT * FROM envios ORDER BY id DESC LIMIT 50").fetchall()
+        return jsonify({"es_local": es_local(), "libreria": fanuc_envio.disponible(cfg().get("fwlib_dir")),
+                        "maquinas": [{"maquina": l["maquina"], "ip": l["ip"], "puerto": l.get("puerto")}
+                                     for l in _lectores_fanuc()],
+                        "historial": [dict(r) for r in filas]})
+    if not es_local():
+        return jsonify({"error": "Los programas se mandan solo desde la PC donde corre la app"}), 403
+    d = request.get_json(silent=True) or {}
+    maq = str(d.get("maquina") or "").strip().upper()
+    lec = next((l for l in _lectores_fanuc() if str(l["maquina"]).upper() == maq), None)
+    if not lec:
+        return jsonify({"error": f"La máquina {maq} no tiene lector Fanuc cargado"}), 400
+    try:
+        numero = int(d.get("numero"))
+        if not 1 <= numero <= 99999999:
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({"error": "Número de programa inválido"}), 400
+    archivo = str(d.get("archivo") or "")[:120]
+    reemplazar = bool(d.get("reemplazar"))
+    ip, puerto, fwdir = lec["ip"], lec.get("puerto") or 8193, cfg().get("fwlib_dir")
+    nom = ("O%04d" % numero) if numero < 10000 else ("O%08d" % numero)
+    if not _lock_envio.acquire(blocking=False):
+        return jsonify({"error": "Ya se está mandando otro programa"}), 409
+    reg = {"hora": ahora(), "maquina": maq, "programa": numero, "archivo": archivo, "bytes": 0,
+           "reemplazo": 0, "copia": None, "resultado": "Error", "verificado": None, "detalle": None,
+           "desde": request.remote_addr}
+    try:
+        import fanuc_focas
+        datos = fanuc_envio.preparar(str(d.get("texto") or ""), numero)
+        reg["bytes"] = len(datos)
+        fanuc_envio.cargar(fwdir)
+        with fanuc_focas.Fanuc(ip, puerto, timeout=10) as f:
+            lista = f.listar_programas()
+        viejo = None
+        if numero in lista:
+            if not reemplazar:
+                return jsonify({"existe": True, "programa": nom,
+                                "comentario": (lista[numero] or {}).get("comentario", "")}), 409
+            run, main = fanuc_envio.programa_activo(ip, puerto, fwdir)
+            if numero in (run, main):
+                raise RuntimeError(f"{nom} es el programa seleccionado o en ejecución en {maq}: "
+                                   "no se reemplaza. Seleccioná otro programa en la máquina o mandalo con otro número.")
+            with fanuc_focas.Fanuc(ip, puerto, timeout=10) as f:
+                viejo = f.bajar(numero)
+            if not fanuc_envio.normalizar(viejo):
+                raise RuntimeError(f"No se pudo leer el {nom} actual para guardar la copia: no se reemplaza")
+            carpeta = os.path.join(BACKUP_DIR, _nombre_seguro(maq), "reemplazados")
+            os.makedirs(carpeta, exist_ok=True)
+            copia = os.path.join(carpeta, f"{nom}_{datetime.now():%Y-%m-%d_%H%M%S}.NC")
+            with open(copia, "w", encoding="latin-1", newline="") as fh:
+                fh.write(viejo.replace("\r", "").replace("\n", "\r\n"))
+            reg.update(reemplazo=1, copia=os.path.relpath(copia, BACKUP_DIR))
+            fanuc_envio.borrar(ip, puerto, numero, fwdir)
+        try:
+            fanuc_envio.enviar(ip, puerto, datos, fwdir)
+        except Exception as e:
+            if viejo is not None:
+                try:
+                    fanuc_envio.enviar(ip, puerto, fanuc_envio.preparar(viejo, numero), fwdir)
+                    raise RuntimeError(f"{e}. Se volvió a cargar el {nom} anterior.")
+                except fanuc_envio.ErrorEnvio as e2:
+                    raise RuntimeError(f"{e}. ATENCIÓN: no se pudo volver a cargar el {nom} anterior ({e2}); "
+                                       f"está guardado en backups\\{reg['copia']}")
+            raise
+        # Verificación: se vuelve a leer lo que quedó en el control
+        try:
+            with fanuc_focas.Fanuc(ip, puerto, timeout=10) as f:
+                quedo = f.bajar(numero)
+            reg["verificado"] = 1 if fanuc_envio.normalizar(quedo) == fanuc_envio.normalizar(datos) else 0
+        except Exception as e:
+            reg["detalle"] = f"Mandado, pero no se pudo verificar: {e}"
+        reg["resultado"] = "Enviado"
+        if reg["verificado"] == 0:
+            reg["detalle"] = "Mandado, pero lo que quedó en el control no es igual al archivo: revisalo en la máquina"
+        return jsonify({"ok": True, **reg})
+    except Exception as e:
+        reg["detalle"] = str(e)
+        return jsonify({"ok": False, "error": str(e), **reg}), 400
+    finally:
+        _lock_envio.release()
+        if reg["resultado"] == "Enviado" or reg["detalle"]:
+            try:
+                db.execute("""INSERT INTO envios (hora,maquina,programa,archivo,bytes,reemplazo,copia,resultado,
+                    verificado,detalle,desde) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    tuple(reg[k] for k in ("hora", "maquina", "programa", "archivo", "bytes", "reemplazo", "copia",
+                                           "resultado", "verificado", "detalle", "desde")))
+                db.commit()
+            except Exception as e:
+                print("  [envio] no se pudo registrar:", e)
+
+
 @app.route("/api/paquetes")
 def api_paquetes():
     filas = get_db().execute("SELECT * FROM paquetes ORDER BY creado DESC LIMIT 100").fetchall()
