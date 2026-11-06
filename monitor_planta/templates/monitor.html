@@ -129,18 +129,28 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
   </section>
 
   <section id="v-envio" hidden>
-    <div class="help" style="max-width:80ch;margin:14px 0 10px">Manda un programa de esta PC a la memoria del control. Si el número ya existe en la máquina, pregunta antes de reemplazarlo y guarda una copia del que estaba (en backups\&lt;máquina&gt;\reemplazados). Nunca reemplaza el programa seleccionado o en ejecución. Después de mandar, lo vuelve a leer de la máquina y lo compara. El primer corte de un programa nuevo lo valida el operario, como siempre.</div>
-    <div id="en-lib" class="aviso" hidden></div>
+    <div class="help" style="max-width:82ch;margin:14px 0 10px">Dejás el programa en la carpeta del torno y el operario lo carga desde la máquina por la red (FTP del Embedded Ethernet). La PC no escribe nada en el control: el que carga es el operario. Después podés tocar <b>Verificar</b> para leer el programa de la máquina y compararlo con el archivo.</div>
+    <div id="en-ftp" class="aviso" hidden></div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;max-width:760px">
-      <label>Máquina<br><select id="en-maq" style="width:100%"></select></label>
-      <label>Archivo del programa<br><input type="file" id="en-arch" accept=".nc,.NC,.txt,.TXT,.tap,.TAP,.prg,.PRG,.min,.MIN,*" onchange="enArchivo(this)" style="width:100%"></label>
-      <label>Número en la máquina (O)<br><input id="en-num" type="number" min="1" max="99999999" placeholder="ej. 1234" style="width:100%"></label>
+      <label>Máquina<br><select id="en-maq" style="width:100%" onchange="enRender()"></select></label>
+      <label>Archivo del programa<br><input type="file" id="en-arch" onchange="enArchivo(this)" style="width:100%"></label>
+      <label>Número de programa (O)<br><input id="en-num" type="number" min="1" max="99999999" placeholder="ej. 1234" style="width:100%"></label>
     </div>
     <pre id="en-prev" style="max-width:760px;max-height:220px;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px 10px;font:12px var(--f-mono);margin:10px 0" hidden></pre>
-    <div class="row" style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><button class="btn p" id="en-btn" onclick="enEnviar(false)">Enviar a la máquina</button></div>
+    <div class="row" style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><button class="btn p" id="en-btn" onclick="enDejar(false)">Dejar en la carpeta del torno</button></div>
     <div id="en-msg" class="aviso" hidden></div>
-    <h3 style="margin:22px 0 6px;font-family:var(--f-display)">Envíos hechos</h3>
-    <div class="tbl"><table><thead><tr><th>Hora</th><th>Máquina</th><th>Programa</th><th>Archivo</th><th>Resultado</th><th>Detalle</th></tr></thead><tbody id="tb-env"></tbody></table></div>
+    <h3 style="margin:22px 0 6px;font-family:var(--f-display)">Programas en la carpeta de <span id="en-maq-tit"></span></h3>
+    <div class="tbl"><table><thead><tr><th>Archivo</th><th>Comentario</th><th style="text-align:right">Tamaño</th><th>Dejado</th><th></th></tr></thead><tbody id="tb-enarch"></tbody></table></div>
+    <h3 style="margin:22px 0 6px;font-family:var(--f-display)">Datos para cargar en el torno (una sola vez)</h3>
+    <div id="en-datos" class="help" style="max-width:82ch"></div>
+    <div id="en-cfg" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-top:10px">
+      <label>Puerto FTP<br><input id="en-puerto" type="number" style="width:90px"></label>
+      <label>Clave<br><input id="en-clave" style="width:130px"></label>
+      <label style="display:flex;gap:6px;align-items:center"><input id="en-act" type="checkbox"> FTP encendido</label>
+      <button class="btn" onclick="enGuardarFtp()">Guardar FTP</button>
+    </div>
+    <h3 style="margin:22px 0 6px;font-family:var(--f-display)">Movimientos</h3>
+    <div class="tbl"><table><thead><tr><th>Hora</th><th>Máquina</th><th>Programa</th><th>Qué pasó</th><th>Detalle</th></tr></thead><tbody id="tb-env"></tbody></table></div>
   </section>
 
   <section id="v-lectores" hidden>
@@ -332,45 +342,75 @@ async function bkHacer(m){
   $('bk-msg').hidden=true; cargarBackup();
 }
 async function bkAbrir(c){const r=await api('/api/backup/abrir',{method:'POST',body:JSON.stringify({carpeta:c})}); if(r.error)bkMsg(false,r.error);}
-// ── Enviar programa ──
-let EN_TXT='', EN_NOM='';
+// ── Enviar programa (carpeta FTP) ──
+let EN=null, EN_TXT='', EN_NOM='';
 async function cargarEnvio(){
   const r=await api('/api/envio'); if(r.error){toast(r.error);return;}
-  const sel=$('en-maq'), ant=sel.value;
+  EN=r; const sel=$('en-maq'), ant=sel.value;
   sel.innerHTML=(r.maquinas||[]).map(m=>'<option value="'+esc(m.maquina)+'">'+esc(m.maquina)+' ('+esc(m.ip)+')</option>').join('')||'<option value="">No hay máquinas Fanuc en Lectores</option>';
-  if(ant)sel.value=ant;
-  const lib=$('en-lib');
-  if(!r.es_local){lib.hidden=false;lib.className='aviso warn';lib.textContent='Los programas se mandan solo desde la PC donde corre la app.';}
-  else if(!r.libreria.ok){lib.hidden=false;lib.className='aviso bad';lib.textContent=r.libreria.error;}
-  else lib.hidden=true;
-  $('en-btn').disabled=!r.es_local||!r.libreria.ok||!(r.maquinas||[]).length;
-  $('tb-env').innerHTML=(r.historial||[]).length?r.historial.map(h=>'<tr><td>'+esc(h.hora)+'</td><td>'+esc(h.maquina)+'</td><td>O'+String(h.programa).padStart(4,'0')+(h.reemplazo?' <span class="help">(reemplazó)</span>':'')+'</td><td>'+esc(h.archivo||'')+'</td><td>'
-    +(h.resultado==='Enviado'?(h.verificado===1?'<span style="color:var(--ok)">Enviado y verificado</span>':'<span style="color:var(--warn)">Enviado</span>'):'<span style="color:var(--bad)">Error</span>')+'</td><td style="white-space:normal;max-width:420px">'+esc(h.detalle||'')+(h.copia?'<br><span class="help">Copia del anterior: backups\\'+esc(h.copia)+'</span>':'')+'</td></tr>').join('')
-    :'<tr><td colspan="6" class="empty">Todavía no se mandó ningún programa.</td></tr>';
+  if(ant&&(r.maquinas||[]).some(m=>m.maquina===ant))sel.value=ant;
+  const f=r.ftp||{}, av=$('en-ftp');
+  if(!r.es_local){av.hidden=false;av.className='aviso warn';av.textContent='Los programas se dejan solo desde la PC donde corre la app.';}
+  else if(!f.habilitado){av.hidden=false;av.className='aviso warn';av.textContent='El FTP está apagado: los tornos no ven la carpeta. Encendelo abajo.';}
+  else if(!f.ok){av.hidden=false;av.className='aviso bad';av.textContent='FTP: '+(f.error||'no arrancó');}
+  else av.hidden=true;
+  $('en-btn').disabled=!r.es_local||!(r.maquinas||[]).length;
+  $('en-cfg').hidden=!r.es_local;
+  if(document.activeElement!==$('en-puerto'))$('en-puerto').value=f.puerto||21;
+  if(document.activeElement!==$('en-clave'))$('en-clave').value=f.clave||'';
+  $('en-act').checked=!!f.habilitado;
+  $('tb-env').innerHTML=(r.historial||[]).length?r.historial.map(h=>{const bad=/incorrect|cortó|distinto/i.test(h.evento), ok=/igual|bajó/i.test(h.evento);
+    return '<tr><td>'+esc(h.hora)+'</td><td>'+esc(h.maquina||'')+'</td><td>'+esc(h.programa||'')+'</td><td style="color:'+(bad?'var(--bad)':(ok?'var(--ok)':'inherit'))+'">'+esc(h.evento)+'</td><td style="white-space:normal;max-width:420px">'+esc([h.archivo,h.detalle,h.desde?'desde '+h.desde:''].filter(Boolean).join(' · '))+'</td></tr>';}).join('')
+    :'<tr><td colspan="5" class="empty">Todavía no hay movimientos.</td></tr>';
+  enRender();
+}
+function enRender(){
+  if(!EN)return; const m=(EN.maquinas||[]).find(x=>x.maquina===$('en-maq').value); const loc=EN.es_local;
+  $('en-maq-tit').textContent=m?m.maquina:'';
+  $('tb-enarch').innerHTML=m&&m.archivos.length?m.archivos.map(a=>'<tr><td><b>'+esc(a.nombre)+'</b></td><td>'+esc(a.comentario||'')+'</td><td style="text-align:right">'+fTam(a.tam)+'</td><td>'+esc(a.fecha)+'</td><td><button class="btn" onclick="enVerificar(\''+esc(m.maquina)+'\',\''+esc(a.nombre)+'\')">Verificar</button>'+(loc?' <button class="btn" onclick="enQuitar(\''+esc(m.maquina)+'\',\''+esc(a.nombre)+'\')">Sacar</button>':'')+'</td></tr>').join('')
+    :'<tr><td colspan="5" class="empty">La carpeta está vacía.</td></tr>';
+  const f=EN.ftp||{};
+  $('en-datos').innerHTML=m?('En el torno <b>'+esc(m.maquina)+'</b>: SYSTEM → EMBED PORT → pestaña <b>FTP TRANS</b> (HOST 1), con el control en MDI o con la llave de parámetros habilitada según el torno:'
+    +'<table style="margin:8px 0;width:auto"><tbody>'
+    +'<tr><td>HOST NAME (IP)</td><td><b style="font-family:var(--f-mono)">'+esc(m.ip_pc)+'</b></td></tr>'
+    +'<tr><td>PORT NUMBER</td><td><b style="font-family:var(--f-mono)">'+esc(f.puerto||21)+'</b></td></tr>'
+    +'<tr><td>USER NAME</td><td><b style="font-family:var(--f-mono)">'+esc(m.usuario)+'</b></td></tr>'
+    +'<tr><td>PASSWORD</td><td><b style="font-family:var(--f-mono)">'+(loc?esc(f.clave||''):'(se ve en la PC de la app)')+'</b></td></tr>'
+    +'<tr><td>LOGIN FOLDER</td><td><i>vacío</i></td></tr></tbody></table>'
+    +'Para cargar un programa: en el torno, modo EDIT → PROG → elegir el dispositivo de red (EMBED) → aparece la lista de esta carpeta → elegir el archivo → LEER. Los nombres exactos de las teclas pueden cambiar según el torno.'
+    +'<br>La PC tiene que dejar entrar al FTP desde la red de los tornos (firewall de Windows).'):'';
 }
 function enArchivo(inp){
   const f=inp.files&&inp.files[0]; if(!f)return; EN_NOM=f.name;
   if(f.size>2*1024*1024){enMsg(false,'El archivo es muy grande para un programa (más de 2 MB).');return;}
   const rd=new FileReader(); rd.onload=()=>{EN_TXT=String(rd.result||'');
-    const m=EN_TXT.match(/^\s*O(\d{1,8})/m); if(m)$('en-num').value=parseInt(m[1],10);
+    const m=EN_TXT.match(/^\s*%?\s*O(\d{1,8})/m); if(m)$('en-num').value=parseInt(m[1],10);
     const p=$('en-prev'); p.hidden=false; const ls=EN_TXT.replace(/\r/g,'').split('\n'); p.textContent=ls.slice(0,40).join('\n')+(ls.length>40?'\n... ('+ls.length+' líneas)':''); $('en-msg').hidden=true;};
   rd.readAsText(f,'latin1');
 }
 function enMsg(ok,t,warn){const e=$('en-msg');e.hidden=false;e.className='aviso '+(warn?'warn':(ok?'ok':'bad'));e.textContent=t;}
-async function enEnviar(reemplazar){
+async function enDejar(reemplazar){
   const maq=$('en-maq').value, num=parseInt($('en-num').value,10);
   if(!maq){enMsg(false,'Elegí la máquina');return;} if(!EN_TXT){enMsg(false,'Elegí el archivo del programa');return;} if(!num){enMsg(false,'Poné el número de programa');return;}
-  const o='O'+String(num).padStart(4,'0');
-  if(!reemplazar&&!confirm('¿Mandar '+EN_NOM+' a '+maq+' como '+o+'?'))return;
-  $('en-btn').disabled=true; enMsg(true,'Mandando '+o+' a '+maq+'...',true);
   const r=await api('/api/envio',{method:'POST',body:JSON.stringify({maquina:maq,numero:num,texto:EN_TXT,archivo:EN_NOM,reemplazar:reemplazar})});
-  $('en-btn').disabled=false;
-  if(r.existe){
-    if(confirm(r.programa+' ya existe en '+maq+(r.comentario?' ('+r.comentario+')':'')+'.\n\n¿Reemplazarlo? Antes se guarda una copia del que está en la máquina.'))return enEnviar(true);
-    enMsg(false,'No se mandó: '+r.programa+' ya existe en '+maq+'. Elegí otro número o confirmá el reemplazo.'); return;
-  }
-  if(r.ok) enMsg(true,o+' quedó cargado en '+maq+(r.verificado===1?' y se verificó que es igual al archivo.':'. '+(r.detalle||'')),r.verificado!==1);
-  else enMsg(false,'No se mandó: '+(r.error||'error desconocido'));
+  if(r.existe){ if(confirm(r.programa+'.NC ya está en la carpeta de '+maq+'. ¿Reemplazarlo por este archivo?'))return enDejar(true); return; }
+  if(r.ok)enMsg(true,r.archivo+' quedó en la carpeta de '+maq+'. Ahora el operario lo carga desde el torno; después tocá Verificar.');
+  else enMsg(false,r.error||'No se pudo dejar el programa');
+  cargarEnvio();
+}
+async function enQuitar(m,n){
+  if(!confirm('¿Sacar '+n+' de la carpeta de '+m+'? No cambia nada en la máquina.'))return;
+  const r=await api('/api/envio/quitar',{method:'POST',body:JSON.stringify({maquina:m,nombre:n})}); if(r.error)enMsg(false,r.error); cargarEnvio();
+}
+async function enVerificar(m,n){
+  enMsg(true,'Leyendo '+n+' de '+m+'...',true);
+  const r=await api('/api/envio/verificar',{method:'POST',body:JSON.stringify({maquina:m,nombre:n})});
+  if(r.error)enMsg(false,r.error); else enMsg(r.igual===true,r.resultado,r.igual==null);
+  cargarEnvio();
+}
+async function enGuardarFtp(){
+  const r=await api('/api/envio/ftp',{method:'PUT',body:JSON.stringify({puerto:$('en-puerto').value,clave:$('en-clave').value.trim(),activo:$('en-act').checked})});
+  if(r.error)enMsg(false,r.error); else enMsg(true,'FTP guardado. Si cambiaste puerto o clave, cargalos también en el torno.');
   cargarEnvio();
 }
 // ── Lectores ──

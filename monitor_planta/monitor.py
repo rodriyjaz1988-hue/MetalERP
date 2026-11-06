@@ -33,6 +33,10 @@ CONFIG_DEFECTO = {
     # Máquinas que la app lee por red ella misma (sin router):
     # [{"maquina": "SL2000", "tipo": "fanuc", "ip": "192.168.1.200", "puerto": 8193, "multiplo": 1, "activo": true}]
     "lectores": [],
+    # FTP para que los tornos Fanuc carguen programas (Embedded Ethernet > FTP TRANS)
+    "ftp_activo": True,
+    "ftp_puerto": 21,
+    "ftp_clave": "",
 }
 LECTOR_SEG = 5                    # cada cuánto se lee el contador de cada máquina
 TIPOS_LECTOR = {"fanuc": 8193, "haas": 5051}
@@ -525,6 +529,10 @@ def api_lectores():
         lista.append({"maquina": maq, "tipo": tipo, "ip": ip, "puerto": puerto,
                       "multiplo": multiplo, "activo": bool(x.get("activo", True))})
     guardar_cfg({"lectores": lista})
+    try:
+        ftp_reiniciar()
+    except Exception as e:
+        print("  [ftp]", e)
     for k in list(_lectores_estado):
         if k not in vistos:
             _lectores_estado.pop(k, None)
@@ -680,121 +688,222 @@ def api_backup_abrir():
     return jsonify({"ok": True, "ruta": ruta})
 
 
-# ── Envío de programas a la máquina (PC -> CNC) ───────────────────────────────
-# Escribe en el control con la librería oficial de Fanuc (fanuc_envio.py).
-# Resguardos: solo desde la PC de la app; el control rechaza un número que ya
-# existe; reemplazar pide confirmación, no toca el programa en ejecución o
-# principal, guarda antes una copia del actual y lo restaura si el envío falla;
-# después de mandar, se vuelve a leer y se compara. Todo queda en la tabla envios.
-_lock_envio = threading.Lock()
+# ── Envío de programas a la máquina por FTP (Embedded Ethernet Fanuc) ────────
+# El Monitor deja el programa en ftp\<MÁQUINA>\ y corre un servidor FTP; el
+# operario lo carga desde el torno (FTP TRANS del Embedded Ethernet). La PC no
+# escribe nada en el control: el que carga es el operario, en la máquina.
+FTP_DIR = os.path.join(AQUI, "ftp")
 
 
 def _db_envios(db):
     db.execute("""CREATE TABLE IF NOT EXISTS envios (id INTEGER PRIMARY KEY AUTOINCREMENT,
-        hora TEXT, maquina TEXT, programa INTEGER, archivo TEXT, bytes INTEGER, reemplazo INTEGER,
-        copia TEXT, resultado TEXT, verificado INTEGER, detalle TEXT, desde TEXT)""")
+        hora TEXT, maquina TEXT, programa TEXT, archivo TEXT, bytes INTEGER, evento TEXT,
+        detalle TEXT, desde TEXT)""")
+
+
+def _registrar_envio(maquina, programa, evento, archivo=None, nbytes=None, detalle=None, desde=None):
+    db = conectar()
+    try:
+        _db_envios(db)
+        db.execute("INSERT INTO envios (hora,maquina,programa,archivo,bytes,evento,detalle,desde) VALUES (?,?,?,?,?,?,?,?)",
+                   (ahora(), maquina, programa, archivo, nbytes, evento, detalle, desde))
+        db.commit()
+    finally:
+        db.close()
 
 
 def _lectores_fanuc():
     return [l for l in cfg().get("lectores") or [] if l.get("tipo") == "fanuc" and l.get("ip")]
 
 
+def _evento_ftp(tipo, maquina, archivo, ip):
+    textos = {"bajado": "La máquina bajó el programa", "bajado_incompleto": "La máquina cortó la bajada a la mitad",
+              "login_fallido": "La máquina intentó entrar con usuario o clave incorrectos"}
+    if tipo in textos:
+        prog = os.path.splitext(archivo)[0] if archivo else None
+        _registrar_envio(maquina, prog, textos[tipo], archivo=archivo, desde=ip)
+
+
+def ftp_reiniciar():
+    import ftp_cnc
+    c = cfg()
+    if not c.get("ftp_activo", True):
+        ftp_cnc.detener()
+        return
+    ftp_cnc.arrancar(FTP_DIR, int(c.get("ftp_puerto") or 21), c.get("ftp_clave") or "",
+                     [_nombre_seguro(str(l["maquina"]).upper()) for l in _lectores_fanuc()], _evento_ftp)
+
+
+def _ip_hacia(ip):
+    """IP de esta PC en la red de la máquina (la que se carga en el torno)."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect((ip, 9))
+        r = s.getsockname()[0]
+        s.close()
+        return r
+    except OSError:
+        return ip_local()
+
+
+def _archivos_maquina(maq):
+    import programa_nc
+    carpeta = os.path.join(FTP_DIR, _nombre_seguro(maq))
+    res = []
+    try:
+        nombres = sorted(os.listdir(carpeta))
+    except OSError:
+        return res
+    for n in nombres:
+        ruta = os.path.join(carpeta, n)
+        if not os.path.isfile(ruta):
+            continue
+        try:
+            with open(ruta, encoding="latin-1") as f:
+                txt = f.read(4096)
+        except OSError:
+            txt = ""
+        res.append({"nombre": n, "tam": os.path.getsize(ruta), "comentario": programa_nc.comentario(txt),
+                    "fecha": datetime.fromtimestamp(os.path.getmtime(ruta)).strftime("%Y-%m-%d %H:%M")})
+    return res
+
+
+def _maquina_fanuc(maq):
+    maq = str(maq or "").strip().upper()
+    return next((l for l in _lectores_fanuc() if str(l["maquina"]).upper() == maq), None)
+
+
 @app.route("/api/envio", methods=["GET", "POST"])
 def api_envio():
-    import fanuc_envio
+    import ftp_cnc, programa_nc
     db = get_db()
     _db_envios(db)
+    c = cfg()
     if request.method == "GET":
-        filas = db.execute("SELECT * FROM envios ORDER BY id DESC LIMIT 50").fetchall()
-        return jsonify({"es_local": es_local(), "libreria": fanuc_envio.disponible(cfg().get("fwlib_dir")),
-                        "maquinas": [{"maquina": l["maquina"], "ip": l["ip"], "puerto": l.get("puerto")}
+        local = es_local()
+        filas = db.execute("SELECT * FROM envios ORDER BY id DESC LIMIT 60").fetchall()
+        return jsonify({"es_local": local, "carpeta": FTP_DIR,
+                        "ftp": {**ftp_cnc.estado(), "habilitado": bool(c.get("ftp_activo", True)),
+                                "clave": c.get("ftp_clave") if local else None},
+                        "maquinas": [{"maquina": l["maquina"], "ip": l["ip"], "usuario": _nombre_seguro(str(l["maquina"]).upper()),
+                                      "ip_pc": _ip_hacia(l["ip"]), "archivos": _archivos_maquina(l["maquina"])}
                                      for l in _lectores_fanuc()],
                         "historial": [dict(r) for r in filas]})
     if not es_local():
-        return jsonify({"error": "Los programas se mandan solo desde la PC donde corre la app"}), 403
+        return jsonify({"error": "Los programas se dejan solo desde la PC donde corre la app"}), 403
     d = request.get_json(silent=True) or {}
-    maq = str(d.get("maquina") or "").strip().upper()
-    lec = next((l for l in _lectores_fanuc() if str(l["maquina"]).upper() == maq), None)
+    lec = _maquina_fanuc(d.get("maquina"))
     if not lec:
-        return jsonify({"error": f"La máquina {maq} no tiene lector Fanuc cargado"}), 400
+        return jsonify({"error": "Esa máquina no tiene lector Fanuc cargado"}), 400
+    maq = str(lec["maquina"]).upper()
     try:
         numero = int(d.get("numero"))
         if not 1 <= numero <= 99999999:
             raise ValueError
     except (TypeError, ValueError):
         return jsonify({"error": "Número de programa inválido"}), 400
-    archivo = str(d.get("archivo") or "")[:120]
-    reemplazar = bool(d.get("reemplazar"))
-    ip, puerto, fwdir = lec["ip"], lec.get("puerto") or 8193, cfg().get("fwlib_dir")
-    nom = ("O%04d" % numero) if numero < 10000 else ("O%08d" % numero)
-    if not _lock_envio.acquire(blocking=False):
-        return jsonify({"error": "Ya se está mandando otro programa"}), 409
-    reg = {"hora": ahora(), "maquina": maq, "programa": numero, "archivo": archivo, "bytes": 0,
-           "reemplazo": 0, "copia": None, "resultado": "Error", "verificado": None, "detalle": None,
-           "desde": request.remote_addr}
     try:
-        import fanuc_focas
-        datos = fanuc_envio.preparar(str(d.get("texto") or ""), numero)
-        reg["bytes"] = len(datos)
-        fanuc_envio.cargar(fwdir)
-        with fanuc_focas.Fanuc(ip, puerto, timeout=10) as f:
+        datos = programa_nc.preparar(str(d.get("texto") or ""), numero)
+    except programa_nc.ErrorPrograma as e:
+        return jsonify({"error": str(e)}), 400
+    nom = programa_nc.nombre_o(numero)
+    carpeta = os.path.join(FTP_DIR, _nombre_seguro(maq))
+    os.makedirs(carpeta, exist_ok=True)
+    ruta = os.path.join(carpeta, nom + ".NC")
+    existe = os.path.exists(ruta)
+    if existe and not d.get("reemplazar"):
+        return jsonify({"existe": True, "programa": nom}), 409
+    tmp = ruta + ".tmp"
+    with open(tmp, "w", encoding="ascii", newline="") as f:
+        f.write(datos)
+    os.replace(tmp, ruta)
+    archivo = str(d.get("archivo") or "")[:120]
+    _registrar_envio(maq, nom, "Reemplazado en la carpeta" if existe else "Dejado en la carpeta",
+                     archivo=archivo, nbytes=len(datos), desde=request.remote_addr)
+    return jsonify({"ok": True, "programa": nom, "archivo": nom + ".NC", "bytes": len(datos)})
+
+
+def _archivo_de(d):
+    lec = _maquina_fanuc(d.get("maquina"))
+    if not lec:
+        return None, None, "Esa máquina no tiene lector Fanuc cargado"
+    nombre = os.path.basename(str(d.get("nombre") or ""))
+    ruta = os.path.join(FTP_DIR, _nombre_seguro(str(lec["maquina"]).upper()), nombre)
+    if not nombre or not os.path.isfile(ruta):
+        return lec, None, "Ese archivo no está en la carpeta"
+    return lec, ruta, None
+
+
+@app.route("/api/envio/quitar", methods=["POST"])
+def api_envio_quitar():
+    """Saca un programa de la carpeta FTP (no toca la máquina)."""
+    if not es_local():
+        return jsonify({"error": "Solo desde la PC donde corre la app"}), 403
+    lec, ruta, err = _archivo_de(request.get_json(silent=True) or {})
+    if err:
+        return jsonify({"error": err}), 400
+    os.remove(ruta)
+    n = os.path.basename(ruta)
+    _registrar_envio(str(lec["maquina"]).upper(), os.path.splitext(n)[0], "Sacado de la carpeta", archivo=n,
+                     desde=request.remote_addr)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/envio/verificar", methods=["POST"])
+def api_envio_verificar():
+    """Lee el programa de la máquina (solo lectura) y lo compara con el archivo de la carpeta."""
+    import fanuc_focas, programa_nc
+    lec, ruta, err = _archivo_de(request.get_json(silent=True) or {})
+    if err:
+        return jsonify({"error": err}), 400
+    maq = str(lec["maquina"]).upper()
+    with open(ruta, encoding="latin-1") as f:
+        txt = f.read()
+    numero = programa_nc.numero_en_texto(txt)
+    if not numero:
+        return jsonify({"error": "El archivo no tiene número de programa (O)"}), 400
+    nom = programa_nc.nombre_o(numero)
+    try:
+        with fanuc_focas.Fanuc(lec["ip"], lec.get("puerto") or 8193, timeout=10) as f:
             lista = f.listar_programas()
-        viejo = None
-        if numero in lista:
-            if not reemplazar:
-                return jsonify({"existe": True, "programa": nom,
-                                "comentario": (lista[numero] or {}).get("comentario", "")}), 409
-            run, main = fanuc_envio.programa_activo(ip, puerto, fwdir)
-            if numero in (run, main):
-                raise RuntimeError(f"{nom} es el programa seleccionado o en ejecución en {maq}: "
-                                   "no se reemplaza. Seleccioná otro programa en la máquina o mandalo con otro número.")
-            with fanuc_focas.Fanuc(ip, puerto, timeout=10) as f:
-                viejo = f.bajar(numero)
-            if not fanuc_envio.normalizar(viejo):
-                raise RuntimeError(f"No se pudo leer el {nom} actual para guardar la copia: no se reemplaza")
-            carpeta = os.path.join(BACKUP_DIR, _nombre_seguro(maq), "reemplazados")
-            os.makedirs(carpeta, exist_ok=True)
-            copia = os.path.join(carpeta, f"{nom}_{datetime.now():%Y-%m-%d_%H%M%S}.NC")
-            with open(copia, "w", encoding="latin-1", newline="") as fh:
-                fh.write(viejo.replace("\r", "").replace("\n", "\r\n"))
-            reg.update(reemplazo=1, copia=os.path.relpath(copia, BACKUP_DIR))
-            fanuc_envio.borrar(ip, puerto, numero, fwdir)
-        try:
-            fanuc_envio.enviar(ip, puerto, datos, fwdir)
-        except Exception as e:
-            if viejo is not None:
-                try:
-                    fanuc_envio.enviar(ip, puerto, fanuc_envio.preparar(viejo, numero), fwdir)
-                    raise RuntimeError(f"{e}. Se volvió a cargar el {nom} anterior.")
-                except fanuc_envio.ErrorEnvio as e2:
-                    raise RuntimeError(f"{e}. ATENCIÓN: no se pudo volver a cargar el {nom} anterior ({e2}); "
-                                       f"está guardado en backups\\{reg['copia']}")
-            raise
-        # Verificación: se vuelve a leer lo que quedó en el control
-        try:
-            with fanuc_focas.Fanuc(ip, puerto, timeout=10) as f:
+            if numero not in lista:
+                res, igual = f"{nom} todavía no está en la máquina", None
+            else:
                 quedo = f.bajar(numero)
-            reg["verificado"] = 1 if fanuc_envio.normalizar(quedo) == fanuc_envio.normalizar(datos) else 0
-        except Exception as e:
-            reg["detalle"] = f"Mandado, pero no se pudo verificar: {e}"
-        reg["resultado"] = "Enviado"
-        if reg["verificado"] == 0:
-            reg["detalle"] = "Mandado, pero lo que quedó en el control no es igual al archivo: revisalo en la máquina"
-        return jsonify({"ok": True, **reg})
+                igual = programa_nc.normalizar(quedo) == programa_nc.normalizar(txt)
+                res = (f"{nom} está en la máquina y es igual al archivo" if igual
+                       else f"{nom} está en la máquina pero NO es igual al archivo")
     except Exception as e:
-        reg["detalle"] = str(e)
-        return jsonify({"ok": False, "error": str(e), **reg}), 400
-    finally:
-        _lock_envio.release()
-        if reg["resultado"] == "Enviado" or reg["detalle"]:
-            try:
-                db.execute("""INSERT INTO envios (hora,maquina,programa,archivo,bytes,reemplazo,copia,resultado,
-                    verificado,detalle,desde) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                    tuple(reg[k] for k in ("hora", "maquina", "programa", "archivo", "bytes", "reemplazo", "copia",
-                                           "resultado", "verificado", "detalle", "desde")))
-                db.commit()
-            except Exception as e:
-                print("  [envio] no se pudo registrar:", e)
+        return jsonify({"error": f"No se pudo leer la máquina: {e}"}), 400
+    _registrar_envio(maq, nom, "Verificado: igual" if igual else ("Verificado: distinto" if igual is False else "Verificado: no está"),
+                     archivo=os.path.basename(ruta), detalle=res, desde=request.remote_addr)
+    return jsonify({"ok": True, "igual": igual, "resultado": res})
+
+
+@app.route("/api/envio/ftp", methods=["PUT"])
+def api_envio_ftp():
+    if not es_local():
+        return jsonify({"error": "Solo desde la PC donde corre la app"}), 403
+    d = request.get_json(silent=True) or {}
+    nuevo = {}
+    if "activo" in d:
+        nuevo["ftp_activo"] = bool(d["activo"])
+    if d.get("puerto") not in (None, ""):
+        try:
+            p = int(d["puerto"])
+            if not 1 <= p <= 65535:
+                raise ValueError
+            nuevo["ftp_puerto"] = p
+        except (TypeError, ValueError):
+            return jsonify({"error": "Puerto inválido"}), 400
+    if d.get("clave") not in (None, ""):
+        clave = str(d["clave"]).strip()
+        if not re.fullmatch(r"[A-Za-z0-9]{4,16}", clave):
+            return jsonify({"error": "La clave tiene que tener de 4 a 16 letras o números (sin espacios ni símbolos)"}), 400
+        nuevo["ftp_clave"] = clave
+    guardar_cfg(nuevo)
+    ftp_reiniciar()
+    return jsonify({"ok": True})
 
 
 @app.route("/api/paquetes")
@@ -917,6 +1026,13 @@ def arrancar_servidor():
     threading.Thread(target=hilo_envios, name="envios", daemon=True).start()
     threading.Thread(target=hilo_maquinas, name="maquinas", daemon=True).start()
     threading.Thread(target=hilo_lectores, name="lectores", daemon=True).start()
+    if not cfg().get("ftp_clave"):
+        import random
+        guardar_cfg({"ftp_clave": "cnc%04d" % random.randint(0, 9999)})
+    try:
+        ftp_reiniciar()
+    except Exception as e:
+        print("  [ftp]", e)
     puerto = int(c.get("puerto") or 5100)
     print("=" * 52 + "\n   Monitor de planta (conectado a MetalERP)\n" + "=" * 52)
     print(f"\n   Pantalla:  http://localhost:{puerto}")
