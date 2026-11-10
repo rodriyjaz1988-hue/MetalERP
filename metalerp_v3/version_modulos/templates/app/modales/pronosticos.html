@@ -1,0 +1,57 @@
+<!-- NUEVO PRONÓSTICO DE VENTAS -->
+<div class="ov" id="mo-pronostico-venta"><div class="mo">
+  <div class="mh">Nuevo pronóstico <span class="mx" onclick="closeMo('mo-pronostico-venta')">×</span></div>
+  <div class="fg2">
+    <div class="fg"><label>Código <span class="req">*</span></label>
+      <input type="text" id="pv-codigo" placeholder="Ej: PV-001">
+    </div>
+    <div class="fg"><label>Estado</label>
+      <select id="pv-estado"><option value="Alta">Alta</option><option value="Baja">Baja</option></select>
+    </div>
+    <div class="fg" style="position:relative">
+      <label>Cliente</label>
+      <input type="text" id="pv-cliente-search" placeholder="Todos los clientes" autocomplete="off"
+        oninput="filtrarPVClientes()" onfocus="filtrarPVClientes()"
+        onblur="setTimeout(function(){var c=$('pv-cliente-results');if(c)c.style.display='none';},150)">
+      <input type="hidden" id="pv-cliente">
+      <div id="pv-cliente-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:7px;margin-top:3px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.14);z-index:10"></div>
+    </div>
+    <div class="fg"><label>Fecha emisión <span class="req">*</span></label>
+      <input type="date" id="pv-fecha">
+    </div>
+    <div class="fg"><label>Periodos <span class="req">*</span></label>
+      <select id="pv-periodos">
+        <option value="1">1 mes</option>
+        <option value="2">2 meses</option>
+        <option value="3">3 meses</option>
+        <option value="4">4 meses</option>
+        <option value="5">5 meses</option>
+        <option value="6">6 meses</option>
+        <option value="7">7 meses</option>
+        <option value="8">8 meses</option>
+        <option value="9">9 meses</option>
+        <option value="10">10 meses</option>
+        <option value="11">11 meses</option>
+        <option value="12">12 meses</option>
+      </select>
+    </div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-pronostico-venta')">Cancelar</button><button class="btn btn-p" onclick="generarPronosticoVentas()">Generar pronóstico</button></div>
+</div></div>
+
+<!-- CONSOLIDAR PRONÓSTICO: ELEGIR MES -->
+<div class="ov" id="mo-pron-mes"><div class="mo">
+  <div class="mh">Consolidar pronóstico <span class="mx" onclick="closeMo('mo-pron-mes')">×</span></div>
+  <div id="pron-oc-warn" style="display:none;background:var(--color-bg-warning,#fff8e1);border:1px solid var(--color-border-warning,#f0c419);border-radius:6px;padding:10px;margin-bottom:12px;font-size:12px">
+    <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
+      <input type="checkbox" id="pron-oc-incluir" checked style="margin-top:2px">
+      <span>También hay <b id="pron-oc-count">0</b> pedido(s) de cliente tildado(s). Tildá esta casilla para consolidarlos junto con el pronóstico en un solo paso, o destildala para consolidar solo el pronóstico ahora.</span>
+    </label>
+  </div>
+  <div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:10px">Se genera una OT distinta por cada mes. Elegí el mes a consolidar.</div>
+  <div class="fg"><label>Mes <span class="req">*</span></label>
+    <select id="pron-mes-select"></select>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-pron-mes')">Cancelar</button><button class="btn btn-p" onclick="confirmarConsolidarPronostico()">Consolidar y generar OTs →</button></div>
+</div></div>
+

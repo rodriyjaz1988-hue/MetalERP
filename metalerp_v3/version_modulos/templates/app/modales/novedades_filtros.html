@@ -1,0 +1,106 @@
+<!-- FILTROS DE NOVEDADES POR OT -->
+<div class="ov" id="mo-cajon"><div class="mo" style="width:820px">
+  <div class="mh"><span id="cajon-title">Cajón</span> <span class="mx" onclick="closeMo('mo-cajon')">×</span></div>
+  <div id="cajon-body"><div class="ld">Cargando...</div></div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-cajon')">Cerrar</button></div>
+</div></div>
+
+<div class="ov" id="mo-cajon-cal"><div class="mo" style="width:560px">
+  <div class="mh"><span id="cajcal-title">Calidad del cajón</span> <span class="mx" onclick="closeMo('mo-cajon-cal')">×</span></div>
+  <input type="hidden" id="cajcal-id"><input type="hidden" id="cajcal-term">
+  <div id="cajcal-info" style="background:var(--color-background-secondary);border-radius:8px;padding:10px 14px;font-size:12px;margin-bottom:14px"></div>
+
+  <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">
+    <button class="btn btn-s" type="button" onclick="cajCalQuick('aprobar_todo')">✓ Aprobar todo</button>
+    <button class="btn btn-s" type="button" onclick="cajCalQuick('rechazar_todo')">✗ Rechazar todo</button>
+    <button class="btn btn-s" type="button" onclick="cajCalQuick('reset')">⏳ Marcar todo pendiente</button>
+  </div>
+
+  <div class="fg2">
+    <div class="fg s2"><label style="color:#1B5E20">✓ Aprobado</label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input type="number" id="cajcal-lib" min="0" step="1" oninput="cajCalRecalc('aprobado')"
+          style="flex:1;font-size:13px;padding:7px 9px;border:1.5px solid #A8D08D;border-radius:6px;background:#F4F9EE;color:#1B5E20">
+        <span style="font-size:12px;color:var(--color-text-secondary)">pz</span>
+      </div>
+    </div>
+    <div class="fg s2"><label style="color:#c62828">✗ Rechazado</label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input type="number" id="cajcal-rech" min="0" step="1" oninput="cajCalRecalc('rechazado')"
+          style="flex:1;font-size:13px;padding:7px 9px;border:1.5px solid #E8A6A6;border-radius:6px;background:#FDF4F4;color:#A32D2D">
+        <span style="font-size:12px;color:var(--color-text-secondary)">pz</span>
+      </div>
+    </div>
+    <div class="fg s2"><label style="color:#E65100">⏳ Pendiente (sin gestionar)</label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input type="number" id="cajcal-pend" readonly tabindex="-1"
+          style="flex:1;font-size:13px;padding:7px 9px;border:1.5px solid #F0C896;border-radius:6px;background:#FDF8EF;color:#9A5300">
+        <span style="font-size:12px;color:var(--color-text-secondary)">pz</span>
+      </div>
+    </div>
+    <div class="fg s2"><label>Total terminadas</label>
+      <div id="cajcal-total-lbl" style="font-size:13px;font-weight:600;padding:6px 0"></div>
+    </div>
+    <div class="fg s2"><label>Observaciones</label><textarea id="cajcal-obs" style="min-height:40px"></textarea></div>
+  </div>
+  <div class="ma">
+    <button class="btn" onclick="closeMo('mo-cajon-cal')">Cancelar</button>
+    <button class="btn btn-p" onclick="saveCajCal()">Confirmar</button>
+  </div>
+</div></div>
+
+<div class="ov" id="mo-cajon-transf"><div class="mo" style="width:440px">
+  <div class="mh"><span id="cajtr-title">Pasar cajón a otra OT</span> <span class="mx" onclick="closeMo('mo-cajon-transf')">×</span></div>
+  <input type="hidden" id="cajtr-id">
+  <div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:10px">La OT destino sigue desde la operación donde quedó el cajón.</div>
+  <div class="fg"><label>OT destino (mismo producto, abierta)</label><select id="cajtr-ot"></select></div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-cajon-transf')">Cancelar</button><button class="btn btn-p" onclick="saveCajTransf()">Pasar</button></div>
+</div></div>
+
+<div class="ov" id="mo-lm"><div class="mo" style="width:560px">
+  <div class="mh" id="lm-title">Gestionar lote <span class="mx" onclick="closeMo('mo-lm')">×</span></div>
+  <input type="hidden" id="lm-id">
+  <input type="hidden" id="lm-total">
+  <div id="lm-info" style="background:var(--color-background-secondary);border-radius:8px;padding:10px 14px;font-size:12px;margin-bottom:14px"></div>
+
+  <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">
+    <button class="btn btn-s" type="button" onclick="lmQuick('aprobar_todo')">✓ Aprobar todo</button>
+    <button class="btn btn-s" type="button" onclick="lmQuick('rechazar_todo')">✗ Rechazar todo</button>
+    <button class="btn btn-s" type="button" onclick="lmQuick('reset')">⏳ Marcar todo pendiente</button>
+  </div>
+
+  <div class="fg2">
+    <div class="fg s2"><label style="color:#1B5E20">✓ Aprobado</label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input type="number" id="lm-aprobado" min="0" step="0.01" oninput="lmRecalc('aprobado')"
+          style="flex:1;font-size:13px;padding:7px 9px;border:1.5px solid #A8D08D;border-radius:6px;background:#F4F9EE;color:#1B5E20">
+        <span id="lm-unidad-1" style="font-size:12px;color:var(--color-text-secondary)"></span>
+      </div>
+    </div>
+    <div class="fg s2"><label style="color:#c62828">✗ Rechazado</label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input type="number" id="lm-rechazado" min="0" step="0.01" oninput="lmRecalc('rechazado')"
+          style="flex:1;font-size:13px;padding:7px 9px;border:1.5px solid #E8A6A6;border-radius:6px;background:#FDF4F4;color:#A32D2D">
+        <span id="lm-unidad-2" style="font-size:12px;color:var(--color-text-secondary)"></span>
+      </div>
+    </div>
+    <div class="fg s2"><label style="color:#E65100">⏳ Pendiente (sin gestionar)</label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input type="number" id="lm-pendiente" readonly tabindex="-1"
+          style="flex:1;font-size:13px;padding:7px 9px;border:1.5px solid #F0C896;border-radius:6px;background:#FDF8EF;color:#9A5300">
+        <span id="lm-unidad-3" style="font-size:12px;color:var(--color-text-secondary)"></span>
+      </div>
+    </div>
+    <div class="fg s2"><label>Total disponible</label>
+      <div id="lm-total-lbl" style="font-size:13px;font-weight:600;padding:6px 0"></div>
+    </div>
+    <div id="lm-err" style="display:none;color:#c62828;font-size:12px;font-weight:600"></div>
+    <div class="fg s2"><label>Observaciones</label><textarea id="lm-obs" style="min-height:40px"></textarea></div>
+  </div>
+  <div class="ma">
+    <button class="btn" onclick="closeMo('mo-lm')">Cancelar</button>
+    <button class="btn btn-p" onclick="saveLiberacion()">Confirmar</button>
+  </div>
+</div></div>
+
+

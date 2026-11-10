@@ -1,0 +1,84 @@
+<!-- EDITAR OPERACIÓN DE OT -->
+<div class="ov" id="mo-sch"><div class="mo" style="width:560px">
+  <div class="mh"><span id="sch-title">Asignar operación</span> <span class="mx" onclick="closeMo('mo-sch')">×</span></div>
+  <input type="hidden" id="sch-id"><input type="hidden" id="sch-oo">
+  <div id="sch-opinfo" style="font-size:12.5px;background:#f7f7f4;border:1px solid #e8e8e3;border-radius:8px;padding:8px 10px;margin-bottom:10px;line-height:1.45"></div>
+  <div class="fg2">
+    <div class="fg s2" style="position:relative">
+      <label>Máquina</label>
+      <input type="text" id="sch-maq-search" placeholder="Buscar por código o nombre..." autocomplete="off"
+        oninput="schFiltrarMaq(true)" onfocus="this.select();schFiltrarMaq(false)"
+        onblur="setTimeout(function(){var c=$('sch-maq-results');if(c)c.style.display='none';},150)">
+      <input type="hidden" id="sch-maq">
+      <div id="sch-maq-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:7px;margin-top:3px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.14);z-index:10"></div>
+    </div>
+    <div class="fg s2" style="position:relative">
+      <label>Operario</label>
+      <input type="text" id="sch-emp-search" placeholder="Buscar por nombre o apellido... (vacío = sin operario)" autocomplete="off"
+        oninput="schFiltrarEmp(true)" onfocus="this.select();schFiltrarEmp(false)"
+        onblur="setTimeout(function(){var c=$('sch-emp-results');if(c)c.style.display='none';},150)">
+      <input type="hidden" id="sch-emp">
+      <div id="sch-emp-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:7px;margin-top:3px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.14);z-index:10"></div>
+    </div>
+    <div class="fg"><label>Jornada</label>
+      <select id="sch-jor" onchange="schModalCalc()"><option value="9">9 horas</option><option value="12">12 horas</option></select></div>
+    <div class="fg"><label>Cantidad a producir en la jornada</label><input type="number" id="sch-qty" min="0" step="1" oninput="this.dataset.man='1'"></div>
+    <div class="fg"><label>Fecha de inicio</label><input type="date" id="sch-f" onchange="schModalCalc()"></div>
+    <div class="fg"><label>Hora de inicio</label><input type="time" id="sch-h" step="900" onchange="schModalCalc()"></div>
+    <div class="fg s2" style="flex-direction:row;gap:6px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:11.5px;color:#666">Horarios habituales:</span>
+      <span class="sch-chip" onclick="schHora('06:00')">06:00</span><span class="sch-chip" onclick="schHora('13:00')">13:00</span><span class="sch-chip" onclick="schHora('14:00')">14:00</span><span class="sch-chip" onclick="schHora('18:00')">18:00</span><span class="sch-chip" onclick="schHora('22:00')">22:00</span>
+    </div>
+    <div class="fg s2"><div id="sch-calc" style="font-size:12px;color:#444"></div></div>
+    <div class="fg s2" id="sch-repbox" style="flex-direction:row;gap:8px;align-items:center;flex-wrap:wrap">
+      <label style="margin:0">Repetir en los próximos</label>
+      <input type="number" id="sch-rep" min="0" max="30" value="0" style="width:64px">
+      <label style="margin:0">días</label>
+      <select id="sch-hab" style="width:auto"><option value="1">hábiles (lun a vie)</option><option value="0">corridos (incluye sáb y dom)</option></select>
+    </div>
+    <div class="fg s2"><label>Observaciones</label><input type="text" id="sch-obs" placeholder="Opcional"></div>
+  </div>
+  <div id="sch-err"></div>
+  <div class="ma">
+    <button class="btn" id="sch-del" style="margin-right:auto;color:#A32D2D;border-color:#F7C1C1" onclick="schBorrar()">Eliminar bloque</button>
+    <button class="btn" onclick="closeMo('mo-sch')">Cancelar</button>
+    <button class="btn btn-p" id="sch-save" onclick="schGuardar()">Guardar</button>
+  </div>
+</div></div>
+<div class="ov" id="mo-otop"><div class="mo" style="width:520px">
+  <div class="mh"><span id="otop-title">Editar operación</span> <span class="mx" onclick="closeMo('mo-otop')">×</span></div>
+  <input type="hidden" id="otop-id">
+  <input type="hidden" id="otop-oid">
+  <div class="fg2">
+    <div class="fg"><label>Orden</label><input type="text" id="otop-ord" inputmode="numeric" style="width:70px"></div>
+    <div class="fg s2"><label>Nombre</label><input type="text" id="otop-nom" placeholder="Nombre de la operación"></div>
+    <div class="fg"><label>Setup (min)</label><input type="number" id="otop-set" min="0" step="0.5" placeholder="min"></div>
+    <div class="fg"><label>Ciclo (seg)</label><input type="number" id="otop-cic" min="0" step="0.1" placeholder="seg"></div>
+    <div class="fg"><label>Cant. requerida</label><input type="number" id="otop-req" min="0" step="0.01"></div>
+    <div class="fg"><label>Estado</label>
+      <select id="otop-est">
+        <option value="Pendiente">Pendiente</option>
+        <option value="En proceso">En proceso</option>
+        <option value="Completada">Completada</option>
+      </select>
+    </div>
+    <div class="fg"><label>Sector / Cat. máquina</label><select id="otop-catm"></select></div>
+    <div class="fg"><label>Máquina</label><select id="otop-maq"></select></div>
+    <div class="fg s2"><label>Observaciones</label><textarea id="otop-obs" style="min-height:36px"></textarea></div>
+  </div>
+  <div style="margin-top:10px;padding-top:10px;border-top:1px solid #f0f0ec">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <b style="font-size:12px">Materiales / insumos de esta operación <span style="font-weight:400;color:var(--color-text-secondary)">(cantidad por unidad)</span></b>
+      <button class="btn btn-s" type="button" onclick="otopAddMat()">+ Material</button>
+    </div>
+    <div id="otop-mats"></div>
+    <div style="font-size:11px;color:var(--color-text-secondary);margin-top:4px">Sin filas = la operación no consume material. Es una copia propia de la OT: no modifica el proceso del producto.</div>
+  </div>
+  <div class="ma">
+    <button class="btn btn-d" id="otop-del-btn" style="margin-right:auto" onclick="deleteOTOp($('otop-id').value,parseInt($('otop-oid').value))">Eliminar</button>
+    <button class="btn" onclick="closeMo('mo-otop')">Cancelar</button>
+    <button class="btn btn-p" onclick="saveOTOp()">Guardar</button>
+  </div>
+</div></div>
+
+
