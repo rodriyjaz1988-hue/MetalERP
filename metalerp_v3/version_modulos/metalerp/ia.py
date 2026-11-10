@@ -594,25 +594,15 @@ Reglas:
 9. Tus respuestas también se escuchan en voz alta: empezá con una o dos oraciones completas que digan lo importante, y dejá las tablas y listas largas para después.
 10. Cada usuario ve solo los módulos que tiene habilitados, y algunos no ven importes. Si una herramienta dice que no hay permiso o un dato no viene, decilo así y no intentes conseguirlo por otro camino."""
 
-# Modos de personalidad de los comandos de broma del chat (/pirata). Lista
-# cerrada: el cliente solo elige la clave; el texto de estilo es del servidor.
-IA_MODOS = {
-    "pirata": "Respondé con el estilo de un pirata simpático, en español rioplatense (por ejemplo \"¡Ahoy, grumete!\", "
-              "\"por las barbas de Neptuno\", \"el botín de la OT\"), con tono divertido pero informativo. "
-              "Es solo el estilo: no cambies ningún dato, número ni regla, y nunca inventes datos por seguir el personaje.",
-}
-
 _IA_DIAS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
 
 
-def _ia_sistema(modo="normal"):
+def _ia_sistema():
     hoy = date.today()
     rol = session.get("rol_nombre") or session.get("rol") or ""
     usuario = (session.get("nombre") or session.get("username") or "el usuario") + (f" (rol {rol})" if rol else "")
     texto = IA_SISTEMA.format(empresa=get_config_valor("empresa_nombre", "la empresa"), usuario=usuario,
                               hoy=f"{_IA_DIAS[hoy.weekday()]} {hoy.strftime('%d/%m/%Y')}")
-    if modo in IA_MODOS:
-        texto += "\n\nEstilo pedido por el usuario: " + IA_MODOS[modo]
     return texto
 
 
@@ -660,13 +650,13 @@ def _ia_llamar(cliente, mensajes):
             raise _IAError(_ia_error_api(e)) from e
 
 
-def _ia_conversar(historial, pregunta, modo="normal"):
+def _ia_conversar(historial, pregunta):
     """Pregunta → (respuesta, herramientas usadas, tokens entrada, tokens salida)."""
     try:
         cliente = _ia_cliente()
     except ImportError:
         raise _IAError("Falta instalar el paquete groq en el servidor (pip install groq).")
-    mensajes = [{"role": "system", "content": _ia_sistema(modo)}] + historial + [{"role": "user", "content": pregunta}]
+    mensajes = [{"role": "system", "content": _ia_sistema()}] + historial + [{"role": "user", "content": pregunta}]
     usadas, t_in, t_out, inicio = [], 0, 0, _ia_time.time()
     for _ in range(IA_MAX_VUELTAS):
         if _ia_time.time() - inicio > IA_MAX_SEGUNDOS:
@@ -796,8 +786,6 @@ def ia_chat():
         return jsonify({"error": "Escribí una pregunta."}), 400
     if len(pregunta) > IA_MAX_LARGO_PREGUNTA:
         return jsonify({"error": f"La pregunta es muy larga (máximo {IA_MAX_LARGO_PREGUNTA} caracteres)."}), 400
-    modo = d.get("modo")
-    modo = modo if isinstance(modo, str) and modo in IA_MODOS else "normal"   # cualquier otro valor = normal
     uid = session["user_id"]
     cid = d.get("conversacion_id")
     if cid:
@@ -822,7 +810,7 @@ def ia_chat():
     respuesta, error, usadas, t_in, t_out = None, None, [], 0, 0
     try:
         historial = _ia_historial(cid) if cid else []
-        respuesta, usadas, t_in, t_out = _ia_conversar(historial, pregunta, modo)
+        respuesta, usadas, t_in, t_out = _ia_conversar(historial, pregunta)
     except _IAError as e:
         error = str(e)
     except Exception as e:
