@@ -485,10 +485,52 @@
   .sch-bar.clipR{border-top-right-radius:0;border-bottom-right-radius:0}
   .sch-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
   .sch-tools label{font-size:12px;color:#444;display:flex;gap:4px;align-items:center}
-  #sch-err{display:none;background:#FCEBEB;color:#791F1F;border:1px solid #F7C1C1;border-radius:7px;padding:8px 10px;font-size:12.5px;margin-top:10px}
+  #sch-err,#schsug-err{display:none;background:#FCEBEB;color:#791F1F;border:1px solid #F7C1C1;border-radius:7px;padding:8px 10px;font-size:12.5px;margin-top:10px}
+  .sch-bar.sch-sug{background:#EDEDED!important;border:1px dashed #9C9C9C;border-left:4px solid #A8A8A8;color:#6F6F6F;box-shadow:none;z-index:1}
+  .sch-bar.sch-sug .o{color:#7A7A7A}
+  .sch-bar.sch-sug:hover{background:#E2E2E2!important;border-color:#6F6F6F}
+  .sch-card .sg{font-size:11px;color:#6F6F6F;margin-top:2px}
+  .sch-body.sin-pend .sch-pend.sch-sugp{display:block}
+  .sch-body.sin-sug .sch-sugp{display:none!important}
+  .sch-sugp .ph .b{background:#EDEDED;color:#555;border:1px dashed #A8A8A8}
+  .sch-pend.sch-sugp{width:260px}
+  #sch-slist{overflow-y:auto;max-height:calc(100vh - 330px);min-height:120px;padding-right:2px}
+  .sch-scard{border:1px dashed #B5B5B5;border-left:4px solid #A8A8A8;border-radius:8px;padding:7px 9px;margin-bottom:6px;background:#F6F6F6;cursor:pointer;font-size:12px;line-height:1.35;color:#444}
+  .sch-scard:hover{box-shadow:0 2px 8px rgba(0,0,0,.09);background:#F0F0F0}
+  .sch-scard.sel{outline:2px solid #378ADD}
+  .sch-scard .n{display:inline-block;min-width:18px;padding:0 5px;margin-right:4px;border-radius:9px;background:#DADADA;color:#444;font-size:10.5px;font-weight:700;text-align:center}
+  .sch-scard .l2{color:#666;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sch-scard .l3{color:#444;font-size:11px;margin-top:2px}
+  .sch-scard .mt{color:#6F6F6F;font-size:10.5px;margin-top:3px}
+  .sch-scard .l4{display:flex;justify-content:space-between;align-items:center;margin-top:4px;gap:6px}
+  .sch-scard .l4 .late{color:#A32D2D;font-weight:600}
+  .sch-scard .l4 .btn{padding:2px 9px;font-size:11px}
+  .sch-sinmaq{font-size:11px;color:#777;border-top:1px solid #e8e8e8;margin-top:6px;padding-top:6px}
+  .sch-bar.sch-sug.hl{outline:2px solid #378ADD;outline-offset:1px;z-index:3}
+  #schsug-dias input[type=checkbox],#sch-sugtodas input[type=checkbox]{-webkit-appearance:checkbox;-moz-appearance:checkbox;appearance:auto;width:15px;height:15px;padding:0;margin:0;border:none;flex:0 0 auto}
+  #sch-sugbox{font-size:12px;background:#F2F2F2;border:1px dashed #A8A8A8;color:#555;border-radius:8px;padding:7px 10px;margin-bottom:10px;line-height:1.45}
+  #sch-sec-par textarea{width:100%;box-sizing:border-box;min-height:64px;padding:8px 10px;font-size:13px;border:1px solid #ddd;border-radius:8px;font-family:inherit;resize:vertical}
+  #sch-sec-par .ayuda{font-size:12px;color:#666;margin:4px 0 8px}
+  .schpar-res{margin-top:10px;border:1px solid #e3e5e8;border-radius:8px;padding:9px 11px;font-size:12.5px;line-height:1.5;background:#fafaf8}
+  .schpar-res .rg{padding:5px 0;border-bottom:1px dashed #e3e3e3}
+  .schpar-res .rg:last-of-type{border-bottom:none}
+  .schpar-res .cn{font-size:11.5px;color:#666}
+  .schpar-res .cn.cero{color:#9A5B00}
+  .schpar-res .er{color:#A32D2D}
+  .schpar-res .du{background:#FAEEDA;border:1px solid #f0d6a8;color:#633806;border-radius:6px;padding:5px 8px;margin:4px 0}
+  .schpar-res .ia{color:#777;font-size:11.5px;margin-top:4px}
+  #schpar-list table{width:100%;border-collapse:collapse;font-size:12.5px}
+  #schpar-list th{text-align:left;font-size:11px;color:#777;font-weight:600;padding:5px 6px;border-bottom:1px solid #e3e5e8}
+  #schpar-list td{padding:6px;border-bottom:1px solid #f0f0f0;vertical-align:top}
+  #schpar-list tr.off td{color:#999}
+  .schpar-res .ac{margin:4px 0 2px 12px;padding:5px 8px;border-left:3px solid #E0A030;background:#FFF8EA;color:#6B4A00;font-size:12px;border-radius:0 6px 6px 0}
+  .schpar-res .ok{margin:3px 0;color:#1F6B3A;font-size:12.5px}
+  #schpar-list .rs{font-size:11.5px;color:#6B4A00;margin-top:3px}
+  #schpar-list .hecha{font-size:10.5px;color:#777;border:1px solid #ddd;border-radius:8px;padding:1px 6px;white-space:nowrap}
+  #schpar-list input[type=checkbox]{width:16px;height:16px}
   .sch-chip{font-size:11px;padding:2px 8px;border:1px solid #d0d0c8;border-radius:12px;background:#fff;cursor:pointer}
   .sch-chip:hover{background:#E6F1FB}
-  @media(max-width:900px){.sch-body{flex-direction:column}.sch-pend{width:100%}#sch-plist{max-height:260px}}
+  @media(max-width:900px){.sch-body{flex-direction:column}.sch-pend{width:100%}#sch-plist{max-height:260px}#sch-slist{max-height:260px}}
 </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
@@ -746,7 +788,7 @@
             <div class="vhead-tit">
               <div class="pt" title="Gantt por máquina: asigná operaciones de OT a una máquina, un operario y una jornada (en horas). Las piezas que manda el monitor de planta se cargan a la operación y al operario del bloque que tiene la máquina a esa hora.">Scheduling de producción</div>
             </div>
-            <div class="tabs vh-tabs" id="sch-tabs"><div class="tab active" data-v="gantt">Planificación</div><div class="tab" data-v="pz" title="Piezas que mandó el monitor de planta (Nexus) y en qué quedó cada una">Piezas</div><div class="tab" data-v="con" id="sch-tab-con" style="display:none" title="Claves de la app del monitor de planta (Nexus) y paquetes recibidos">Conexión</div></div>
+            <div class="tabs vh-tabs" id="sch-tabs"><div class="tab active" data-v="gantt">Planificación</div><div class="tab" data-v="pz" title="Piezas que mandó el monitor de planta (Nexus) y en qué quedó cada una">Piezas</div><div class="tab" data-v="con" id="sch-tab-con" style="display:none" title="Claves de la app del monitor de planta (Nexus) y paquetes recibidos">Conexión</div><div class="tab" data-v="par" id="sch-tab-par" style="display:none" title="Reglas para las sugerencias, escritas con tus palabras e interpretadas por la IA">Parámetros</div></div>
             <div id="sch-resumen" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"></div>
             <div class="vh-acciones">
               <button class="btn" onclick="schActualizar()" title="Volver a cargar"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.6 8A5.6 5.6 0 1 1 11.9 4"/><path d="M12.4 1.6V4.4H9.6"/></svg>Actualizar</button>
@@ -765,6 +807,8 @@
             <select id="sch-sector" class="sel-fil vh-fil-sel-w" onchange="schRender()"><option value="">Todos los sectores</option></select>
             <input id="sch-q" class="sel-fil vh-fil-wide" placeholder="🔍 Resaltar OT / producto / operario" autocomplete="off" oninput="clearTimeout(window._schT);window._schT=setTimeout(schRender,250)">
             <label class="sch-tools" style="font-size:12px"><input type="checkbox" id="sch-solo" onchange="schRender()"> Solo máquinas con carga</label>
+            <label class="sch-tools" style="font-size:12px" title="Recuadro con las operaciones que conviene hacer y cuándo; al elegir una se muestra en el Gantt en gris cómo quedaría (entrega más próxima, OT más vieja, operación siguiente al mismo tiempo, mismo producto a continuación en la misma máquina). Clic en una barra gris para confirmarla."><input type="checkbox" id="sch-versug" checked onchange="schToggleSug()"> Sugerencias</label>
+            <button class="btn" id="sch-btn-sugcfg" onclick="schSugCfgAbrir()" title="Turno que se usa para las sugerencias">Turno</button>
           </div>
           <div class="vhead-row vhead-fil" id="sch-fil-pz" style="display:none">
             <select id="mp-pz-estado" class="sel-fil" onchange="mpLoadPiezas()" title="Estado"><option value="">Todos los estados</option><option>Procesado</option><option>Pendiente</option><option>Esperando</option><option>Error</option><option>Descartada</option></select>
@@ -779,6 +823,31 @@
         <div class="card" style="font-size:12px;color:var(--color-text-secondary)">Cada pieza que manda el monitor se carga como una novedad de la operación y el operario del bloque que la máquina tiene en la <b>Planificación</b> a esa hora. Si a esa hora la máquina no tiene bloque (para el sistema no estaba trabajando), o el bloque no tiene operario, la pieza queda <b>en espera</b> y se carga sola cuando completás la planificación. También podés cargarlas desde el bloque, con <b>Cargarlas a este bloque</b>.</div>
         <div class="card" id="mp-pz-resumen"></div>
         <div class="card"><div id="mp-pz-list"><div class="ld">Cargando...</div></div></div>
+      </div>
+      <div id="sch-sec-par" style="display:none">
+        <div class="card">
+          <b>Nuevo parámetro para las sugerencias</b>
+          <div class="ayuda">Escribí la regla con tus palabras. La IA (Groq) la traduce y te muestra qué entendió; recién se guarda cuando apretás <b>Guardar</b>.</div>
+          <textarea id="schpar-txt" maxlength="600" placeholder="Ej: la T5 no hace torneado · priorizá al cliente Alejos SA · la T1 está en mantenimiento el lunes · el verde-3 va en la T5"></textarea>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px">
+            <span style="font-size:11.5px;color:#666">Ejemplos:</span>
+            <span class="sch-chip" onclick="schParEj(this)">Priorizá todo lo del cliente Alejos SA</span>
+            <span class="sch-chip" onclick="schParEj(this)">El torneado del producto joaco va en la T1</span>
+            <span class="sch-chip" onclick="schParEj(this)">La T3 está en mantenimiento hasta el viernes</span>
+            <span class="sch-chip" onclick="schParEj(this)">Las AMOLADORA 1, 2 y 3 son amoladoras</span>
+            <span class="sch-chip" onclick="schParEj(this)">No sugieras nada de la OT-172</span>
+            <button class="btn btn-p" id="schpar-btn" style="margin-left:auto" onclick="schParInterpretar()">Interpretar con IA</button>
+          </div>
+          <div id="schpar-res"></div>
+        </div>
+        <div class="card">
+          <b>Parámetros guardados</b>
+          <div class="ayuda">Los que están tildados se aplican a las sugerencias. Destildá uno para dejar de usarlo sin borrarlo.</div>
+          <div id="schpar-list"><div class="ld">Cargando...</div></div>
+        </div>
+        <div class="card ayuda" style="margin:0">
+          <b>Qué puede entender:</b> subir o bajar la prioridad (de un cliente, producto, OT u operación) · no sugerir ciertas operaciones · que una operación vaya en una máquina · que una operación no vaya en una máquina (o no usar una máquina) · que una máquina no esté disponible entre dos fechas (mantenimiento, rotura: <b>al guardar quita los bloques programados de esa máquina en ese período y los vuelve a sugerir en otra máquina del mismo tipo</b>) · qué tipo es cada máquina (tornos, centros, amoladoras...: las sugerencias solo cambian una máquina por otra del mismo tipo). Lo que no entre en estos tipos, la IA te lo avisa y no se guarda.
+        </div>
       </div>
       <div id="sch-sec-con" style="display:none">
         <div class="card">
@@ -809,7 +878,16 @@
             <span><i style="display:inline-block;width:30px;height:7px;background:rgba(0,0,0,.12);border-radius:3px;vertical-align:middle;position:relative;overflow:hidden"><i style="position:absolute;left:0;top:0;bottom:0;width:8px;background:#3B9B2F"></i><i style="position:absolute;left:8px;top:0;bottom:0;width:8px;background:#E24B4A"></i></i> avance del bloque: verde lo hecho, rojo lo atrasado (tendría que estar hecho a esta hora), gris lo que todavía no toca</span>
             <span><i style="display:inline-block;width:10px;height:10px;background:#FCE3E3;border:1px solid #A32D2D"></i> bloque terminado al que le faltó producir</span>
             <span><i class="sch-mon ok" style="font-style:normal">12</i> piezas del monitor hoy (<i class="sch-mon esp" style="font-style:normal">3</i> en espera, <i class="sch-mon err" style="font-style:normal">1</i> con error): clic para verlas</span>
+            <span><i style="display:inline-block;width:10px;height:10px;background:#EDEDED;border:1px dashed #9C9C9C"></i> sugerencia (todavía no programada)</span>
           </div>
+        </div>
+        <div class="card sch-pend sch-sugp">
+          <div class="ph"><span title="Operaciones que conviene hacer y cuándo, en orden de prioridad: entrega más próxima, OT más vieja, operación siguiente al mismo tiempo que la anterior, mismo producto a continuación en la misma máquina">💡 Sugerencias</span><span id="sch-scount" class="b">0</span></div>
+          <div class="pf">
+            <input type="text" id="sch-sq" placeholder="🔍 Buscar OT / producto / cliente" oninput="schRenderSugPanel()" autocomplete="off">
+          </div>
+          <div id="sch-slist"></div>
+          <div style="font-size:11px;color:#888;margin-top:6px">Clic en una sugerencia para ver en el Gantt cómo quedaría (otro clic la saca); <b>Confirmar</b> la programa como un bloque normal. Se recalculan solas cuando cambia la planificación.</div>
         </div>
       </div>
     </div>
@@ -3205,6 +3283,7 @@
   <div class="mh"><span id="sch-title">Asignar operación</span> <span class="mx" onclick="closeMo('mo-sch')">×</span></div>
   <input type="hidden" id="sch-id"><input type="hidden" id="sch-oo">
   <div id="sch-opinfo" style="font-size:12.5px;background:#f7f7f4;border:1px solid #e8e8e3;border-radius:8px;padding:8px 10px;margin-bottom:10px;line-height:1.45"></div>
+  <div id="sch-sugbox" style="display:none"></div>
   <div class="fg2">
     <div class="fg s2" style="position:relative">
       <label>Máquina</label>
@@ -3238,6 +3317,7 @@
       <label style="margin:0">días</label>
       <select id="sch-hab" style="width:auto"><option value="1">hábiles (lun a vie)</option><option value="0">corridos (incluye sáb y dom)</option></select>
     </div>
+    <div class="fg s2" id="sch-sugtodas" style="display:none;flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="sch-sugtodas-c" style="width:16px;height:16px;flex:0 0 auto;padding:0;margin:0"><label for="sch-sugtodas-c" style="margin:0" id="sch-sugtodas-t"></label></div>
     <div class="fg s2"><label>Observaciones</label><input type="text" id="sch-obs" placeholder="Opcional"></div>
   </div>
   <div id="sch-espbox" style="display:none;font-size:12.5px;background:#FAEEDA;border:1px solid #f0d6a8;color:#633806;border-radius:8px;padding:8px 10px;margin-top:8px;align-items:center;gap:10px;flex-wrap:wrap"><span id="sch-esptxt" style="flex:1;min-width:200px"></span><button class="btn" onclick="schCargarEspera()">Cargarlas a este bloque</button></div>
@@ -3246,6 +3326,21 @@
     <button class="btn" id="sch-del" style="margin-right:auto;color:#A32D2D;border-color:#F7C1C1" onclick="schBorrar()">Eliminar bloque</button>
     <button class="btn" onclick="closeMo('mo-sch')">Cancelar</button>
     <button class="btn btn-p" id="sch-save" onclick="schGuardar()">Guardar</button>
+  </div>
+</div></div>
+<div class="ov" id="mo-schsug"><div class="mo" style="width:420px">
+  <div class="mh"><span>Turno para las sugerencias</span> <span class="mx" onclick="closeMo('mo-schsug')">×</span></div>
+  <div style="font-size:12px;color:#555;margin-bottom:10px">Las sugerencias se ubican solo dentro de este horario, en los huecos que dejan los bloques programados.</div>
+  <div class="fg2">
+    <div class="fg"><label>Hora de inicio</label><input type="time" id="schsug-ini" step="900"></div>
+    <div class="fg"><label>Horas del turno</label><input type="number" id="schsug-horas" min="0.5" max="24" step="0.5"></div>
+    <div class="fg s2"><label>Días que se trabaja</label><div id="schsug-dias" style="display:flex;gap:10px;flex-wrap:wrap;font-size:12.5px"></div></div>
+    <div class="fg s2"><label>Sugerir hasta (días hacia adelante)</label><input type="number" id="schsug-horiz" min="1" max="60" step="1"></div>
+  </div>
+  <div id="schsug-err"></div>
+  <div class="ma">
+    <button class="btn" onclick="closeMo('mo-schsug')">Cancelar</button>
+    <button class="btn btn-p" id="schsug-save" onclick="schSugCfgGuardar()">Guardar</button>
   </div>
 </div></div>
 <div class="ov" id="mo-otop"><div class="mo" style="width:520px">
@@ -4363,7 +4458,8 @@ async function loadOpsSector(){
 // Gantt por máquina. Cada barra = una jornada (9 o 12 h) de una operación de OT,
 // en una máquina, con su operario. Las fechas se manejan como texto local
 // 'AAAA-MM-DD HH:MM' (sin zona horaria) para que coincidan con el servidor.
-const SCH={desde:null,dias:7,pxh:6,maqs:[],bl:[],pend:[],emps:[],cats:[],col:{},sel:null,mv:null,tickH:6,mon:{},vista:'gantt',zf:1,ahora:null};
+const SCH={desde:null,dias:7,pxh:6,maqs:[],bl:[],pend:[],emps:[],cats:[],col:{},sel:null,mv:null,tickH:6,mon:{},vista:'gantt',zf:1,ahora:null,
+  sug:[],sugSin:[],sugCfg:null,verSug:true};
 // Zoom: multiplica los px por hora de la escala elegida (Semana, 3 días...).
 function schZoom(f,cx){
   var sc=$('sch-scroll'),old=SCH.pxh;
@@ -4401,8 +4497,13 @@ function schCorto(n){n=String(n||'').trim();if(!n)return '';var p=n.split(/\s+/)
 
 async function loadScheduling(){
   $('sch-tab-con').style.display=ROL==='admin'?'':'none';
+  $('sch-tab-par').style.display=ROL==='admin'?'':'none';
   try{if(localStorage.getItem('sch_sin_pend')==='1')schTogglePend(true);}catch(e){}
-  if(SCH.vista==='con'&&ROL!=='admin')SCH.vista='gantt';
+  try{SCH.verSug=localStorage.getItem('sch_ver_sug')!=='0';}catch(e){}
+  $('sch-versug').checked=SCH.verSug;
+  $('sch-sec-gantt').classList.toggle('sin-sug',!SCH.verSug);
+  $('sch-btn-sugcfg').style.display=ROL==='admin'?'':'none';
+  if((SCH.vista==='con'||SCH.vista==='par')&&ROL!=='admin')SCH.vista='gantt';
   if(!SCH.desde){SCH.desde=schLunes(schHoy());$('sch-fecha').value=SCH.desde;}
   if(!SCH.cats.length){
     try{
@@ -4429,7 +4530,7 @@ document.querySelectorAll('#sch-tabs .tab').forEach(function(t){
 function schTab(v){
   SCH.vista=v;
   document.querySelectorAll('#sch-tabs .tab').forEach(function(x){x.classList.toggle('active',x.dataset.v===v);});
-  ['gantt','pz','con'].forEach(function(k){
+  ['gantt','pz','con','par'].forEach(function(k){
     $('sch-sec-'+k).style.display=k===v?'':'none';
     var f=$('sch-fil-'+k);if(f)f.style.display=k===v?'':'none';
   });
@@ -4439,6 +4540,7 @@ function schTab(v){
 function schActualizar(){
   if(SCH.vista==='pz')return mpLoadPiezas();
   if(SCH.vista==='con')return mpLoadConexion();
+  if(SCH.vista==='par')return schParCargar();
   return schRefrescar();
 }
 // Desde la insignia de una máquina: sus piezas (con error, en espera o las de hoy)
@@ -4453,8 +4555,13 @@ async function schRefrescar(irAhora){
   var z=SCH_ZOOM[$('sch-zoom').value]||SCH_ZOOM.sem;
   SCH.dias=z.dias;SCH.pxh=z.pxh*SCH.zf;SCH.tickH=z.tick;
   var res=await Promise.all([api('/api/scheduling?desde='+SCH.desde+'&dias='+SCH.dias),api('/api/scheduling/pendientes'),
-    api('/api/planta/maquinas').catch(function(){return null;})]);
-  var g=res[0],p=res[1],mon=res[2];
+    api('/api/planta/maquinas').catch(function(){return null;}),
+    SCH.verSug?api('/api/scheduling/sugerencias').catch(function(){return null;}):Promise.resolve(null)]);
+  var g=res[0],p=res[1],mon=res[2],sg=res[3];
+  SCH.sug=(sg&&Array.isArray(sg.sugerencias))?sg.sugerencias:[];
+  SCH.sugSin=(sg&&Array.isArray(sg.sin_maquina))?sg.sin_maquina:[];
+  SCH.sugExc=(sg&&Array.isArray(sg.excluidas))?sg.excluidas:[];
+  if(sg&&sg.config)SCH.sugCfg=sg.config;
   if(!g||g.error||!Array.isArray(g.maquinas)){
     $('sch-gantt').innerHTML='<div class="em">'+schEsc((g&&g.error)||'No se pudo cargar. Si el error es 404, el servidor está corriendo una versión vieja: reinicialo con el server.py nuevo.')+'</div>';
     return;
@@ -4465,7 +4572,7 @@ async function schRefrescar(irAhora){
   SCH.maqs.sort(function(a,b){return (gOrd[a.grupo]-gOrd[b.grupo])||String(a.codigo||'').localeCompare(String(b.codigo||''),'es',{numeric:true,sensitivity:'base'});});
   SCH.mon={};
   if(Array.isArray(mon))mon.forEach(function(m){SCH.mon[m.id]=m;});
-  schRender();schRenderPend();
+  schRender();schRenderPend();schRenderSugPanel();
   if(irAhora){
     var t0=schMin(SCH.desde+' 00:00'),n=schAhora();
     var sc=$('sch-scroll');
@@ -4487,6 +4594,9 @@ function schRender(){
   var t0=schMin(SCH.desde+' 00:00'),t1=t0+dias*1440;
   var sec=$('sch-sector').value,solo=$('sch-solo').checked,q=($('sch-q').value||'').trim().toLowerCase();
   var by={};SCH.bl.forEach(function(b){(by[b.maquina_id]=by[b.maquina_id]||[]).push(b);});
+  // Sugerencias: en el Gantt solo se dibuja la que se eligió en el recuadro (vista previa de cómo quedaría)
+  var bySug={};if(SCH.verSug&&SCH.selSug)SCH.sug.forEach(function(x,i){if(x.orden_operacion_id===SCH.selSug)(bySug[x.maquina_id]=bySug[x.maquina_id]||[]).push(i);});
+  var nsug=0;
   var hoy=schHoy();
   // encabezado
   var hc='';
@@ -4502,7 +4612,7 @@ function schRender(){
   SCH.maqs.forEach(function(m){
     if(sec&&String(m.categoria_id)!==String(sec))return;
     var mb=by[m.id]||[];
-    if(solo&&!mb.length)return;
+    if(solo&&!mb.length&&!(bySug[m.id]||[]).length)return;
     if(!gm[m.grupo]){gm[m.grupo]=[];grupos.push(m.grupo);}
     gm[m.grupo].push(m);
   });
@@ -4547,6 +4657,20 @@ function schRender(){
         bars+='<div class="'+cls+'" data-b="'+b.id+'" title="'+schEsc(tip)+'" style="left:'+left+'px;width:'+w+'px;background:'+SCH_PAL[(b.orden_id||0)%SCH_PAL.length]+'">'
           +(w>46?'<span class="t">'+(late?'⚠ ':'')+schEsc(b.ot_numero)+' · '+schEsc(b.operacion)+'</span>'+(w>70?'<span class="o">'+schEsc(l2)+'</span>':''):'')+(w>24?avH:'')+'</div>';
       });
+      (bySug[m.id]||[]).forEach(function(i){
+        var x=SCH.sug[i],a=schMin(x.inicio),e=schMin(x.fin);
+        var ca=Math.max(a,t0),ce=Math.min(e,t1);
+        if(ce<=ca)return;
+        nsug++;
+        var left=(ca-t0)/60*pxh,w=Math.max(3,(ce-ca)/60*pxh);
+        var txt=(x.ot_numero+' '+(x.producto_nombre||'')+' '+x.operacion+' '+(x.cliente_nombre||'')).toLowerCase();
+        var tip='SUGERENCIA (todavía no está programada)\n'+x.ot_numero+' · Op '+x.op_orden+' '+x.operacion+'\n'+(x.producto_codigo?x.producto_codigo+' — ':'')+(x.producto_nombre||'')+(x.cliente_nombre?'\nCliente: '+x.cliente_nombre:'')
+          +'\n'+x.inicio.slice(5,16).replace('-','/')+' → '+x.fin.slice(5,16).replace('-','/')+' ('+fN(x.jornada_horas)+' h)'+(x.cantidad_plan?' · '+fN(x.cantidad_plan)+' u':'')
+          +(x.partes>1?'\nJornada '+x.parte+' de '+x.partes:'')+'\nPrioridad n° '+x.prioridad+':\n• '+(x.motivos||[]).join('\n• ')+(schPuedeEditar()?'\nClic para confirmarla':'');
+        var l2='Sugerida · '+fN(x.jornada_horas)+'h'+(x.cantidad_plan?' · '+fN(x.cantidad_plan)+' u':'');
+        bars+='<div class="sch-bar sch-sug'+(a<t0?' clipL':'')+(e>t1?' clipR':'')+((q&&txt.indexOf(q)<0)?' dim':'')+(SCH.selSug===x.orden_operacion_id?' hl':'')+'" data-s="'+i+'" data-soo="'+x.orden_operacion_id+'" title="'+schEsc(tip)+'" style="left:'+left+'px;width:'+w+'px">'
+          +(w>46?'<span class="t">💡 '+schEsc(x.ot_numero)+' · '+schEsc(x.operacion)+'</span>'+(w>70?'<span class="o">'+schEsc(l2)+'</span>':''):'')+'</div>';
+      });
       hrs+=hm;
       // Piezas del monitor de la máquina: hoy, en espera (sin bloque) y con error
       var mo=SCH.mon[m.id]||{},mon='';
@@ -4571,7 +4695,9 @@ function schRender(){
   gt.innerHTML=h;
   // resumen
   var pendSin=SCH.pend.filter(function(p){return schSinPlan(p)>0;}).length;
-  $('sch-resumen').innerHTML='<span class="b bb">'+nbl+' bloques en la vista</span><span class="b bg">'+(Math.round(hrs*10)/10)+' h planificadas</span><span class="b ba">'+pendSin+' operaciones sin planificar</span>';
+  $('sch-resumen').innerHTML='<span class="b bb">'+nbl+' bloques en la vista</span><span class="b bg">'+(Math.round(hrs*10)/10)+' h planificadas</span><span class="b ba">'+pendSin+' operaciones sin planificar</span>'
+    +(SCH.verSug?'<span class="b" style="background:#EDEDED;color:#555;border:1px dashed #A8A8A8" title="Operaciones sugeridas (ver el recuadro Sugerencias). Al elegir una se muestra en el Gantt cómo quedaría">💡 '+(function(){var o={};SCH.sug.forEach(function(x){o[x.orden_operacion_id]=1;});return Object.keys(o).length;})()+' sugerencias</span>':'')
+    +(SCH.verSug&&SCH.sugSin.length?'<span class="b" style="background:#F2F2F2;color:#777" title="'+schEsc('No se pueden sugerir porque no se sabe en qué máquina van (sin máquina ni sector en el proceso, y nunca se hicieron antes):\n'+SCH.sugSin.map(function(o){return o.ot_numero+' · Op '+o.op_orden+' '+o.operacion;}).join('\n'))+'">'+SCH.sugSin.length+' sin máquina para sugerir</span>':'');
 }
 
 // % esperado a esta hora (tiempo transcurrido del bloque) y % real (piezas
@@ -4612,6 +4738,7 @@ function schRenderPend(){
       +'<div><b>'+schEsc(p.ot_numero)+'</b> · Op '+schEsc(p.orden)+' <b>'+schEsc(p.operacion)+'</b></div>'
       +'<div class="l2">'+schEsc((p.producto_codigo?p.producto_codigo+' — ':'')+(p.producto_nombre||'—'))+(p.cliente_nombre?' · '+schEsc(p.cliente_nombre):'')+'</div>'
       +'<div class="l3">'+schEsc(p.sector||'Sin sector')+' · faltan <b>'+fN(falta)+'</b> · '+(sin<=0?'<span style="color:#3B6D11">✓ planificada</span>':'sin planificar <b>'+sin+'</b>')+'</div>'
+      +schSugTxtCard(p.id)
       +'<div class="l4"><span'+(late?' class="late"':'')+'>Entrega '+(p.fecha_entrega?schDM(p.fecha_entrega):'—')+'</span>'+(edit?'<button class="btn" data-act="asig">Asignar</button>':'')+'</div></div>';
   });
   $('sch-plist').innerHTML=h||'<div class="em">Sin operaciones para planificar</div>';
@@ -4670,6 +4797,8 @@ function schMinDesdeX(line,clientX){
     schAbrirNuevo(oo,row.dataset.m,schStr(schMinDesdeX(line,e.clientX)));
   });
   gt.addEventListener('click',function(e){
+    var sgb=e.target.closest('.sch-sug');
+    if(sgb){schAbrirSug(+sgb.dataset.s);return;}
     var mb=e.target.closest('.sch-mon');
     if(mb){schVerPiezas(+mb.dataset.mon);return;}
     var g=e.target.closest('.sch-grp');
@@ -4809,7 +4938,7 @@ function schInfoOp(p){
     +'<span style="color:#555">Sector: '+schEsc(p.sector||'—')+' · faltan '+fN(falta)+' u · planificadas a futuro '+fN(p.qty_planificada||0)+' u'
     +(p.fecha_entrega?' · entrega '+schDM(p.fecha_entrega):'')+'</span>';
 }
-function schAbrirNuevo(p,maqId,inicio){
+function schAbrirNuevo(p,maqId,inicio,sug){
   if(!schPuedeEditar()){toast('Tu rol no puede modificar la planificación','w');return;}
   if(schCompleta(p)){toast('La operación ya está planificada por completo. Para cambiarla, editá o eliminá sus bloques.','w');return;}
   $('sch-title').textContent='Asignar operación';
@@ -4831,6 +4960,12 @@ function schAbrirNuevo(p,maqId,inicio){
   $('sch-obs').value='';$('sch-del').style.display='none';
   $('sch-err').style.display='none';$('sch-espbox').style.display='none';
   $('mo-sch')._p=p;
+  schSugModal(sug||null);
+  if(sug){
+    $('sch-jor').value=String(sug.jornada_horas);
+    if(sug.cantidad_plan>0){$('sch-qty').value=sug.cantidad_plan;$('sch-qty').dataset.man='1';}
+    $('sch-repbox').style.display='none';
+  }
   schModalCalc();openMo('mo-sch');
 }
 function schAbrirEditar(b){
@@ -4851,6 +4986,7 @@ function schAbrirEditar(b){
   $('sch-obs').value=b.obs||'';
   $('sch-del').style.display=edit?'':'none';$('sch-save').style.display=edit?'':'none';
   $('sch-err').style.display='none';
+  schSugModal(null);
   var mo=SCH.mon[b.maquina_id]||{},esp=mo.sin_bloque||0;
   var abierto=['Completada','Cancelada'].indexOf(b.ot_estado)<0&&['Completada','Cancelada'].indexOf(b.op_estado)<0;
   if(edit&&abierto&&esp){
@@ -4897,12 +5033,225 @@ async function schGuardar(){
   try{
     var r=await api(id?'/api/scheduling/'+id:'/api/scheduling',{method:id?'PUT':'POST',body:JSON.stringify(body)});
     if(!r||r.error){err.textContent=(r&&r.error)||'No se pudo guardar';err.style.display='block';return;}
+    var n=(r.ids||[]).length,avisos=(r.avisos||[]).slice();
+    var sug=$('mo-sch')._sug;
+    if(!id&&sug&&$('sch-sugtodas-c').checked){
+      // Las otras jornadas de la misma sugerencia, con el mismo operario y observación
+      var otras=SCH.sug.filter(function(x){return x.orden_operacion_id===sug.orden_operacion_id&&x.parte!==sug.parte;});
+      for(var k=0;k<otras.length;k++){
+        var x=otras[k];
+        var rb=await api('/api/scheduling',{method:'POST',body:JSON.stringify({orden_operacion_id:x.orden_operacion_id,maquina_id:x.maquina_id,
+          empleado_id:body.empleado_id,inicio:x.inicio,jornada_horas:x.jornada_horas,cantidad_plan:x.cantidad_plan||0,obs:body.obs})});
+        if(!rb||rb.error){avisos.push('Jornada '+x.parte+' ('+schDM(x.inicio)+'): '+((rb&&rb.error)||'no se pudo guardar'));break;}
+        n+=(rb.ids||[1]).length;
+        (rb.avisos||[]).forEach(function(a){if(avisos.indexOf(a)<0)avisos.push(a);});
+      }
+    }
     closeMo('mo-sch');
-    var n=(r.ids||[]).length;
-    if(r.avisos&&r.avisos.length)toast((n>1?n+' bloques creados. ':'Guardado. ')+r.avisos.join(' · '),'w');
+    if(avisos.length)toast((n>1?n+' bloques creados. ':'Guardado. ')+avisos.join(' · '),'w');
     else toast(n>1?n+' bloques creados':'Planificación guardada');
     schRefrescar();
   }finally{btn.disabled=false;}
+}
+// ── Sugerencias (barras grises) ──────────────────────────────────────────────
+// Las calcula el servidor cada vez contra lo programado: si se programa otra
+// cosa en ese horario, la sugerencia se corre al próximo hueco parecido o
+// desaparece si no hay. Confirmarla crea un bloque normal.
+function schToggleSug(){
+  SCH.verSug=$('sch-versug').checked;
+  $('sch-sec-gantt').classList.toggle('sin-sug',!SCH.verSug);
+  try{localStorage.setItem('sch_ver_sug',SCH.verSug?'1':'0');}catch(e){}
+  schRefrescar();
+}
+function schSugTxtCard(ooId){
+  if(!SCH.verSug)return '';
+  var x=SCH.sug.find(function(s){return s.orden_operacion_id===ooId&&s.parte===1;});
+  if(!x)return '';
+  var m=SCH.maqs.find(function(mm){return mm.id===x.maquina_id;});
+  return '<div class="sg">💡 Sugerida: '+schDM(x.inicio)+' '+x.inicio.slice(11,16)+' en '+schEsc(m?m.codigo:'?')+(x.partes>1?' ('+x.partes+' jornadas)':'')+'</div>';
+}
+// Recuadro de sugerencias: una tarjeta por operación (todas sus jornadas), en orden de prioridad
+function schRenderSugPanel(){
+  var cont=$('sch-slist');if(!cont)return;
+  var q=($('sch-sq').value||'').trim().toLowerCase();
+  var ops=[],por={};
+  SCH.sug.forEach(function(x,i){
+    var g=por[x.orden_operacion_id];
+    if(!g){g=por[x.orden_operacion_id]={x:x,i:i,fin:x.fin,qty:0,n:0};ops.push(g);}
+    g.n++;g.qty+=(+x.cantidad_plan||0);if(x.fin>g.fin)g.fin=x.fin;
+    if(x.parte===1){g.x=x;g.i=i;}
+  });
+  ops.sort(function(a,b){return a.x.prioridad-b.x.prioridad;});
+  var lista=ops.filter(function(g){
+    var x=g.x;
+    return !q||(x.ot_numero+' '+x.operacion+' '+(x.producto_nombre||'')+' '+(x.producto_codigo||'')+' '+(x.cliente_nombre||'')).toLowerCase().indexOf(q)>=0;
+  });
+  $('sch-scount').textContent=ops.length;
+  var edit=schPuedeEditar(),h='';
+  lista.forEach(function(g){
+    var x=g.x,m=SCH.maqs.find(function(mm){return mm.id===x.maquina_id;});
+    var late=x.fecha_entrega&&String(x.fecha_entrega).slice(0,10)<schHoy();
+    // los motivos que explican el lugar elegido (regla 3 o 4); la entrega ya se ve abajo
+    var mot=(x.motivos||[]).filter(function(t){return /^(Al mismo tiempo|Después de la Op|A continuación de)/.test(t);});
+    h+='<div class="sch-scard'+(SCH.selSug===x.orden_operacion_id?' sel':'')+'" data-soo="'+x.orden_operacion_id+'" title="'+schEsc('• '+(x.motivos||[]).join('\n• '))+'">'
+      +'<div><span class="n">'+x.prioridad+'</span><b>'+schEsc(x.ot_numero)+'</b> · Op '+schEsc(x.op_orden)+' <b>'+schEsc(x.operacion)+'</b></div>'
+      +'<div class="l2">'+schEsc((x.producto_codigo?x.producto_codigo+' — ':'')+(x.producto_nombre||'—'))+(x.cliente_nombre?' · '+schEsc(x.cliente_nombre):'')+'</div>'
+      +'<div class="l3"><b>'+schEsc(m?m.codigo+(m.nombre&&m.nombre!==m.codigo?' '+m.nombre:''):'?')+'</b> · '+schDM(x.inicio)+' '+x.inicio.slice(11,16)+' → '+schDM(g.fin)+' '+g.fin.slice(11,16)
+        +'<br>'+(g.n>1?g.n+' jornadas · ':'')+(g.qty>0?fN(g.qty)+' u':'cantidad a definir')+'</div>'
+      +(mot.length?'<div class="mt">'+schEsc(mot.join(' · '))+'</div>':'')
+      +'<div class="l4"><span'+(late?' class="late"':'')+'>Entrega '+(x.fecha_entrega?schDM(x.fecha_entrega):'—')+'</span>'+(edit?'<button class="btn" data-act="conf">Confirmar</button>':'')+'</div></div>';
+  });
+  if(!lista.length)h='<div class="em">'+(ops.length?'Ninguna sugerencia coincide con la búsqueda':'No hay sugerencias: no quedan operaciones con lugar libre dentro del turno y del horizonte')+'</div>';
+  if((SCH.sugExc||[]).length)h+='<div class="sch-sinmaq" title="Se pueden volver a sugerir desactivando el parámetro (pestaña Parámetros)">No sugeridas por un parámetro ('+SCH.sugExc.length+'):<br>'
+    +SCH.sugExc.map(function(o){return '<span title="'+schEsc(o.parametro)+'">'+schEsc(o.ot_numero+' · Op '+o.op_orden+' '+o.operacion)+'</span>';}).join('<br>')+'</div>';
+  if(SCH.sugSin.length)h+='<div class="sch-sinmaq" title="Cargá la máquina o el sector de la operación en el proceso del producto">Sin máquina para sugerir ('+SCH.sugSin.length+'):<br>'
+    +SCH.sugSin.map(function(o){return schEsc(o.ot_numero+' · Op '+o.op_orden+' '+o.operacion);}).join('<br>')+'</div>';
+  cont.innerHTML=h;
+}
+// Lleva el Gantt hasta la sugerencia y resalta sus barras
+async function schSugVer(oo){
+  SCH.selSug=(SCH.selSug===oo)?null:oo;
+  var x=SCH.sug.find(function(s){return s.orden_operacion_id===oo&&s.parte===1;});
+  if(SCH.selSug&&x){
+    var t0=schMin(SCH.desde+' 00:00'),a=schMin(x.inicio);
+    if(a<t0||a>=t0+SCH.dias*1440){
+      var z=SCH_ZOOM[$('sch-zoom').value]||SCH_ZOOM.sem,f=x.inicio.slice(0,10);
+      SCH.desde=z.dias>=7?schLunes(f):f;$('sch-fecha').value=SCH.desde;
+      await schRefrescar();
+    }else{schRender();schRenderSugPanel();}
+    var bar=document.querySelector('#sch-gantt .sch-sug[data-soo="'+oo+'"]');
+    if(bar){
+      var sc=$('sch-scroll');
+      sc.scrollLeft=Math.max(0,(schMin(x.inicio)-schMin(SCH.desde+' 00:00'))/60*SCH.pxh-120);
+      var row=bar.closest('.sch-row');if(row)row.scrollIntoView({block:'nearest'});
+    }
+  }else{schRender();schRenderSugPanel();}
+}
+(function schInitSugPanel(){
+  var sl=$('sch-slist');if(!sl)return;
+  sl.addEventListener('click',function(e){
+    var c=e.target.closest('.sch-scard');if(!c)return;
+    var oo=+c.dataset.soo;
+    if(e.target.closest('[data-act="conf"]')){
+      var i=SCH.sug.findIndex(function(s){return s.orden_operacion_id===oo&&s.parte===1;});
+      if(i>=0)schAbrirSug(i);
+      return;
+    }
+    schSugVer(oo);
+  });
+})();
+function schAbrirSug(i){
+  var x=SCH.sug[i];if(!x)return;
+  var p=SCH.pend.find(function(pp){return pp.id===x.orden_operacion_id;});
+  if(!p){toast('La operación ya no está pendiente: actualizá la vista','w');return;}
+  if(!schPuedeEditar()){toast('Sugerencia: '+(x.motivos||[]).join(' · '),'w');return;}
+  schAbrirNuevo(p,x.maquina_id,x.inicio,x);
+}
+function schSugModal(x){
+  var mo=$('mo-sch');mo._sug=x;
+  var box=$('sch-sugbox'),tod=$('sch-sugtodas');
+  if(!x){box.style.display='none';tod.style.display='none';$('sch-sugtodas-c').checked=false;return;}
+  $('sch-title').textContent='Confirmar sugerencia';
+  box.innerHTML='<b>💡 Sugerencia · prioridad n° '+x.prioridad+'</b>'+(x.partes>1?' · jornada '+x.parte+' de '+x.partes:'')+'<br>'+(x.motivos||[]).map(function(t){return '• '+schEsc(t);}).join('<br>')
+    +'<br><span style="color:#777">Elegí el operario y guardá: queda como un bloque programado normal.</span>';
+  box.style.display='block';
+  var otras=SCH.sug.filter(function(s){return s.orden_operacion_id===x.orden_operacion_id&&s.parte!==x.parte;}).length;
+  if(otras){
+    $('sch-sugtodas-t').textContent='Confirmar también las otras '+otras+' jornada'+(otras>1?'s':'')+' sugerida'+(otras>1?'s':'')+' de esta operación (mismo operario)';
+    $('sch-sugtodas-c').checked=false;tod.style.display='flex';
+  }else{tod.style.display='none';$('sch-sugtodas-c').checked=false;}
+}
+const SCH_SUG_DN=[['1','Lun'],['2','Mar'],['3','Mié'],['4','Jue'],['5','Vie'],['6','Sáb'],['7','Dom']];
+function schSugCfgAbrir(){
+  var c=SCH.sugCfg||{inicio:'06:00',horas:9,dias:'12345',horizonte:21};
+  $('schsug-ini').value=c.inicio;$('schsug-horas').value=c.horas;$('schsug-horiz').value=c.horizonte;
+  $('schsug-dias').innerHTML=SCH_SUG_DN.map(function(d){
+    return '<label style="display:flex;gap:3px;align-items:center;margin:0"><input type="checkbox" value="'+d[0]+'" style="width:15px;height:15px;padding:0;margin:0"'+(String(c.dias).indexOf(d[0])>=0?' checked':'')+'>'+d[1]+'</label>';
+  }).join('');
+  $('schsug-err').style.display='none';
+  openMo('mo-schsug');
+}
+async function schSugCfgGuardar(){
+  var dias='';document.querySelectorAll('#schsug-dias input:checked').forEach(function(c){dias+=c.value;});
+  var err=$('schsug-err');err.style.display='none';
+  var r=await api('/api/scheduling/sugerencias/config',{method:'POST',body:JSON.stringify({inicio:$('schsug-ini').value,horas:$('schsug-horas').value,dias:dias,horizonte:$('schsug-horiz').value})});
+  if(!r||r.error){err.textContent=(r&&r.error)||'No se pudo guardar';err.style.display='block';return;}
+  SCH.sugCfg=r.config;closeMo('mo-schsug');toast('Turno de las sugerencias guardado');schRefrescar();
+}
+// ── Parámetros de las sugerencias (pestaña Parámetros, solo admin) ───────────
+// El texto lo traduce Groq en el servidor; acá se muestra lo que entendió y
+// recién se guarda al confirmar. El servidor vuelve a validar al guardar.
+var SCH_PAR={res:null,texto:''};
+function schParEj(el){$('schpar-txt').value=el.textContent;$('schpar-txt').focus();}
+async function schParCargar(){
+  var rows=await api('/api/scheduling/parametros');
+  var cont=$('schpar-list');
+  if(!Array.isArray(rows)){cont.innerHTML='<div class="em">'+schEsc((rows&&rows.error)||'No se pudo cargar')+'</div>';return;}
+  if(!rows.length){cont.innerHTML='<div class="em">Todavía no hay parámetros. Escribí uno arriba.</div>';return;}
+  cont.innerHTML='<table><tr><th style="width:52px">Activo</th><th>Regla</th><th>Escrito como</th><th style="width:130px">Cargado</th><th style="width:60px"></th></tr>'
+    +rows.map(function(p){
+      var hecha=p.regla&&p.regla.tipo==='tipo_maquina';
+      return '<tr class="'+(p.activo||hecha?'':'off')+'"><td>'+(hecha?'<span class="hecha" title="Ya se asignó el tipo a las máquinas; se cambia desde Máquinas">Hecho</span>':'<input type="checkbox" '+(p.activo?'checked':'')+' onchange="schParActivo('+p.id+',this.checked)">')+'</td>'
+        +'<td><b>'+schEsc(p.descripcion)+'</b>'+(p.resultado&&!hecha?'<div class="rs">'+schEsc(p.resultado)+'</div>':'')+'</td><td style="color:#666">«'+schEsc(p.texto)+'»</td>'
+        +'<td style="font-size:11.5px;color:#777">'+schEsc(fmtDH?fmtDH(p.creado):p.creado)+(p.usuario_nombre?'<br>'+schEsc(p.usuario_nombre):'')+'</td>'
+        +'<td><button class="btn" style="padding:2px 8px;font-size:11px;color:#A32D2D;border-color:#F7C1C1" onclick="schParBorrar('+p.id+')">Borrar</button></td></tr>';
+    }).join('')+'</table>';
+}
+async function schParInterpretar(){
+  var t=($('schpar-txt').value||'').trim(),res=$('schpar-res');
+  if(!t){toast('Escribí la regla','w');return;}
+  var btn=$('schpar-btn');btn.disabled=true;btn.textContent='Pensando...';
+  res.innerHTML='<div class="schpar-res"><span class="ld">La IA está leyendo la regla...</span></div>';
+  try{
+    var r=await api('/api/scheduling/parametros/interpretar',{method:'POST',body:JSON.stringify({texto:t})});
+    if(!r||r.error){res.innerHTML='<div class="schpar-res er">'+schEsc((r&&r.error)||'No se pudo interpretar')+'</div>';return;}
+    SCH_PAR={res:r,texto:t};
+    var h='<div class="schpar-res">';
+    if(r.reglas.length){
+      h+='<b>Entendí '+(r.reglas.length>1?'estas '+r.reglas.length+' reglas':'esta regla')+':</b>';
+      r.reglas.forEach(function(x){
+        h+='<div class="rg">• '+schEsc(x.descripcion)
+          +(x.accion?'<div class="ac">⚙ '+schEsc(x.accion)+'</div>':'')
+          +(x.coincidencias==null?'':'<div class="cn'+(x.coincidencias?'':' cero')+'">'+(x.coincidencias?'Hoy se aplica a '+x.coincidencias+(x.coincidencias>1?' operaciones pendientes':' operación pendiente'):'⚠ Hoy no coincide con ninguna operación pendiente: revisá cómo está escrito el nombre')+'</div>')+'</div>';
+      });
+    }
+    (r.errores||[]).forEach(function(e){h+='<div class="er">No se pudo usar: '+schEsc(e)+'</div>';});
+    if(r.duda)h+='<div class="du">'+schEsc(r.duda)+'</div>';
+    if(!r.reglas.length&&!r.duda&&!(r.errores||[]).length)h+='<div class="du">No encontré ninguna regla en el texto. Probá escribirlo de otra forma.</div>';
+    if(r.explicacion)h+='<div class="ia">La IA dice: '+schEsc(r.explicacion)+'</div>';
+    h+='<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px"><button class="btn" onclick="schParDescartar()">Descartar</button>'
+      +(r.reglas.length?'<button class="btn btn-p" onclick="schParGuardar()">'+(r.reglas.some(function(x){return x.accion;})?'Guardar y aplicar':'Guardar')+'</button>':'')+'</div></div>';
+    res.innerHTML=h;
+  }finally{btn.disabled=false;btn.textContent='Interpretar con IA';}
+}
+function schParDescartar(){SCH_PAR={res:null,texto:''};$('schpar-res').innerHTML='';}
+async function schParGuardar(){
+  if(!SCH_PAR.res||!SCH_PAR.res.reglas.length)return;
+  var acc=SCH_PAR.res.reglas.filter(function(x){return x.accion&&!/^No tiene bloques/.test(x.accion);});
+  if(acc.length&&!await confirmar('¿Guardar y aplicar? Esto hace cambios ahora\n'+acc.map(function(x){return '• '+x.accion;}).join('\n\n')))return;
+  var r=await api('/api/scheduling/parametros',{method:'POST',body:JSON.stringify({texto:SCH_PAR.texto,reglas:SCH_PAR.res.reglas.map(function(x){return x.regla;})})});
+  if(!r||r.error){toast((r&&r.error)||'No se pudo guardar','e');return;}
+  toast('Parámetro guardado: ya se aplica a las sugerencias');
+  $('schpar-txt').value='';schParDescartar();schParCargar();
+  var hr=(r.resultados||[]),rs=(r.resugeridas||[]);
+  if(hr.length||rs.length){
+    $('schpar-res').innerHTML='<div class="schpar-res"><b>Listo. Esto se hizo:</b>'
+      +hr.map(function(t){return '<div class="ok">✓ '+schEsc(t)+'</div>';}).join('')
+      +(rs.length?'<div style="margin-top:6px"><b>Dónde quedaron sugeridas las operaciones quitadas</b> (confirmalas desde el recuadro 💡 Sugerencias del Gantt):</div>'
+        +rs.map(function(t){return '<div class="rg">• '+schEsc(t)+'</div>';}).join(''):'')
+      +'<div style="display:flex;justify-content:flex-end;margin-top:8px"><button class="btn" onclick="schParDescartar()">Cerrar</button></div></div>';
+  }
+}
+async function schParActivo(id,on){
+  var r=await api('/api/scheduling/parametros/'+id,{method:'PUT',body:JSON.stringify({activo:on})});
+  if(!r||r.error){toast((r&&r.error)||'No se pudo cambiar','e');}
+  schParCargar();
+}
+async function schParBorrar(id){
+  if(!await confirmar('¿Borrar este parámetro? Las sugerencias dejan de tenerlo en cuenta.'))return;
+  var r=await api('/api/scheduling/parametros/'+id,{method:'DELETE'});
+  if(!r||r.error){toast((r&&r.error)||'No se pudo borrar','e');return;}
+  toast('Parámetro borrado');schParCargar();
 }
 async function schCargarEspera(){
   var id=$('sch-id').value;if(!id)return;
