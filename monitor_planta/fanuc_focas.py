@@ -4,7 +4,8 @@ Python puro: no necesita la librería de Fanuc (Fwlib32.dll). El protocolo sale
 de pyfanuc (github.com/diohpix/pyfanuc, dominio público), reducido a lo que usa
 el Monitor: abrir la conexión, leer datos del sistema, leer una variable de
 macro (#3901 = piezas hechas) o un parámetro (6711 = piezas hechas), listar y
-bajar los programas de la memoria del control (backup) y cerrar.
+bajar los programas de la memoria del control (backup), leer las alarmas
+activas y cerrar.
 
 Prueba rápida desde la PC:   python fanuc_focas.py 192.168.1.200
 """
@@ -18,6 +19,11 @@ CERRAR, CERRAR_OK = 0x0201, 0x0202
 # Subida de programas (control -> PC), como cnc_upstart/cnc_upload de Fwlib
 SUBIR, SUBIR_FIN, SUBIR_FIN_OK = 0x1501, 0x1701, 0x1702
 SUBIR_DATOS = 0x16   # byte alto de las tramas con texto: 0x1604 en unos controles, 0x1602 en el 0i-D
+
+
+# Grupos de alarma de Fanuc (cnc_rdalmmsg2): el prefijo que muestra la pantalla ALARM
+TIPOS_ALARMA = {0: "SW", 1: "PW", 2: "IO", 3: "PS", 4: "OT", 5: "OH", 6: "SV", 7: "SR", 8: "MC",
+                9: "SP", 10: "DS", 11: "IE", 12: "BG", 13: "SN", 15: "EX", 19: "PC"}
 
 
 class ErrorFanuc(Exception):
@@ -223,6 +229,41 @@ class Fanuc:
                 raise ErrorFanuc("El control cerró la conexión al bajar programas")
             buf += parte
 
+    # ── alarmas ──
+    def leer_alarmas(self, maximo=10):
+        """Alarmas activas del control: [{"tipo": "SP", "numero": 9001, "codigo": "SP9001",
+        "texto": "MOTOR OVERHEAT", "eje": 0}]. Lista vacía si no hay ninguna.
+        Primero pide todas juntas (tipo -1); si el control no lo acepta, lee qué
+        grupos tienen alarma (mapa de bits) y pide cada grupo."""
+        try:
+            return self._alarmas_tipo(-1, maximo)
+        except ErrorFanuc:
+            mapa = self._pedido(1, 1, 0x1A)
+            if len(mapa) < 4:
+                raise ErrorFanuc("El control no devolvió las alarmas")
+            bits, = unpack(">L", mapa[:4])
+            res = []
+            for t in range(32):
+                if bits & (1 << t):
+                    try:
+                        res += self._alarmas_tipo(t, maximo)
+                    except ErrorFanuc:
+                        res.append({"tipo": TIPOS_ALARMA.get(t, "AL"), "numero": None,
+                                    "codigo": TIPOS_ALARMA.get(t, "AL"), "texto": "", "eje": 0})
+            return res
+
+    def _alarmas_tipo(self, tipo, maximo, largo_texto=32):
+        d = self._pedido(1, 1, 0x23, tipo, maximo, 1, largo_texto)
+        res, paso = [], 16 + largo_texto
+        for pos in range(0, len(d) - 15, paso):
+            num, t, eje, n = unpack(">iiii", d[pos:pos + 16])
+            txt = d[pos + 16:pos + 16 + max(0, min(n, largo_texto))]
+            txt = txt.split(b"\0", 1)[0].decode("latin-1", "replace").strip()
+            pref = TIPOS_ALARMA.get(t, "AL")
+            res.append({"tipo": pref, "numero": num, "codigo": f"{pref}{num:04d}" if num >= 0 else pref,
+                        "texto": txt, "eje": eje})
+        return res
+
     def piezas(self):
         """Contador de piezas: #3901 y, si no se puede, el parámetro 6711."""
         try:
@@ -314,6 +355,11 @@ if __name__ == "__main__":
                 print("Parámetro 6711 (piezas hechas):", f.leer_parametro(6711))
             except ErrorFanuc as e:
                 print("Parámetro 6711:", e)
+            try:
+                al = f.leer_alarmas()
+                print("Alarmas activas:", ", ".join(f"{a['codigo']} {a['texto']}" for a in al) or "ninguna")
+            except ErrorFanuc as e:
+                print("Alarmas:", e)
             try:
                 progs = f.listar_programas()
                 print(f"Programas en memoria: {len(progs)}", ", ".join("O%04d" % n for n in sorted(progs)[:30]))

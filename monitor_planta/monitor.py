@@ -42,6 +42,9 @@ CONFIG_DEFECTO = {
     "variable_parada": 500,
     "base_parada": 9500,
     "codigos_parada": [],         # vacío: los de Trabajo no productivo de CNC de MetalERP
+    # Alarmas del control (Fanuc): cada alarma activa queda como parada.
+    "leer_alarmas": True,
+    "alarma_min_seg": 10,         # una alarma más corta se anota pero no va a MetalERP
 }
 # Códigos de parada de CNC de Trabajo no productivo (CODIGOS_PARADA_MAQUINA['CNC']
 # de MetalERP): el código es la posición, empezando en 1. El texto va igual a
@@ -52,6 +55,7 @@ CODIGOS_PARADA_CNC = ["MANTENIMIENTO", "PUESTA EN MARCHA", "ALMUERZO - CENA", "L
     "CORTE Y DESPUNTE DE BARRAS", "BAÑO", "ROTURA DE HTAS", "CAMBIO DE INSERTO EN OTRA MAQUINA",
     "EXPLICACION / REUNION", "FALTA DE PREPARACION", "MOVER PIEZAS", "FALTA DE MATERIAL",
     "ESPERAR AL ENCARGADO / PEDIR INSERTO", "REPASAR PIEZAS", "DESCARGAR MATERIAL"]
+ALARMA_SIN_CONEXION_SEG = 120     # sin poder leer el control este tiempo, las alarmas abiertas se cierran
 LECTOR_SEG = 5                    # cada cuánto se lee el contador de cada máquina
 TIPOS_LECTOR = {"fanuc": 8193, "haas": 5051}
 REINTENTO_MIN = 5
@@ -183,6 +187,11 @@ def _cerrar(e=None):
 def init_db():
     db = conectar()
     db.executescript(ESQUEMA)
+    cols = {r[1] for r in db.execute("PRAGMA table_info(paradas)")}
+    if "tipo" not in cols:      # operario (variable de macro) / alarma (alarma del control)
+        db.execute("ALTER TABLE paradas ADD COLUMN tipo TEXT DEFAULT 'operario'")
+    if "alarma" not in cols:    # código de la alarma, por ejemplo SP9001
+        db.execute("ALTER TABLE paradas ADD COLUMN alarma TEXT")
     db.commit()
     db.close()
 
@@ -472,6 +481,11 @@ def leer_lector(lec, timeout=5):
                         r["parada_valor"] = f.leer_macro(var)
                     except fanuc_focas.ErrorFanuc as e:
                         r["parada_error"] = f"No se pudo leer #{var}: {e}"
+                if cfg().get("leer_alarmas", True):
+                    try:
+                        r["alarmas"] = f.leer_alarmas()
+                    except fanuc_focas.ErrorFanuc as e:
+                        r["alarma_error"] = f"No se pudieron leer las alarmas: {e}"
                 return r
         except fanuc_focas.ErrorFanuc as e:
             raise RuntimeError(str(e))
@@ -490,6 +504,7 @@ def _leer_y_registrar(lec):
         r = leer_lector(lec)
     except Exception as e:
         est.update(error=str(e), intento=ahora())
+        _alarmas_sin_conexion(maq, est)
         return
     hora = ahora()
     est.update(contador=r["contador"], origen=r.get("origen"), leido=hora, error=None, intento=hora,
@@ -508,9 +523,17 @@ def _leer_y_registrar(lec):
             est["parada_error"] = r.get("parada_error")
             if "parada_valor" in r:
                 procesar_parada(db, maq, r["parada_valor"], n or 0, hora)
-            ab = db.execute("SELECT codigo, motivo, inicio FROM paradas WHERE maquina=? AND fin IS NULL", (maq,)).fetchone()
+            ab = db.execute("""SELECT codigo, motivo, inicio FROM paradas WHERE maquina=? AND fin IS NULL
+                AND COALESCE(tipo,'operario')='operario'""", (maq,)).fetchone()
             est["parada"] = dict(ab) if ab else None
             est["parada_valor"] = r.get("parada_valor")
+        est["alarma_error"] = r.get("alarma_error")
+        if "alarmas" in r:
+            procesar_alarmas(db, maq, r["alarmas"], hora)
+            est["alarmas"] = r["alarmas"]
+            est["alarma_ok"] = hora
+        elif not r.get("alarma_error"):
+            est["alarmas"] = None
     finally:
         db.close()
 
@@ -556,7 +579,8 @@ def procesar_parada(db, maq, valor, piezas_nuevas, hora):
         return
     r = db.execute("SELECT valor FROM parada_variable WHERE maquina=?", (maq,)).fetchone()
     anterior = r["valor"] if r else 0
-    abierta = db.execute("SELECT * FROM paradas WHERE maquina=? AND fin IS NULL ORDER BY id DESC", (maq,)).fetchone()
+    abierta = db.execute("""SELECT * FROM paradas WHERE maquina=? AND fin IS NULL
+        AND COALESCE(tipo,'operario')='operario' ORDER BY id DESC""", (maq,)).fetchone()
     codigo, motivo = codigo_de_valor(v)
     if v != anterior:
         if abierta:
@@ -568,6 +592,59 @@ def procesar_parada(db, maq, valor, piezas_nuevas, hora):
     elif abierta and piezas_nuevas > 0:
         _cerrar_parada(db, abierta, hora, "piezas")
     db.commit()
+
+
+# ── Alarmas del control (sobrecalentamiento, servo, husillo, etc.) ──────────
+def _motivo_alarma(a):
+    return ("ALARMA " + a["codigo"] + (" " + a["texto"] if a.get("texto") else ""))[:120]
+
+
+def _cerrar_alarma(db, fila, hora, por):
+    ini = datetime.strptime(fila["inicio"], "%Y-%m-%d %H:%M:%S")
+    fin = datetime.strptime(hora, "%Y-%m-%d %H:%M:%S")
+    dur = max(0.0, (fin - ini).total_seconds())
+    corta = dur < float(cfg().get("alarma_min_seg") or 0)
+    db.execute("""UPDATE paradas SET fin=?, duracion_seg=?, cerrada_por=?, estado=? WHERE id=?""",
+               (hora, dur, por, "Corta" if corta else "Por enviar", fila["id"]))
+
+
+def procesar_alarmas(db, maq, alarmas, hora):
+    """Cada alarma activa del control es una parada abierta; se cierra cuando
+    la alarma desaparece de la pantalla ALARM del torno."""
+    activas = {}
+    for a in alarmas or []:
+        activas.setdefault(a["codigo"], a)
+    abiertas = db.execute("""SELECT * FROM paradas WHERE maquina=? AND fin IS NULL AND tipo='alarma'""",
+                          (maq,)).fetchall()
+    ya = set()
+    for f in abiertas:
+        if f["alarma"] in activas and f["alarma"] not in ya:
+            ya.add(f["alarma"])
+        else:
+            _cerrar_alarma(db, f, hora, "alarma")
+    for cod, a in activas.items():
+        if cod not in ya:
+            db.execute("""INSERT INTO paradas (uuid, maquina, codigo, motivo, valor, inicio, tipo, alarma)
+                VALUES (?,?,NULL,?,NULL,?,'alarma',?)""", (str(uuid.uuid4()), maq, _motivo_alarma(a), hora, cod))
+    db.commit()
+
+
+def _alarmas_sin_conexion(maq, est):
+    """Torno apagado o desconectado: las alarmas abiertas se cierran a la hora
+    de la última lectura buena, para que no sigan corriendo toda la noche."""
+    ult = est.get("alarma_ok")
+    if not ult or (datetime.now() - datetime.strptime(ult, "%Y-%m-%d %H:%M:%S")).total_seconds() < ALARMA_SIN_CONEXION_SEG:
+        return
+    db = conectar()
+    try:
+        filas = db.execute("SELECT * FROM paradas WHERE maquina=? AND fin IS NULL AND tipo='alarma'", (maq,)).fetchall()
+        for f in filas:
+            _cerrar_alarma(db, f, max(ult, f["inicio"]), "sin_conexion")
+        db.commit()
+        est["alarmas"] = None
+        est["alarma_ok"] = None
+    finally:
+        db.close()
 
 
 def hilo_lectores():
@@ -1125,7 +1202,8 @@ def api_paradas():
     filas = get_db().execute("SELECT * FROM paradas ORDER BY id DESC LIMIT 300").fetchall()
     c = cfg()
     return jsonify({"paradas": [dict(r) for r in filas], "variable": c.get("variable_parada"),
-                    "base": c.get("base_parada"), "codigos": codigos_parada()})
+                    "base": c.get("base_parada"), "codigos": codigos_parada(),
+                    "leer_alarmas": c.get("leer_alarmas", True), "alarma_min_seg": c.get("alarma_min_seg")})
 
 
 @app.route("/api/paquetes")
@@ -1175,7 +1253,9 @@ def api_config():
         nuevo["metalerp_url"] = u
     if d.get("api_key"):
         nuevo["api_key"] = str(d["api_key"]).strip()
-    for k, lo, hi in (("intervalo_min", 1, 1440), ("parada_seg", 30, 7200)):
+    if "leer_alarmas" in d:
+        nuevo["leer_alarmas"] = bool(d["leer_alarmas"])
+    for k, lo, hi in (("intervalo_min", 1, 1440), ("parada_seg", 30, 7200), ("alarma_min_seg", 0, 3600)):
         if k in d:
             try:
                 nuevo[k] = max(lo, min(hi, int(d[k])))

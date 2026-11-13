@@ -174,6 +174,12 @@ setTimeout(function(){var s=document.getElementById("splash");if(!s)return;s.cla
 
   <section id="v-paradas" hidden>
     <div class="help" style="max-width:82ch;margin:14px 0 10px" id="pa-ayuda"></div>
+    <div class="help" style="max-width:82ch;margin:0 0 10px" id="pa-ayuda-al"></div>
+    <div id="pa-cfg" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:0 0 12px" hidden>
+      <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="pa-al-on"> Leer alarmas de las máquinas</label>
+      <label style="display:flex;gap:6px;align-items:center">No mandar a MetalERP alarmas de menos de <input id="pa-al-min" type="number" min="0" max="3600" style="width:80px"> s</label>
+      <button class="btn" onclick="paGuardarAl()">Guardar</button>
+    </div>
     <div class="tbl"><table><thead><tr><th>Máquina</th><th>Código</th><th>Motivo</th><th>Desde</th><th>Hasta</th><th style="text-align:right">Duración</th><th>Cerró</th><th>MetalERP</th></tr></thead><tbody id="tb-pa"></tbody></table></div>
     <details style="margin-top:16px"><summary class="help" style="cursor:pointer">Ver la lista de códigos</summary><div id="pa-cods" class="help" style="columns:2;max-width:760px;margin-top:8px"></div></details>
   </section>
@@ -259,19 +265,21 @@ function renderConn(){
   else if(ok===false) av='<div class="aviso bad">'+esc(E.metalerp_error||'MetalERP no responde')+'. La app sigue guardando las piezas y las manda cuando vuelva la conexión.</div>';
   $('aviso').innerHTML=av;
 }
+function alarmasDe(m){const l=(E.lectores||[]).find(x=>String(x.maquina).toUpperCase()===String(m.codigo).toUpperCase()&&x.activo!==false);return (l&&l.estado&&l.estado.alarmas)||[];}
 function paradaDe(m){const l=(E.lectores||[]).find(x=>String(x.maquina).toUpperCase()===String(m.codigo).toUpperCase()&&x.activo!==false);return l&&l.estado&&l.estado.parada;}
 function estadoMaq(m){
-  const s=m.local||{}, seg=segDesde(s.ultima), lim=(E.config.parada_seg||180), pa=paradaDe(m);
+  const s=m.local||{}, seg=segDesde(s.ultima), lim=(E.config.parada_seg||180), pa=paradaDe(m), al=alarmasDe(m);
+  if(al.length) return ['sin','Alarma '+al[0].codigo];
   if(pa) return ['par','Parada P-'+pa.codigo];
   if(seg!=null&&seg<=lim) return ['prod','Produciendo'];
   if(m.operacion) return seg==null?['idle','Sin piezas hoy']:['par','Parada'];
   return ['idle','Sin trabajo'];
 }
 function renderGrid(){
-  const ms=(E.maquinas||[]).filter(m=>m.operacion||(m.local&&(m.local.hoy||m.local.sin_paquete))||m.desconocida);
+  const ms=(E.maquinas||[]).filter(m=>m.operacion||(m.local&&(m.local.hoy||m.local.sin_paquete))||m.desconocida||alarmasDe(m).length);
   const hoy=(E.maquinas||[]).reduce((a,m)=>a+((m.local&&m.local.hoy)||0),0);
-  const prod=ms.filter(m=>estadoMaq(m)[0]==='prod').length, par=ms.filter(m=>estadoMaq(m)[0]==='par').length;
-  $('resumen').innerHTML='<span><b>'+prod+'</b> produciendo</span><span><b>'+par+'</b> paradas</span><span><b>'+fN(hoy)+'</b> piezas hoy</span><span>Último envío <b>'+hm(E.ultimo_envio)+'</b></span>'
+  const prod=ms.filter(m=>estadoMaq(m)[0]==='prod').length, par=ms.filter(m=>estadoMaq(m)[0]==='par').length, nal=ms.filter(m=>alarmasDe(m).length).length;
+  $('resumen').innerHTML='<span><b>'+prod+'</b> produciendo</span><span><b>'+par+'</b> paradas</span>'+(nal?'<span style="color:var(--bad)"><b>'+nal+'</b> con alarma</span>':'')+'<span><b>'+fN(hoy)+'</b> piezas hoy</span><span>Último envío <b>'+hm(E.ultimo_envio)+'</b></span>'
     +'<button class="btn" id="b-enviar" onclick="enviarAhora()"'+(E.enviando?' disabled':'')+'>'+(E.enviando?'Enviando...':'Enviar ahora')+'</button>';
   if(!ms.length){$('grid').innerHTML='<div class="empty">'+(E.tiene_clave?'Ninguna máquina tiene un bloque ahora en el Scheduling de MetalERP ni mandó piezas hoy. Planificalas en MetalERP → Scheduling de producción.':'Conectá la app con MetalERP en Configuración.')+'</div>';return;}
   const pal=($('buscar').value||'').toLowerCase().split(/\s+/).filter(Boolean);
@@ -289,6 +297,8 @@ function renderGrid(){
     const lec=(E.lectores||[]).find(l=>String(l.maquina).toUpperCase()===String(m.codigo).toUpperCase()&&l.activo!==false);
     if(lec&&lec.estado&&lec.estado.error) extra+='<div class="warnline">Lector: '+esc(lec.estado.error)+'</div>';
     else if(lec&&lec.estado&&lec.estado.leido) extra+='<div class="help" style="font-size:12px">Lector '+esc(lec.tipo)+': contador '+fN(lec.estado.contador)+' a las '+hm(lec.estado.leido)+'</div>';
+    if(lec&&lec.estado&&(lec.estado.alarmas||[]).length) extra+=lec.estado.alarmas.map(a=>'<div class="warnline"><b>ALARMA '+esc(a.codigo)+'</b> '+esc(a.texto||'')+'</div>').join('');
+    else if(lec&&lec.estado&&lec.estado.alarma_error) extra+='<div class="help" style="font-size:12px">'+esc(lec.estado.alarma_error)+'</div>';
     if(lec&&lec.estado&&lec.estado.parada) extra+='<div class="warnline"><b>Parada P-'+esc(lec.estado.parada.codigo)+' '+esc(lec.estado.parada.motivo)+'</b> desde las '+hm(lec.estado.parada.inicio)+'</div>';
     else if(lec&&lec.estado&&lec.estado.parada_error) extra+='<div class="help" style="font-size:12px">'+esc(lec.estado.parada_error)+'</div>';
     else if(lec&&lec.estado&&lec.estado.parada_valor&&!lec.estado.parada) extra+='<div class="help" style="font-size:12px">La variable de parada tiene '+esc(lec.estado.parada_valor)+', que no es un código válido</div>';
@@ -378,13 +388,19 @@ async function cargarParadas(){
   const r=await api('/api/paradas'); if(r.error){toast(r.error);return;}
   const b=r.base||0;
   $('pa-ayuda').innerHTML='El operario, al parar, carga en la variable <b>#'+esc(r.variable)+'</b> el número '+esc(b)+' + código (por ejemplo baño = <b>'+(b+16)+'</b>) y al volver la pone en <b>0</b>. El Monitor la lee junto con el contador. Si la máquina vuelve a sacar piezas con la parada abierta, la parada se cierra sola. Las paradas terminadas viajan a MetalERP con el paquete y quedan como Trabajo no productivo del operario de la máquina.';
+  $('pa-ayuda-al').innerHTML=r.leer_alarmas?'<b>Alarmas de la máquina:</b> el Monitor también lee las alarmas activas del control (por ejemplo sobrecalentamiento de husillo o servo, sobrecarrera, alarmas del fabricante). Cada alarma queda como parada desde que aparece hasta que se borra de la pantalla ALARM, y viaja a MetalERP como Trabajo no productivo "ALARMA código texto". Las de menos de '+esc(r.alarma_min_seg||0)+' s se anotan acá pero no se mandan. Si el torno se apaga o se desconecta con una alarma, se cierra a la hora de la última lectura.':'<b>Alarmas de la máquina:</b> la lectura de alarmas está apagada.';
+  $('pa-cfg').hidden=!(E&&E.es_local); if(!paCfgTocado){$('pa-al-on').checked=!!r.leer_alarmas; $('pa-al-min').value=r.alarma_min_seg??10;}
   $('pa-cods').innerHTML=(r.codigos||[]).map((c,i)=>'<div><b>'+(b+i+1)+'</b> · P-'+(i+1)+' '+esc(c)+'</div>').join('');
-  const cerro={operario:'Operario (0)',cambio:'Otro código',piezas:'Volvió a producir'};
+  const cerro={operario:'Operario (0)',cambio:'Otro código',piezas:'Volvió a producir',alarma:'Se borró la alarma',sin_conexion:'Sin conexión'};
   $('tb-pa').innerHTML=(r.paradas||[]).length?r.paradas.map(p=>{const ab=!p.fin; const dur=ab?segDesde(p.inicio):p.duracion_seg;
-    const est=ab?'<span style="color:var(--warn)">En curso</span>':(p.estado==='Enviada'?'<span style="color:var(--ok)">Enviada</span>':(p.estado==='Por enviar'?'Por enviar':'<span style="color:var(--bad)" title="'+esc(p.error||'')+'">'+esc(p.estado)+'</span>'));
-    return '<tr><td><b>'+esc(p.maquina)+'</b></td><td>P-'+esc(p.codigo)+'</td><td>'+esc(p.motivo)+'</td><td>'+esc(p.inicio)+'</td><td>'+(p.fin?esc(p.fin.slice(11)):'—')+'</td><td style="text-align:right">'+durTxt(dur)+'</td><td>'+esc(cerro[p.cerrada_por]||'')+'</td><td>'+est+(p.error&&p.estado!=='Enviada'?'<br><span class="help" style="white-space:normal">'+esc(p.error)+'</span>':'')+'</td></tr>';}).join('')
+    const est=ab?'<span style="color:var(--warn)">En curso</span>':(p.estado==='Enviada'?'<span style="color:var(--ok)">Enviada</span>':(p.estado==='Por enviar'?'Por enviar':p.estado==='Corta'?'<span style="color:var(--muted)" title="Duró menos que el mínimo: no se manda">Corta, no se manda</span>':'<span style="color:var(--bad)" title="'+esc(p.error||'')+'">'+esc(p.estado)+'</span>'));
+    return '<tr><td><b>'+esc(p.maquina)+'</b></td><td>'+(p.tipo==='alarma'?'<b style="color:var(--bad)">'+esc(p.alarma)+'</b>':'P-'+esc(p.codigo))+'</td><td>'+esc(p.motivo)+'</td><td>'+esc(p.inicio)+'</td><td>'+(p.fin?esc(p.fin.slice(11)):'—')+'</td><td style="text-align:right">'+durTxt(dur)+'</td><td>'+esc(cerro[p.cerrada_por]||'')+'</td><td>'+est+(p.error&&p.estado!=='Enviada'?'<br><span class="help" style="white-space:normal">'+esc(p.error)+'</span>':'')+'</td></tr>';}).join('')
     :'<tr><td colspan="8" class="empty">Todavía no hay paradas cargadas desde las máquinas.</td></tr>';
 }
+let paCfgTocado=false;
+document.addEventListener('input',e=>{if(e.target&&(e.target.id==='pa-al-on'||e.target.id==='pa-al-min'))paCfgTocado=true;});
+async function paGuardarAl(){const r=await api('/api/config',{method:'PUT',body:JSON.stringify({leer_alarmas:$('pa-al-on').checked,alarma_min_seg:$('pa-al-min').value})});
+  if(r.error)toast(r.error);else{paCfgTocado=false;toast('Guardado');cargarParadas();}}
 // ── Enviar programa (carpeta FTP) ──
 let EN=null, EN_TXT='', EN_NOM='';
 async function cargarEnvio(){
