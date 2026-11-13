@@ -1,0 +1,30 @@
+    <div class="page" id="p-tablets_planta">
+      <div class="vhead">
+        <div class="vhead-card">
+          <div class="vhead-row vhead-top">
+            <div class="vhead-tit">
+              <div class="pt" title="Tablets de máquina: alta, enlaces y bandeja de lo que cargan los operarios">Tablets de planta</div>
+              <span class="vh-badge" id="tab-resumen" title="Bandeja">–</span>
+            </div>
+            <div class="tabs vh-tabs" id="tab-tabs"><div class="tab active" data-t="tablets">Tablets</div><div class="tab" data-t="bandeja">Bandeja</div></div>
+            <div class="vh-acciones">
+              <button class="btn" onclick="loadTabletsPlanta()" title="Volver a leer"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.6 8A5.6 5.6 0 1 1 11.9 4"/><path d="M12.4 1.6V4.4H9.6"/></svg>Actualizar</button>
+              <button class="btn" onclick="window.open('/tablero-planta','tablero_planta')" title="Todas las máquinas en vivo: quién está, qué OT, produciendo o en pausa y por qué. Se puede dejar abierto en un televisor."><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="8.5" rx="1.2"/><path d="M5.5 14h5M8 11v3"/></svg>Tablero en vivo</button>
+              <button class="btn btn-p" id="tab-b-nueva" onclick="tabAbrir(null)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M8 3.3v9.4M3.3 8h9.4"/></svg>Nueva tablet</button>
+            </div>
+          </div>
+          <div class="vhead-row vhead-fil" id="tab-fil-bandeja" style="display:none">
+            <select id="tab-fil-estado" class="sel-fil" onchange="loadBandejaPlanta()">
+              <option value="">Todos los estados</option><option value="Error">Con error</option><option value="Esperando lote">Esperando lote</option><option value="Pendiente">Pendientes</option>
+              <option value="Procesado">Procesados</option><option value="Descartado">Descartados</option>
+            </select>
+            <select id="tab-fil-tablet" class="sel-fil" onchange="loadBandejaPlanta()"><option value="">Todas las tablets</option></select>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div id="tab-list"><div class="ld">Cargando...</div></div>
+      </div>
+    </div>
+
+    <!-- RRHH -->

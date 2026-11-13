@@ -1,0 +1,139 @@
+=====================================================================
+  CONECTAR EL TORNO FANUC AL MONITOR - QUE HACER EN CADA CASO
+=====================================================================
+
+Datos de la conexion (cable directo PC -> torno):
+  PC (Ethernet) ......... 192.168.10.5    mascara 255.255.255.0
+  Torno (EMBEDDED) ...... 192.168.10.200  mascara 255.255.255.0
+                          router 0.0.0.0  FOCAS2 TCP 8193
+
+Todos los comandos van en cmd abierto COMO ADMINISTRADOR:
+  Inicio -> escribir cmd -> clic derecho -> Ejecutar como administrador.
+
+Atajo: hacer doble clic en DIAGNOSTICO_TORNO.bat (en esta misma carpeta)
+hace todas las pruebas solo y dice en que caso estas.
+
+Revisar en orden. Parar en el primer caso que coincida.
+
+
+---------------------------------------------------------------------
+PRUEBA 1 - Ver el cable y la IP de la PC
+---------------------------------------------------------------------
+  ipconfig
+
+Mirar el bloque "Adaptador de Ethernet Ethernet".
+
+
+CASO A - Dice "medios desconectados"
+  Que pasa: la PC no ve el cable.
+  Que hacer:
+    1. Con el torno PRENDIDO DEL TODO, revisar que el cable este en el
+       conector de red de ATRAS de la pantalla del torno (CD38A), no en
+       el del frente.
+    2. Mirar que se prenda la lucecita del conector en la PC y en el torno.
+    3. Probar con otro cable.
+    4. Reiniciar el puerto de red de la PC:
+         netsh interface set interface name="Ethernet" admin=disabled
+         netsh interface set interface name="Ethernet" admin=enabled
+    5. Si sigue igual: poner un switch en el medio (PC -> switch -> torno).
+  Despues volver a la PRUEBA 1.
+
+
+CASO B - Dice una IP que empieza con 169.254
+  Que pasa: la PC perdio la IP fija.
+  Que hacer:
+    netsh interface ipv4 set address name="Ethernet" static 192.168.10.5 255.255.255.0
+  Despues volver a la PRUEBA 1: tiene que decir 192.168.10.5.
+
+
+Si dice "Direccion IPv4: 192.168.10.5" -> seguir con la PRUEBA 2.
+
+
+---------------------------------------------------------------------
+PRUEBA 2 - Ver si el torno contesta
+---------------------------------------------------------------------
+  ping 192.168.10.200
+
+
+CASO C - Dice "Host de destino inaccesible"
+  Que pasa: el torno no tiene IP en el puerto de red de atras.
+  Que hacer en el torno (modo MDI):
+    1. SYSTEM -> [>] hasta [EMBED PORT] (o [ETHERNET]) -> [COMMON].
+    2. Arriba TIENE que decir  COMMON:SETTING [EMBEDDED].
+       Si dice [PCMCIA]: tecla [EMBED] o [CHG DEV] para cambiarlo.
+       En EMBEDDED el MAC ADDRESS muestra numeros.
+    3. Cargar (escribir el valor + INPUT):
+         IP ADDRESS ........ 192.168.10.200
+         SUBNET MASK ....... 255.255.255.0
+         ROUTER IP ADDRESS . 0.0.0.0
+    4. Si hay pagina 2/2 en COMMON: DHCP desactivado.
+    5. Apagar el torno con el interruptor general, esperar 10 s, prender.
+  Si ya estaba todo asi: es el cable/conector (CASO A) o el enlace
+  directo no anda -> probar con un switch en el medio.
+
+
+CASO D - Dice "Tiempo de espera agotado"
+  Ver si el torno aparece en la red:
+    arp -a -N 192.168.10.5
+  - Si aparece una linea con 192.168.10.200 -> el torno esta en la red:
+    seguir con la PRUEBA 3.
+  - Si NO aparece -> hacer lo mismo que en el CASO C.
+
+
+Si el ping responde ("Respuesta desde 192.168.10.200: bytes=32 ...")
+-> seguir con la PRUEBA 3.
+
+
+---------------------------------------------------------------------
+PRUEBA 3 - Ver si el puerto FOCAS del torno esta abierto
+---------------------------------------------------------------------
+  powershell -Command "Test-NetConnection 192.168.10.200 -Port 8193"
+
+Mirar la ultima linea: TcpTestSucceeded : True / False
+
+
+CASO E - TcpTestSucceeded : False
+  Que pasa: el torno esta en la red pero no abre la comunicacion FOCAS.
+  Que hacer en el torno:
+    1. SYSTEM -> [EMBED PORT] -> con EMBEDDED elegido -> [FOCAS2].
+    2. Cargar:
+         TCP PORT NUMBER ... 8193
+         UDP PORT NUMBER ... 0
+         TIME INTERVAL ..... 0
+    3. Apagar y prender el torno.
+  Despues repetir la PRUEBA 3.
+
+
+CASO F - TcpTestSucceeded : True, pero el Monitor dice que no conecta
+  La red esta bien. En el Monitor, pestana Lectores, revisar:
+    IP 192.168.10.200, puerto 8193, control Fanuc (FOCAS).
+  Tocar Probar. Si da error, mandar a Claude el mensaje EXACTO que sale
+  (aca si puede ser el programa).
+
+
+---------------------------------------------------------------------
+PRUEBA 4 - En el Monitor
+---------------------------------------------------------------------
+  Pestana Lectores -> + Agregar maquina:
+    Maquina T1 (a T6 segun el torno) - Fanuc (FOCAS) -
+    IP 192.168.10.200 - Puerto 8193 - Pzs/ciclo 1
+  Probar -> tiene que decir "Conecta. Contador de piezas: N"
+            (el mismo numero que PARTS COUNT en el torno).
+  Guardar lectores.
+
+
+CASO G - "Conecta" pero no entran piezas
+  - Que este tildado "Activo".
+  - Que PARTS COUNT suba en el torno al terminar cada pieza
+    (OFFSET SETTING -> [SETTING]).
+  - La primera lectura solo toma el numero de partida.
+  - En MetalERP -> Maquinas en planta: la maquina tiene que tener
+    operacion Y operario asignados (si no, las piezas quedan esperando).
+
+
+---------------------------------------------------------------------
+AL TERMINAR LAS PRUEBAS (opcional)
+---------------------------------------------------------------------
+Para que el Ethernet de la PC vuelva a ser automatico:
+  netsh interface ipv4 set address name="Ethernet" dhcp
+(No hacerlo mientras el torno este conectado directo a la PC.)

@@ -1,0 +1,29 @@
+<!-- TRAZABILIDAD DE LOTE -->
+<div class="ov" id="mo-lote-traz"><div class="mo" style="width:720px">
+  <div class="mh" id="lote-traz-title">Trazabilidad del lote <span class="mx" onclick="closeMo('mo-lote-traz')">×</span></div>
+  <div id="lote-traz-info" style="background:var(--color-background-secondary);border-radius:8px;padding:10px 14px;font-size:12px;margin-bottom:12px"></div>
+  <div class="tabs" id="lote-traz-tabs" style="margin-bottom:12px">
+    <div class="tab active" data-lt="movs">Movimientos</div>
+    <div class="tab" data-lt="ots">OTs vinculadas</div>
+    <div class="tab" data-lt="origen">Origen</div>
+    <div class="tab" data-lt="destinos">Destino (clientes)</div>
+  </div>
+  <div id="lote-traz-movs"></div>
+  <div id="lote-traz-ots" style="display:none"></div>
+  <div id="lote-traz-origen" style="display:none"></div>
+  <div id="lote-traz-destinos" style="display:none"></div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-lote-traz')">Cerrar</button></div>
+</div></div>
+
+
+<!-- LIBERACIÓN / EDICIÓN DE LOTE -->
+<!-- CORREGIR RENDIMIENTO DE NOVEDADES -->
+<div class="ov" id="mo-novot-corr"><div class="mo" style="width:600px;max-width:95%">
+  <div class="mh">Corregir rendimiento de novedades <span class="mx" onclick="closeMo('mo-novot-corr')">×</span></div>
+  <div style="padding:16px" id="novot-corr-body"><div class="ld">Analizando...</div></div>
+  <div class="ma">
+    <button class="btn" onclick="closeMo('mo-novot-corr')">Cancelar</button>
+    <button class="btn btn-p" id="novot-corr-confirm-btn" style="display:none" onclick="confirmarCorregirNovedades()">Confirmar corrección</button>
+  </div>
+</div></div>
+

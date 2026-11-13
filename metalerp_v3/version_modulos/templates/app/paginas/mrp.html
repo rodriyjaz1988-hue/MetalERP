@@ -1,0 +1,24 @@
+    <div class="page" id="p-mrp">
+      <div class="vhead">
+        <div class="vhead-card">
+          <div class="vhead-row vhead-top">
+            <div class="vhead-tit">
+              <div class="pt" title="Requerimiento de materiales basado en órdenes activas">Planificación MRP</div>
+            </div>
+            <div class="vh-acciones">
+              <button class="btn" onclick="loadMRP()" title="Volver a calcular">↻ Actualizar</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="ch"><span class="ct">Pedidos de clientes pendientes de procesar</span><button class="btn btn-p" onclick="consolidarTodo()">Consolidar y generar OTs →</button></div>
+        <div id="mrp-oc-pend"><div class="ld">Cargando...</div></div>
+        <div class="ch" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--color-border-primary)"><span class="ct">Consolidar pronóstico de venta</span></div>
+        <div id="mrp-pron-pend"><div class="ld">Cargando...</div></div>
+      </div>
+      <div class="card"><div class="ch"><span class="ct">Materiales críticos / faltantes</span></div><div id="mrp-mat"><div class="ld">Cargando...</div></div></div>
+      <div class="card"><div class="ch"><span class="ct">Órdenes activas</span></div><div id="mrp-ot"><div class="ld">Cargando...</div></div></div>
+      <div class="card"><div class="ch"><span class="ct">Carga de trabajo por sector</span></div><div id="mrp-carga-sector"><div class="ld">Cargando...</div></div></div>
+    </div>
+

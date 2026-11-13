@@ -1,0 +1,148 @@
+<!-- NOVEDAD PRODUCCIÓN -->
+<div class="ov" id="mo-nov"><div class="mo">
+  <div class="mh"><span>Declarar novedad de producción<span id="nov-op-title" style="font-weight:400;color:var(--color-text-secondary)"></span></span> <span class="mx" onclick="closeMo('mo-nov')">×</span></div>
+  <input type="hidden" id="nov-oid">
+  <div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:12px" id="nov-op-name"></div>
+  <div class="fg2">
+    <div class="fg" id="nov-op-wrap"><label>Operación <span class="req">*</span></label><select id="nov-op"></select></div>
+    <div class="fg" style="position:relative">
+      <label>Empleado</label>
+      <input type="text" id="nov-emp-search" placeholder="Buscar por nombre o apellido... (vacío = sin asignar)" autocomplete="off"
+        oninput="filtrarNovEmpleados()" onfocus="filtrarNovEmpleados()"
+        onblur="setTimeout(function(){var c=$('nov-emp-results');if(c)c.style.display='none';},150)">
+      <input type="hidden" id="nov-emp">
+      <div id="nov-emp-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:7px;margin-top:3px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.14);z-index:10"></div>
+    </div>
+    <div class="fg"><label>Fecha</label><input type="date" id="nov-fecha"></div>
+    <div class="fg"><label>Cantidad producida (OK) <span class="req">*</span></label><input type="number" id="nov-qty" placeholder="0" min="0" step="1" oninput="autoNovCajones();novCajSuma()"></div>
+    <div class="fg"><label>Piezas observadas / no OK</label><input type="number" id="nov-obs-qty" placeholder="0" min="0" step="1"></div>
+    <div class="fg s2" id="nov-caj-wrap" style="display:none">
+      <label>Nro de cajón</label>
+      <div id="nov-caj-body"></div>
+    </div>
+    <div class="fg"><label>Tiempo real (horas) <span class="req">*</span></label><input type="number" id="nov-tmin" placeholder="0" min="0.01" step="0.01"></div>
+    <input type="hidden" id="nov-tperd" value="">
+    <div class="fg" style="position:relative">
+      <label>Máquina</label>
+      <input type="text" id="nov-maq-search" placeholder="Buscar por código o nombre... (vacío = sin asignar)" autocomplete="off"
+        oninput="filtrarNovMaquinas()" onfocus="filtrarNovMaquinas()"
+        onblur="setTimeout(function(){var c=$('nov-maq-results');if(c)c.style.display='none';},150)">
+      <input type="hidden" id="nov-maq">
+      <div id="nov-maq-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:7px;margin-top:3px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.14);z-index:10"></div>
+    </div>
+    <div class="fg"><label>Turno</label><select id="nov-tur"><option value="">—</option><option>Mañana</option><option>Tarde</option><option>Noche</option></select></div>
+    <div class="fg s2" id="nov-lotes-wrap" style="display:none">
+      <label>Lotes vinculados</label>
+      <div id="nov-lotes-list" style="display:flex;flex-direction:column;gap:6px"></div>
+    </div>
+    <div class="fg s2"><label>Observaciones</label><textarea id="nov-obs" style="min-height:45px" placeholder="Incidencias, paros, material defectuoso..."></textarea></div>
+  </div>
+  <div style="background:var(--color-background-secondary);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--color-text-secondary);margin-top:8px">
+    Al confirmar: se registra la producción declarada. El inventario de materiales se descuenta cuando la OT pasa a "Completada". Si es la última operación, se generará stock del producto terminado al completar.
+  </div>
+  <div id="nov-cic-warn" style="display:none;background:#fdecea;border:1px solid #f5c2c0;border-radius:8px;padding:10px 14px;font-size:12px;color:#c0392b;font-weight:600;margin-top:8px">
+    ⚠ Atención: La operación que quiere realizar no tiene tiempo de ciclo cargado, por lo que el rendimiento no se calculará correctamente.
+  </div>
+  <div class="ma"><button class="btn" id="nov-del-btn" style="display:none;background:#e74c3c;color:#fff;margin-right:auto" onclick="deleteNovFromModal()">🗑 Eliminar novedad</button><button class="btn" onclick="closeMo('mo-nov')">Cancelar</button><button class="btn btn-p" onclick="saveNov()">Confirmar novedad</button></div>
+</div></div>
+
+<!-- TRABAJO NO PRODUCTIVO -->
+<div class="ov" id="mo-tnp"><div class="mo" style="width:420px">
+  <div class="mh"><span id="tnp-title">Trabajo no productivo</span> <span class="mx" onclick="closeTNP()">×</span></div>
+  <input type="hidden" id="tnp-id">
+  <div class="fg" style="margin-bottom:14px">
+    <label>Máquina</label>
+    <select id="tnp-maquina" onchange="onTNPMaquinaChange()">
+      <option value="">-- Selecciona Maquina --</option>
+    </select>
+  </div>
+  <div class="fg" style="margin-bottom:14px">
+    <label>Descripción/Código de parada <span class="req">*</span></label>
+    <input id="tnp-desc" placeholder="Ej: 20 o Limpieza" onblur="resolveTNPCodigo()">
+  </div>
+  <div class="fg" style="margin-bottom:14px">
+    <label>Fecha <span class="req">*</span></label>
+    <input type="date" id="tnp-fecha">
+  </div>
+  <div class="fg" style="margin-bottom:14px">
+    <label>Tiempo trabajado (horas) <span class="req">*</span></label>
+    <input type="number" id="tnp-tmin" placeholder="0" min="0.01" step="0.01">
+  </div>
+  <div class="fg" style="margin-bottom:14px;position:relative">
+    <label>Empleado</label>
+    <input type="text" id="tnp-emp-search" placeholder="Buscar por nombre o apellido... (vacío = sin asignar)" autocomplete="off"
+      oninput="filtrarTNPEmpleados()" onfocus="filtrarTNPEmpleados()"
+      onblur="setTimeout(function(){var c=$('tnp-emp-results');if(c)c.style.display='none';},150)">
+    <input type="hidden" id="tnp-emp">
+    <div id="tnp-emp-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:7px;margin-top:3px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.14);z-index:10"></div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeTNP()">Cancelar</button><button class="btn btn-p" onclick="saveTNP()">Confirmar</button></div>
+</div></div>
+
+<!-- LISTADO DE TRABAJO NO PRODUCTIVO -->
+<div class="ov" id="mo-tnp-list"><div class="mo" style="max-width:900px;width:95%">
+  <div class="mh">Trabajo no productivo <span class="mx" onclick="closeMo('mo-tnp-list')">×</span></div>
+  <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px">
+    <div class="fg" style="position:relative;min-width:220px;flex:1">
+      <label>Empleado</label>
+      <input type="text" id="tnpl-emp-search" placeholder="Buscar por nombre o apellido... (vacío = todos)" autocomplete="off"
+        oninput="filtrarTNPListEmpleados()" onfocus="filtrarTNPListEmpleados()"
+        onblur="setTimeout(function(){var c=$('tnpl-emp-results');if(c)c.style.display='none';},150)">
+      <input type="hidden" id="tnpl-emp-fil">
+      <div id="tnpl-emp-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:7px;margin-top:3px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.14);z-index:10"></div>
+    </div>
+    <div class="fg" style="min-width:150px">
+      <label>Fecha desde</label>
+      <input type="date" id="tnpl-fdesde-fil" onchange="loadTNPList()">
+    </div>
+    <div class="fg" style="min-width:150px">
+      <label>Fecha hasta</label>
+      <input type="date" id="tnpl-fhasta-fil" onchange="loadTNPList()">
+    </div>
+    <button class="btn" onclick="clearTNPListFiltros()">Limpiar filtros</button>
+    <button class="btn btn-p" style="margin-left:auto" onclick="closeMo('mo-tnp-list');openTNP()">+ Nuevo</button>
+  </div>
+  <div id="tnpl-list"><div class="ld">Cargando...</div></div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-tnp-list')">Cerrar</button></div>
+</div></div>
+
+<div class="ov" id="mo-nov-elim"><div class="mo" style="max-width:1000px;width:95%">
+  <div class="mh">Novedades eliminadas <span class="mx" onclick="closeMo('mo-nov-elim')">×</span></div>
+  <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px">
+    <div class="fg" style="min-width:220px;flex:1">
+      <label>Buscar</label>
+      <input type="text" id="novelim-q-fil" placeholder="N° novedad, OT, operación, empleado, producto..." oninput="loadNovEliminadas()">
+    </div>
+    <div class="fg" style="min-width:150px">
+      <label>Fecha desde</label>
+      <input type="date" id="novelim-fdesde-fil" onchange="loadNovEliminadas()">
+    </div>
+    <div class="fg" style="min-width:150px">
+      <label>Fecha hasta</label>
+      <input type="date" id="novelim-fhasta-fil" onchange="loadNovEliminadas()">
+    </div>
+    <button class="btn" onclick="clearNovEliminadasFiltros()">Limpiar filtros</button>
+  </div>
+  <div id="novelim-list"><div class="ld">Cargando...</div></div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-nov-elim')">Cerrar</button></div>
+</div></div>
+
+<!-- DETALLE DE NOVEDAD ELIMINADA -->
+<div class="ov" id="mo-nov-elim-det"><div class="mo" style="width:560px">
+  <div class="mh">Consecuencias de la eliminación <span class="mx" onclick="closeMo('mo-nov-elim-det')">×</span></div>
+  <div id="novelim-det-body"></div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-nov-elim-det')">Cerrar</button></div>
+</div></div>
+
+<!-- MODIFICAR LOTES ASIGNADOS -->
+<div class="ov" id="mo-mod-lotes" style="z-index:200"><div class="mo" style="width:560px;max-height:85vh;overflow-y:auto">
+  <div class="mh"><span id="ml-desc">Lotes asignados</span> <span class="mx" onclick="closeMo('mo-mod-lotes')">×</span></div>
+  <input type="hidden" id="ml-oid"><input type="hidden" id="ml-mid">
+  <div id="ml-list"><div class="ld">Cargando...</div></div>
+  <div style="margin-top:14px;padding-top:12px;border-top:1px solid #e8e8e3">
+    <div style="font-size:11px;font-weight:600;color:#888;margin-bottom:7px;text-transform:uppercase;letter-spacing:.04em">Agregar otro lote</div>
+    <div id="ml-add-list"><div class="ld">Cargando lotes disponibles...</div></div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-mod-lotes')">Cerrar</button></div>
+</div></div>
+
