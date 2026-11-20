@@ -1,0 +1,981 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nexus</title>
+<style>
+:root{
+  --bg:#EEF1F4; --panel:#FFFFFF; --sunk:#E3E8ED; --line:#CDD5DD;
+  --fg:#17222C; --muted:#5A6875; --accent:#1F5F8B; --accent-fg:#FFFFFF;
+  --ok:#1E7A46; --ok-bg:#DDF1E4; --warn:#9A5B00; --warn-bg:#FBEBCF; --bad:#B23A2E; --bad-bg:#F8DEDA; --idle:#6B7783; --idle-bg:#E4E8EC;
+  --f-display:"Arial Narrow","Roboto Condensed","Segoe UI",Arial,sans-serif;
+  --f-body:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;
+  --f-mono:Consolas,"Cascadia Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#121A21; --panel:#1A242D; --sunk:#0F161C; --line:#2C3A46; --fg:#E4EAF0; --muted:#93A2AF; --accent:#6FB3E0; --accent-fg:#0E1A23;
+  --ok:#5DCB8A; --ok-bg:#163526; --warn:#F0B35A; --warn-bg:#3A2A12; --bad:#F08A7E; --bad-bg:#3D1C19; --idle:#93A2AF; --idle-bg:#24303A; color-scheme:dark}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:14px;line-height:1.45}
+.wrap{max-width:1400px;margin:0 auto;padding:12px 16px 40px}
+header.top{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+.brand{font-family:var(--f-display);font-weight:700;font-size:22px;margin-right:auto}
+.brand small{display:block;font-family:var(--f-body);font-weight:400;font-size:12px;color:var(--muted)}
+.conn{display:flex;flex-wrap:wrap;gap:8px}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:4px 10px;font-size:12.5px;white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--idle)}
+.dot.ok{background:var(--ok)} .dot.bad{background:var(--bad)} .dot.warn{background:var(--warn)}
+nav.tabs{display:flex;gap:4px;margin-top:12px;border-bottom:1px solid var(--line);overflow-x:auto}
+nav.tabs button{font:600 13.5px var(--f-body);background:none;border:0;border-bottom:2px solid transparent;color:var(--muted);padding:9px 12px;cursor:pointer;white-space:nowrap}
+nav.tabs button[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--accent)}
+.btn{font:500 13px var(--f-body);border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:6px;padding:6px 11px;cursor:pointer}
+.btn:hover{border-color:var(--accent)} .btn:disabled{opacity:.5;cursor:default}
+.btn.p{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.btn.on{background:var(--ok-bg);color:var(--ok);border-color:var(--ok)}
+.bar-top{display:flex;flex-wrap:wrap;align-items:center;gap:8px 22px;margin:14px 0 12px;font-size:13px;color:var(--muted)}
+.bar-top b{font-family:var(--f-mono);color:var(--fg)}
+.bar-top .btn{margin-left:auto}
+.aviso{font-size:13px;border-radius:8px;padding:10px 12px;margin:12px 0}
+.aviso.bad{background:var(--bad-bg);color:var(--bad)} .aviso.ok{background:var(--ok-bg);color:var(--ok)} .aviso.warn{background:var(--warn-bg);color:var(--warn)}
+.buscar{font:14px var(--f-body);padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--fg);width:100%;max-width:380px;margin:0 0 12px;box-sizing:border-box}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px}
+/* ── Tornos: conexión con dibujo 3D ── */
+.tn-tit{display:flex;align-items:baseline;gap:12px;margin:14px 0 8px;flex-wrap:wrap}
+.tn-tit h2{font:700 15px var(--f-display);margin:0}
+.tn-tit span{font-size:12.5px;color:var(--muted)}
+.tn-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px;margin-bottom:6px}
+.tn{--c:var(--bad);--cbg:var(--bad-bg);border:2px solid var(--c);border-radius:12px;padding:8px 12px 10px;background:linear-gradient(180deg,var(--cbg),var(--panel) 62%);position:relative;cursor:pointer;transition:transform .15s,box-shadow .15s}
+.tn:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(0,0,0,.12)}
+.tn.ok{--c:var(--ok);--cbg:var(--ok-bg)}
+.tn.off{--c:var(--idle);--cbg:var(--idle-bg)}
+.tn svg{display:block;width:100%;height:auto;margin:0 auto}
+.tn.bad svg .tn-cuerpo,.tn.off svg .tn-cuerpo{filter:saturate(.35) brightness(.96)}
+.tn-h{display:flex;align-items:center;gap:8px;margin-top:2px}
+.tn-h .code{font-size:22px}
+.tn-h .mname{font-size:12px}
+.tn-est{font-size:11.5px;font-weight:700;border-radius:999px;padding:2px 9px;color:var(--c);background:var(--cbg);border:1px solid var(--c);white-space:nowrap;margin-left:auto}
+.tn-info{font-size:11.5px;color:var(--muted);margin-top:3px;min-height:32px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:16px}
+.tn-al{font-size:11.5px;color:var(--bad);font-weight:600;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tn .l-r{fill:#6E3B3B}.tn .l-a{fill:#6B5A33}.tn .l-g{fill:#2F5A40}
+.tn.ok .l-g{fill:#34D27A}.tn.bad .l-r{fill:#FF4D40}
+.tn.ok .tn-halo{opacity:.4}
+.tn.ok.gira .tn-halo{animation:tnPulso 1.6s ease-in-out infinite}
+.tn.bad .tn-halo{animation:tnPulso .8s ease-in-out infinite}
+.tn.off .tn-halo{opacity:0}
+.tn.ok .tn-halo{color:#34D27A!important}.tn.bad .tn-halo{color:#FF4D40!important}
+@keyframes tnPulso{0%,100%{opacity:.25}50%{opacity:.85}}
+.tn-pant{fill:var(--c);opacity:.85}
+.tn.gira .tn-plato{animation:tnGira .7s linear infinite;transform-box:fill-box;transform-origin:center}
+@keyframes tnGira{to{transform:rotate(360deg)}}
+/* ── Animaciones de los tornos ── */
+.tn{animation:tnEntra .45s ease both}
+.tn:nth-child(2){animation-delay:.06s}.tn:nth-child(3){animation-delay:.12s}.tn:nth-child(4){animation-delay:.18s}.tn:nth-child(5){animation-delay:.24s}.tn:nth-child(6){animation-delay:.3s}.tn:nth-child(n+7){animation-delay:.36s}
+@keyframes tnEntra{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}
+.tn svg{transition:transform .35s ease;transform-origin:50% 60%}
+.tn:hover svg{transform:perspective(700px) rotateY(-9deg) rotateX(4deg) scale(1.03)}
+.tn-torreta,.tn-brillo,.tn-gota,.tn-chispas .ch,.tn-caen circle,.tn-graf,.tn-cuerpo{transform-box:fill-box}
+.tn-chispas .ch,.tn-gota,.tn-caen circle{opacity:0}
+.tn.gira .tn-cuerpo{animation:tnVibra .16s linear infinite}
+@keyframes tnVibra{0%,100%{transform:translate(0,0)}25%{transform:translate(.25px,-.2px)}75%{transform:translate(-.25px,.2px)}}
+.tn.gira .tn-torreta{animation:tnAvance 2.6s ease-in-out infinite}
+@keyframes tnAvance{0%,100%{transform:translateX(0)}45%,55%{transform:translateX(-3.5px)}}
+.tn.gira .tn-brillo{animation:tnBrillo .35s linear infinite}
+.tn.gira .tn-brillo.b2{animation-delay:-.17s}
+@keyframes tnBrillo{0%{transform:translateY(0);opacity:.0}20%{opacity:.75}100%{transform:translateY(9px);opacity:.1}}
+.tn.gira .tn-chispas .ch{animation:tnChispa .7s ease-out infinite}
+@keyframes tnChispa{0%{transform:translate(0,0) scale(1);opacity:1}100%{transform:translate(var(--dx),var(--dy)) scale(.4);opacity:0}}
+.tn.gira .tn-refri{stroke-dasharray:3 2.2;animation:tnFluye .5s linear infinite}
+@keyframes tnFluye{to{stroke-dashoffset:-5.2}}
+.tn.gira .tn-gota{animation:tnGota .9s ease-in infinite}
+.tn.gira .tn-gota.g2{animation-delay:.45s}
+@keyframes tnGota{0%{transform:translateY(0);opacity:.9}100%{transform:translateY(20px);opacity:0}}
+.tn.gira .tn-cinta{animation:tnCinta .9s linear infinite}
+@keyframes tnCinta{to{stroke-dashoffset:-4.8}}
+.tn.gira .tn-caen circle{animation:tnCae 1.4s ease-in infinite}
+.tn.gira .tn-caen circle:nth-child(2){animation-delay:.47s}.tn.gira .tn-caen circle:nth-child(3){animation-delay:.94s}
+@keyframes tnCae{0%{transform:translateY(0);opacity:0}15%{opacity:1}100%{transform:translateY(28px);opacity:.6}}
+.tn.ok .tn-graf{stroke-dasharray:22;animation:tnGraf 2.4s ease-in-out infinite}
+@keyframes tnGraf{0%{stroke-dashoffset:22}55%,100%{stroke-dashoffset:0}}
+.tn.bad .tn-pant{animation:tnEstatica 1.8s steps(6) infinite}
+@keyframes tnEstatica{0%,100%{opacity:.85}20%{opacity:.35}40%{opacity:.7}60%{opacity:.2}80%{opacity:.6}}
+.tn.bad .l-r{animation:tnParpa 1.2s steps(2,jump-none) infinite}
+@keyframes tnParpa{0%{opacity:1}100%{opacity:.25}}
+.tn.alarma{animation:tnAlarma 1s ease-in-out infinite}
+@keyframes tnAlarma{0%,100%{box-shadow:0 0 0 0 rgba(255,77,64,0)}50%{box-shadow:0 0 0 5px rgba(255,77,64,.35)}}
+.tn.alarma .l-r{fill:#FF4D40;animation:tnParpa .5s steps(2,jump-none) infinite}
+.tn.alarma .l-a{fill:#FFB020;animation:tnParpa .5s steps(2,jump-none) infinite;animation-delay:.25s}
+.tn.alarma .tn-pant{fill:#FF4D40;animation:tnParpa .5s steps(2,jump-none) infinite}
+.tn.alarma .tn-halo{color:#FF4D40!important;animation:tnPulso .5s ease-in-out infinite}
+.tn-al{animation:tnParpa 1s steps(2,jump-none) infinite}
+@media (prefers-reduced-motion:reduce){.tn,.tn *{animation:none!important;transition:none!important}}
+
+@media (prefers-reduced-motion:reduce){.tn .tn-halo,.tn.gira .tn-plato{animation:none}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;position:relative;overflow:hidden;min-width:0}
+.card::before{content:"";position:absolute;inset:0 auto 0 0;width:4px;background:var(--idle)}
+.card.s-prod::before{background:var(--ok)} .card.s-par::before{background:var(--warn)} .card.s-sin::before{background:var(--bad)}
+.c-head{display:flex;align-items:baseline;gap:8px}
+.code{font-family:var(--f-display);font-weight:700;font-size:20px}
+.mname{color:var(--muted);font-size:13px;margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pill{font-size:11.5px;font-weight:600;border-radius:999px;padding:2px 8px;white-space:nowrap}
+.pill.prod{color:var(--ok);background:var(--ok-bg)} .pill.par{color:var(--warn);background:var(--warn-bg)} .pill.sin{color:var(--bad);background:var(--bad-bg)} .pill.idle{color:var(--idle);background:var(--idle-bg)}
+.k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.07em;display:block}
+.counter{display:flex;align-items:flex-end;justify-content:space-between;gap:8px}
+.cnt{font-family:var(--f-mono);font-size:34px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
+.cnt small{font-size:13px;color:var(--muted);font-weight:400}
+.meta{font-size:12px;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+.prog{height:6px;background:var(--sunk);border-radius:3px;overflow:hidden} .prog i{display:block;height:100%;background:var(--accent)}
+.warnline{font-size:12px;color:var(--bad)} .waitline{font-size:12px;color:var(--warn)}
+.tbl{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:8px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap;font-variant-numeric:tabular-nums}
+tr:last-child td{border-bottom:0}
+td.num{text-align:right;font-family:var(--f-mono)}
+.empty{padding:22px;text-align:center;color:var(--muted)}
+.form{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;max-width:640px;display:flex;flex-direction:column;gap:12px}
+.form label{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted)}
+.form input{font:14px var(--f-body);padding:8px 9px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--fg)}
+.form .row{display:flex;gap:8px;flex-wrap:wrap}
+.help{font-size:12.5px;color:var(--muted)}
+code{font-family:var(--f-mono);font-size:12.5px;background:var(--sunk);padding:1px 5px;border-radius:4px}
+.sim-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));gap:8px}
+.sim-item{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.sim-item .sim-n{width:64px;font:14px var(--f-body);padding:5px 6px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--fg)}
+.sim-item b{font-family:var(--f-display);font-size:16px;margin-right:auto}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:13px;z-index:30;max-width:90vw}
+#tb-lec input,#tb-lec select{font:13px var(--f-body);padding:5px 6px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--fg)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* ── Diseño v2 ── */
+:root{--accent-bg:#E1ECF5;--hover:rgba(31,95,139,.05);--shadow:0 1px 2px rgba(16,24,40,.06),0 6px 16px -8px rgba(16,24,40,.16);--radius:12px}
+@media (prefers-color-scheme: dark){:root{--accent-bg:#17304A;--hover:rgba(111,179,224,.06);--shadow:0 1px 2px rgba(0,0,0,.4),0 8px 20px -10px rgba(0,0,0,.6)}}
+body{background:radial-gradient(1100px 480px at 88% -12%,var(--accent-bg),transparent 62%) fixed,var(--bg)}
+header.top{border-bottom:0;padding:10px 0 4px}
+.brand-logo{height:58px}
+.brand small{margin-top:1px;letter-spacing:.01em}
+.chip{padding:6px 12px;font-weight:500;box-shadow:var(--shadow)}
+.dot{box-shadow:0 0 0 3px var(--idle-bg)}
+.dot.ok{box-shadow:0 0 0 3px var(--ok-bg)}.dot.bad{box-shadow:0 0 0 3px var(--bad-bg)}.dot.warn{box-shadow:0 0 0 3px var(--warn-bg)}
+nav.tabs{position:sticky;top:0;z-index:25;gap:4px;margin:10px -16px 0;padding:8px 16px;background:var(--bg);border-bottom:1px solid var(--line);scrollbar-width:thin}
+nav.tabs button{display:inline-flex;align-items:center;gap:7px;border:1px solid transparent;border-radius:9px;padding:7px 12px;transition:background .15s,color .15s,box-shadow .15s}
+nav.tabs button svg{width:16px;height:16px;flex-shrink:0;opacity:.75}
+nav.tabs button:hover{background:var(--panel);color:var(--fg);border-color:var(--line)}
+nav.tabs button[aria-selected="true"]{background:linear-gradient(180deg,#2A74A8,#1F5F8B);color:#fff;border-color:#1B557D;box-shadow:0 3px 10px -3px rgba(31,95,139,.55)}
+nav.tabs button[aria-selected="true"] svg{opacity:1}
+.btn{border-radius:8px;padding:7px 13px;font-weight:600;box-shadow:0 1px 2px rgba(16,24,40,.06);transition:border-color .15s,background .15s,transform .05s}
+.btn:hover{background:var(--sunk)}
+.btn:active:not(:disabled){transform:translateY(1px)}
+.btn.p{background:linear-gradient(180deg,#2A74A8,#1F5F8B);border-color:#1B557D;color:#fff}
+.btn.p:hover{background:linear-gradient(180deg,#3080B8,#226A9C);border-color:#1B557D}
+.btn.on{background:var(--ok-bg)}
+input[type=text],input[type=number],input[type=password],input[type=search],input[type=date],select,.form input,#tb-lec input,#tb-lec select{font:13.5px var(--f-body);padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--fg);transition:border-color .15s,box-shadow .15s}
+#tb-lec input,#tb-lec select{padding:5px 8px}
+input:focus,select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-bg)}
+.buscar{padding:9px 12px 9px 36px;border-radius:10px;box-shadow:var(--shadow);background:var(--panel) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%238896A3' stroke-width='1.6' stroke-linecap='round'%3E%3Ccircle cx='7' cy='7' r='4.6'/%3E%3Cpath d='M10.5 10.5 14 14'/%3E%3C/svg%3E") no-repeat 12px center/16px}
+.tn-tit{margin:18px 0 10px}
+.tn-tit h2{font-size:18px;display:flex;align-items:center;gap:8px}
+.tn-tit h2::before,section h3::before,.form>b:first-child::before{content:"";width:4px;height:16px;border-radius:2px;background:var(--accent);flex-shrink:0}
+section h3{display:flex;align-items:center;gap:8px;font-size:16px}
+.tn{box-shadow:var(--shadow)}
+.bar-top{gap:10px;margin:18px 0 14px}
+.kpi{display:flex;flex-direction:column;gap:1px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:9px 18px 9px 16px;min-width:118px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+.kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--kc,var(--accent))}
+.kpi b{font:700 22px var(--f-mono);line-height:1.15}
+.kpi span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;font-weight:600}
+.card{border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 16px;transition:transform .15s,box-shadow .15s}
+.card:hover{transform:translateY(-1px);box-shadow:0 2px 4px rgba(16,24,40,.06),0 12px 24px -10px rgba(16,24,40,.22)}
+.card::before{width:5px}
+.prog{height:8px;border-radius:4px}.prog i{border-radius:4px;background:linear-gradient(90deg,#1F5F8B,#3A8BC4)}
+.tbl{border-radius:var(--radius);box-shadow:var(--shadow)}
+th{background:var(--sunk);padding:10px 12px}
+td{padding:9px 12px}
+tbody tr:hover td{background:var(--hover)}
+.empty{padding:30px 22px;font-size:13.5px}
+.form{border-radius:var(--radius);box-shadow:var(--shadow);padding:18px 20px;gap:14px}
+.form>b:first-child{font:700 16px var(--f-display);display:flex;align-items:center;gap:8px}
+section>.help:first-child:not(:empty),section>p.help:first-child{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:10px;padding:10px 14px;margin:16px 0 12px!important;max-width:none!important;box-shadow:var(--shadow)}
+.aviso{border-left:4px solid transparent;border-radius:10px;padding:10px 14px;font-weight:500}
+.aviso.bad{border-left-color:var(--bad)}.aviso.ok{border-left-color:var(--ok)}.aviso.warn{border-left-color:var(--warn)}
+.sim-item{border-radius:10px;box-shadow:var(--shadow);padding:10px 12px}
+.bk-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;box-shadow:var(--shadow)}
+details>summary{user-select:none}
+.grid>.empty,.sim-grid>.empty{grid-column:1/-1;background:var(--panel);border:1px dashed var(--line);border-radius:var(--radius)}
+input[type=file]{font:13px var(--f-body);color:var(--muted)}
+input[type=file]::file-selector-button{font:600 13px var(--f-body);border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:8px;padding:6px 12px;margin-right:10px;cursor:pointer}
+input[type=file]::file-selector-button:hover{background:var(--sunk)}
+/* Pantalla de carga Nexus (3 s al entrar) */
+#splash{position:fixed;inset:0;z-index:9999;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:34px;transition:opacity .8s ease}
+#splash.fuera{opacity:0;pointer-events:none}
+#splash img{width:min(760px,86vw);height:auto;opacity:0;transform:scale(.94);animation:spIn 1s ease forwards}
+#splash .sp-bar{width:min(420px,70vw);height:4px;border-radius:2px;background:var(--line);overflow:hidden}
+#splash .sp-bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#1F5F8B,#2a6df4);animation:spBar 3s linear forwards}
+#splash .sp-txt{color:var(--muted);font:500 13px var(--f-body);letter-spacing:.18em;text-transform:uppercase}
+.brand-logo{height:66px;width:auto;display:block;margin:-6px 0 0 -8px}
+@keyframes spIn{to{opacity:1;transform:scale(1)}}
+@keyframes spBar{to{width:100%}}
+@media (prefers-reduced-motion: reduce){#splash img{animation:none;opacity:1;transform:none}}
+</style>
+</head>
+<body>
+<div id="splash" role="status" aria-label="Cargando Nexus"><picture><source srcset="/nexus_logo_oscuro.png" media="(prefers-color-scheme: dark)"><img src="/nexus_logo.png" alt="MetalERP Nexus"></picture><div class="sp-bar"><i></i></div><div class="sp-txt">Cargando</div></div>
+<script>
+// Pantalla de carga Nexus: 3 segundos y se va.
+setTimeout(function(){var s=document.getElementById("splash");if(!s)return;s.classList.add("fuera");setTimeout(function(){s.remove()},900)},3000);
+</script>
+<div class="wrap">
+  <header class="top">
+    <div class="brand"><picture><source srcset="/nexus_logo_oscuro.png" media="(prefers-color-scheme: dark)"><img class="brand-logo" src="/nexus_logo.png" alt="Nexus"></picture><small>Recibe las piezas del router y las manda a MetalERP en paquetes</small></div>
+    <div class="conn" id="conn"></div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" id="t-maquinas" aria-selected="true" onclick="ir('maquinas')"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.8 14V7.2l4 2.8V7.2l4 2.8V3.5h4.4V14z"/><path d="M1.8 14h12.4"/></svg>Máquinas</button>
+    <button role="tab" id="t-paquetes" aria-selected="false" onclick="ir('paquetes')"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 4.8 8 2l6 2.8v6.4L8 14l-6-2.8z"/><path d="M2 4.8 8 7.6l6-2.8M8 7.6V14"/></svg>Paquetes enviados</button>
+    <button role="tab" id="t-piezas" aria-selected="false" onclick="ir('piezas')"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.8l5.4 3.1v6.2L8 14.2l-5.4-3.1V4.9z"/><circle cx="8" cy="8" r="2.3"/></svg>Piezas</button>
+    <button role="tab" id="t-lectores" aria-selected="false" onclick="ir('lectores')"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 13.3h.01M5.6 10.9a3.4 3.4 0 0 1 4.8 0M3.3 8.6a6.6 6.6 0 0 1 9.4 0M1.2 6.3a9.6 9.6 0 0 1 13.6 0"/></svg>Lectores</button>
+    <button role="tab" id="t-backup" aria-selected="false" onclick="ir('backup')"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v8M4.8 6.8 8 10l3.2-3.2M2.5 11v2.5h11V11"/></svg>Backup</button>
+    <button role="tab" id="t-envio" aria-selected="false" onclick="ir('envio')"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2 7 9M14 2l-4.5 12L7 9 2 6.5z"/></svg>Enviar programa</button>
+    <button role="tab" id="t-paradas" aria-selected="false" onclick="ir('paradas')"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.2"/><path d="M6.5 5.6v4.8M9.5 5.6v4.8"/></svg>Paradas</button>
+    <button role="tab" id="t-simulador" aria-selected="false" onclick="ir('simulador')"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.2"/><path d="M6.6 5.4l4 2.6-4 2.6z"/></svg>Simulador</button>
+    <button role="tab" id="t-config" aria-selected="false" onclick="ir('config')"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/><circle cx="6" cy="4" r="1.6" fill="currentColor"/><circle cx="10.5" cy="8" r="1.6" fill="currentColor"/><circle cx="5" cy="12" r="1.6" fill="currentColor"/></svg>Configuración</button>
+  </nav>
+
+  <div id="aviso"></div>
+
+  <section id="v-maquinas">
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+      <defs>
+        <linearGradient id="tnFrente" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FBFCFD"/><stop offset=".55" stop-color="#E7EBEF"/><stop offset="1" stop-color="#CED5DC"/></linearGradient>
+        <linearGradient id="tnLado" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#B9C2CA"/><stop offset="1" stop-color="#939DA7"/></linearGradient>
+        <linearGradient id="tnTecho" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#EEF1F4"/><stop offset="1" stop-color="#FFFFFF"/></linearGradient>
+        <linearGradient id="tnBanda" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4A5661"/><stop offset="1" stop-color="#2C353D"/></linearGradient>
+        <linearGradient id="tnBase" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#36414B"/><stop offset="1" stop-color="#1D252B"/></linearGradient>
+        <linearGradient id="tnMarco" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#DCE1E6"/><stop offset="1" stop-color="#B7C0C8"/></linearGradient>
+        <linearGradient id="tnInterior" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5E6E7B"/><stop offset=".45" stop-color="#36444F"/><stop offset="1" stop-color="#1A242C"/></linearGradient>
+        <linearGradient id="tnVidrio" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9FD3F5" stop-opacity=".28"/><stop offset=".5" stop-color="#5FA7D6" stop-opacity=".10"/><stop offset="1" stop-color="#1D4E73" stop-opacity=".30"/></linearGradient>
+        <radialGradient id="tnPlatoG" cx=".38" cy=".35" r=".75"><stop offset="0" stop-color="#F2F4F6"/><stop offset=".55" stop-color="#A8B2BB"/><stop offset="1" stop-color="#5A6570"/></radialGradient>
+        <linearGradient id="tnHusillo" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8E99A3"/><stop offset=".5" stop-color="#5B6670"/><stop offset="1" stop-color="#36404A"/></linearGradient>
+        <linearGradient id="tnPieza" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F4F6F8"/><stop offset=".45" stop-color="#C3CBD2"/><stop offset="1" stop-color="#7E8993"/></linearGradient>
+        <radialGradient id="tnTorretaG" cx=".4" cy=".35" r=".8"><stop offset="0" stop-color="#C9D0D6"/><stop offset="1" stop-color="#5F6A74"/></radialGradient>
+        <linearGradient id="tnPanel" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3B4650"/><stop offset="1" stop-color="#1F272E"/></linearGradient>
+        <radialGradient id="tnEstopG" cx=".35" cy=".3" r=".8"><stop offset="0" stop-color="#FF8A80"/><stop offset=".6" stop-color="#D32F2F"/><stop offset="1" stop-color="#7F1D1D"/></radialGradient>
+        <radialGradient id="tnHaloG"><stop offset="0" stop-color="currentColor" stop-opacity=".95"/><stop offset="1" stop-color="currentColor" stop-opacity="0"/></radialGradient>
+        <linearGradient id="tnLuzVidrio" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity=".45"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".18"/></linearGradient>
+        <clipPath id="tnClipPz"><rect x="76" y="82.5" width="34" height="7" rx="1.2"/></clipPath>
+      </defs>
+    </svg>
+    <div class="tn-tit"><h2>Tornos</h2><span id="tn-resumen"></span></div>
+    <div class="tn-grid" id="tn-grid"></div>
+    <div class="bar-top" id="resumen"></div>
+    <input type="search" id="buscar" class="buscar" placeholder="Buscar OT, máquina, producto u operario" oninput="renderGrid()" autocomplete="off">
+    <div class="grid" id="grid"><div class="empty">Cargando...</div></div>
+  </section>
+
+  <section id="v-paquetes" hidden>
+    <p class="help">Cada paquete junta las piezas de un período y se manda a MetalERP de una vez. Si MetalERP no responde, el paquete queda guardado y se vuelve a intentar cada 5 minutos con el mismo código, así nunca se carga dos veces.</p>
+    <div class="tbl"><table><thead><tr><th>Armado</th><th>Piezas desde</th><th>hasta</th><th style="text-align:right">Piezas</th><th>Estado</th><th>Enviado</th><th>Respuesta de MetalERP</th></tr></thead><tbody id="tb-paq"></tbody></table></div>
+  </section>
+
+  <section id="v-piezas" hidden>
+    <p class="help" id="pz-ayuda">Todas las piezas que registró Nexus, de todas las máquinas. Se guardan todas en la PC (monitor.db); filtrá por máquina y fechas.</p>
+    <div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin:0 0 10px">
+      <label>Máquina<br><select id="pz-maq" onchange="pzBuscar(1)"><option value="">Todas</option></select></label>
+      <label>Desde<br><input type="date" id="pz-desde" onchange="pzBuscar(1)"></label>
+      <label>Hasta<br><input type="date" id="pz-hasta" onchange="pzBuscar(1)"></label>
+      <button class="btn" onclick="pzRango('hoy')">Hoy</button><button class="btn" onclick="pzRango('ayer')">Ayer</button><button class="btn" onclick="pzRango('semana')">7 días</button><button class="btn" onclick="pzRango('mes')">Este mes</button><button class="btn" onclick="pzRango('')">Todo</button>
+    </div>
+    <div id="pz-resumen" style="margin:0 0 10px"></div>
+    <div class="tbl"><table><thead><tr><th>Hora</th><th>Máquina</th><th style="text-align:right">Ciclo</th><th style="text-align:right">Contador</th><th>Origen</th><th>Paquete</th></tr></thead><tbody id="tb-pz"></tbody></table></div>
+    <div id="pz-pag" style="display:flex;gap:8px;align-items:center;justify-content:center;margin:10px 0"></div>
+  </section>
+
+  <section id="v-simulador" hidden>
+    <div class="aviso warn">Las piezas del simulador son piezas reales para MetalERP: entran en el próximo paquete y se cargan como novedades. Usalo solo para probar, con una OT de prueba asignada a la máquina.</div>
+    <div class="sim-grid" id="sim"></div>
+  </section>
+
+  <section id="v-backup" hidden>
+    <div class="help" style="max-width:80ch;margin:14px 0 10px">Baja a esta PC todos los programas que tiene guardados el control (memoria del CNC), uno por archivo <code>O0001.NC</code>, más <code>TODOS.NC</code> con todos juntos y <code>LISTA.txt</code> con el detalle. No cambia nada en la máquina y se puede hacer con la máquina trabajando. Aparecen las máquinas Fanuc cargadas en la pestaña Lectores.</div>
+    <div id="bk-lista"></div>
+    <div class="row" style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><button class="btn" id="bk-abrir" onclick="bkAbrir('')">Abrir carpeta de backups</button></div>
+    <div id="bk-msg" class="aviso" hidden></div>
+    <div class="help" id="bk-carpeta"></div>
+  </section>
+
+  <section id="v-envio" hidden>
+    <div class="help" style="max-width:82ch;margin:14px 0 10px">Dejás el programa en la carpeta del torno y después: <b>Mandar al torno</b> lo carga directo en la memoria del control por la red, sin tocar el torno (no reemplaza un programa que ya esté); o el operario lo trae desde la máquina por FTP. <b>Verificar</b> lee el programa de la máquina y lo compara con el archivo.</div>
+    <div id="en-ftp" class="aviso" hidden></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;max-width:760px">
+      <label>Máquina<br><select id="en-maq" style="width:100%" onchange="$('en-msg').hidden=true;cargarEnvio()"></select></label>
+      <label>Archivo del programa<br><input type="file" id="en-arch" onchange="enArchivo(this)" style="width:100%"></label>
+      <label>Número de programa (O)<br><input id="en-num" type="number" min="1" max="99999999" placeholder="ej. 1234" style="width:100%"></label>
+    </div>
+    <pre id="en-prev" style="max-width:760px;max-height:220px;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px 10px;font:12px var(--f-mono);margin:10px 0" hidden></pre>
+    <div class="row" style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><button class="btn p" id="en-btn" onclick="enDejar(false)">Dejar en la carpeta del torno</button></div>
+    <div id="en-msg" class="aviso" hidden></div>
+    <h3 style="margin:22px 0 6px;font-family:var(--f-display)">Programas en la carpeta de <span id="en-maq-tit"></span></h3>
+    <div class="tbl"><table><thead><tr><th>Archivo</th><th>Comentario</th><th style="text-align:right">Tamaño</th><th>Dejado</th><th></th></tr></thead><tbody id="tb-enarch"></tbody></table></div>
+    <h3 style="margin:22px 0 6px;font-family:var(--f-display)">Datos para cargar en el torno (una sola vez)</h3>
+    <div id="en-datos" class="help" style="max-width:82ch"></div>
+    <div id="en-cfg" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-top:10px">
+      <label>Puerto FTP<br><input id="en-puerto" type="number" style="width:90px"></label>
+      <label>Clave<br><input id="en-clave" style="width:130px"></label>
+      <label style="display:flex;gap:6px;align-items:center"><input id="en-act" type="checkbox"> FTP encendido</label>
+      <button class="btn" onclick="enGuardarFtp()">Guardar FTP</button>
+      <button class="btn" onclick="enProbarFtp()" title="Entra al FTP como lo haría el torno, desde esta PC">Probar FTP</button>
+    </div>
+    <h3 style="margin:22px 0 6px;font-family:var(--f-display)">Movimientos</h3>
+    <div class="help" style="max-width:82ch;margin:0 0 6px">Cada vez que el torno se conecta, entra, ve la lista o baja un programa queda anotado acá. Si el operario lo intenta y no aparece nada, el torno no está llegando a la PC: revisá el cable o el switch, la IP del torno y que los datos estén en la página [EMBEDDED].</div>
+    <div class="tbl"><table><thead><tr><th>Hora</th><th>Máquina</th><th>Programa</th><th>Qué pasó</th><th>Detalle</th></tr></thead><tbody id="tb-env"></tbody></table></div>
+  </section>
+
+  <section id="v-paradas" hidden>
+    <div class="help" style="max-width:82ch;margin:14px 0 10px" id="pa-ayuda"></div>
+    <div class="help" style="max-width:82ch;margin:0 0 10px" id="pa-ayuda-al"></div>
+    <div id="pa-cfg" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:0 0 12px" hidden>
+      <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="pa-al-on"> Leer alarmas de las máquinas</label>
+      <label style="display:flex;gap:6px;align-items:center">No mandar a MetalERP alarmas de menos de <input id="pa-al-min" type="number" min="0" max="3600" style="width:80px"> s</label>
+      <button class="btn" onclick="paGuardarAl()">Guardar</button>
+    </div>
+    <div class="tbl"><table><thead><tr><th>Máquina</th><th>Código</th><th>Motivo</th><th>Desde</th><th>Hasta</th><th style="text-align:right">Duración</th><th>Cerró</th><th>MetalERP</th></tr></thead><tbody id="tb-pa"></tbody></table></div>
+    <details style="margin-top:16px"><summary class="help" style="cursor:pointer">Ver la lista de códigos</summary><div id="pa-cods" class="help" style="columns:2;max-width:760px;margin-top:8px"></div></details>
+  </section>
+
+  <section id="v-lectores" hidden>
+    <div class="help" style="max-width:80ch;margin:14px 0 10px">Máquinas que la app lee sola por la red, sin router: cada 5 segundos le pregunta el contador de piezas al control y carga las piezas nuevas. La primera lectura solo toma el número de referencia. La máquina va con el código que tiene en MetalERP.</div>
+    <div class="tbl"><table>
+      <thead><tr><th>Máquina</th><th>Control</th><th>IP</th><th>Puerto</th><th title="Piezas que salen en cada ciclo">Pzs/ciclo</th><th>Activo</th><th>Última lectura</th><th></th></tr></thead>
+      <tbody id="tb-lec"></tbody>
+    </table></div>
+    <div class="row" style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+      <button class="btn" id="l-agregar" onclick="lecAgregar()">+ Agregar máquina</button>
+      <button class="btn p" id="l-guardar" onclick="lecGuardar()">Guardar lectores</button>
+    </div>
+    <div id="l-msg" class="aviso" hidden></div>
+    <div class="help" id="l-local"></div>
+    <h3 style="margin:22px 0 6px;font-family:var(--f-display)">Qué hay que hacer en la máquina</h3>
+    <div class="help" style="max-width:80ch">
+      <p><b>Fanuc</b> (tornos y centros con control Fanuc): cable de red al control, IP cargada en SYSTEM → EMBED PORT → COMMON, y en FOCAS2 el puerto TCP <code>8193</code>. Se lee la variable <code>#3901</code> (PARTS COUNT de la pantalla SETTING); si no, el parámetro <code>6711</code>.</p>
+      <p><b>Haas</b>: cable de red, IP en Settings → Network y el Setting 143 (Machine Data Collect) activado. Se lee el contador M30 #1 por el puerto <code>5051</code>.</p>
+      <p>Con <b>Probar</b> se lee una vez el contador sin cargar piezas: sirve para saber si la conexión anda.</p>
+    </div>
+  </section>
+
+  <section id="v-config" hidden>
+    <div class="form">
+      <b>Conectar con MetalERP</b>
+      <div class="help">Poné la dirección de MetalERP y un usuario administrador de MetalERP. La app pide su clave sola; no hay que copiar nada.</div>
+      <label for="c-url">Dirección de MetalERP<input id="c-url" type="text" placeholder="http://localhost:5000"></label>
+      <div class="row">
+        <label for="c-usr" style="flex:1">Usuario de MetalERP<input id="c-usr" type="text" autocomplete="off" placeholder="admin"></label>
+        <label for="c-pw" style="flex:1">Contraseña<input id="c-pw" type="password" autocomplete="off"></label>
+      </div>
+      <div class="row"><button class="btn p" id="c-conectar" onclick="conectar()">Conectar</button><button class="btn" onclick="probar()">Probar conexión</button></div>
+      <div id="c-msg" class="aviso" hidden></div>
+      <div class="help" id="c-local"></div>
+    </div>
+    <div class="form" style="margin-top:14px">
+      <b>Otros ajustes</b>
+      <label for="c-key">Clave a mano (solo si no usaste Conectar)<input id="c-key" type="password" placeholder="Dejala vacía para no cambiarla" autocomplete="off"></label>
+      <div class="row">
+        <label for="c-int" style="flex:1">Mandar el paquete cada (minutos)<input id="c-int" type="number" min="1" max="1440"></label>
+        <label for="c-par" style="flex:1">Máquina parada sin piezas durante (segundos)<input id="c-par" type="number" min="30" max="7200"></label>
+      </div>
+      <label for="c-tok">Código del router (opcional; si lo ponés, el router tiene que mandar <code>&amp;token=...</code>)<input id="c-tok" type="text" autocomplete="off"></label>
+      <div class="row"><button class="btn" id="c-guardar" onclick="guardarConfig()">Guardar ajustes</button></div>
+    </div>
+    <h3 style="margin:22px 0 6px;font-family:var(--f-display)">Cómo manda las piezas el router</h3>
+    <div class="help" style="max-width:75ch">
+      <p>Por cada pieza terminada, el router (o el programa que lee las máquinas) llama a esta dirección:</p>
+      <p><code id="ej1"></code> una pieza.</p>
+      <p><code id="ej2"></code> con el contador de piezas del CNC: la app calcula cuántas salieron desde la última lectura.</p>
+      <p>También acepta <code>POST /senal</code> con <code>{"maquina": "T16", "contador": 18452}</code> o una lista de esos. La máquina se nombra con el código que tiene en MetalERP.</p>
+    </div>
+  </section>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+let E=null, vista='maquinas', autos={};
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fN=n=>n==null?'—':Number(n).toLocaleString('es-AR',{maximumFractionDigits:1});
+const hm=s=>s?s.slice(11,16):'—';
+const dh=s=>s?s.slice(8,10)+'/'+s.slice(5,7)+' '+s.slice(11,16):'—';
+function toast(t){const e=$('toast');e.textContent=t;e.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(()=>e.hidden=true,3000);}
+async function api(u,o){try{const r=await fetch(u,Object.assign({headers:{'Content-Type':'application/json'}},o||{}));return await r.json();}catch(e){return {error:'La app no responde'};}}
+function ir(v){vista=v;['maquinas','paquetes','piezas','lectores','backup','envio','paradas','simulador','config'].forEach(x=>{$('v-'+x).hidden=x!==v;$('t-'+x).setAttribute('aria-selected',x===v);});
+  if(v==='paquetes')cargarPaquetes(); if(v==='piezas')cargarPiezas(); if(v==='config')cargarConfig(); if(v==='simulador')renderSim(); if(v==='lectores')cargarLectores(); if(v==='backup')cargarBackup(); if(v==='envio')cargarEnvio(); if(v==='paradas')cargarParadas();}
+function segDesde(h){if(!h)return null;const t=new Date(h.replace(' ','T'));return Math.round((Date.now()-t.getTime())/1000);}
+
+async function cargarEstado(){
+  const d=await api('/api/estado'); if(d.error&&!d.maquinas){$('conn').innerHTML='<span class="chip"><span class="dot bad"></span>'+esc(d.error)+'</span>';return;}
+  E=d; renderConn(); renderGrid(); if(vista==='simulador')renderSim(); if(vista==='lectores')lecEstados(); if(vista==='paradas')cargarParadas();
+}
+function renderConn(){
+  const ok=E.metalerp_ok;
+  $('conn').innerHTML='<span class="chip"><span class="dot '+(ok===true?'ok':ok===false?'bad':'')+'"></span>MetalERP '+(ok===true?'conectado':ok===false?'sin conexión':'sin probar')+'</span>'
+    +'<span class="chip"><span class="dot '+(E.sin_enviar?'warn':'ok')+'"></span>'+(E.sin_enviar?fN(E.sin_enviar)+' piezas por enviar':'Todo enviado')+'</span>'
+    +'<span class="chip">Próximo paquete '+hm(E.proximo_envio)+'</span>';
+  let av='';
+  if(!E.tiene_clave) av='<div class="aviso warn">Falta conectar con MetalERP. Andá a Configuración, poné tu usuario de MetalERP y tocá Conectar.</div>';
+  else if(ok===false) av='<div class="aviso bad">'+esc(E.metalerp_error||'MetalERP no responde')+'. La app sigue guardando las piezas y las manda cuando vuelva la conexión.</div>';
+  $('aviso').innerHTML=av;
+}
+function alarmasDe(m){const l=(E.lectores||[]).find(x=>String(x.maquina).toUpperCase()===String(m.codigo).toUpperCase()&&x.activo!==false);return (l&&l.estado&&l.estado.alarmas)||[];}
+function paradaDe(m){const l=(E.lectores||[]).find(x=>String(x.maquina).toUpperCase()===String(m.codigo).toUpperCase()&&x.activo!==false);return l&&l.estado&&l.estado.parada;}
+function estadoMaq(m){
+  const s=m.local||{}, seg=segDesde(s.ultima), lim=(E.config.parada_seg||180), pa=paradaDe(m), al=alarmasDe(m);
+  if(al.length) return ['sin','Alarma '+al[0].codigo];
+  if(pa) return ['par','Parada P-'+pa.codigo];
+  if(seg!=null&&seg<=lim) return ['prod','Produciendo'];
+  if(m.operacion) return seg==null?['idle','Sin piezas hoy']:['par','Parada'];
+  return ['idle','Sin trabajo'];
+}
+// ── Tornos: un recuadro por lector, verde si está conectado y rojo si no ──
+let _tnFirma='';
+function tnSvg(){
+  const teclas=[0,1,2,3].map(f=>[0,1,2,3].map(c=>'<rect x="'+(181+c*6.2)+'" y="'+(85+f*5.6)+'" width="4.6" height="4" rx=".9" fill="#4D5964" stroke="#2A323A" stroke-width=".3"/>').join('')).join('');
+  const herr=[0,60,120,180,240,300].map(a=>'<rect x="128" y="64" width="3.2" height="9" rx=".8" fill="#9BA6B0" stroke="#4D5760" stroke-width=".4" transform="rotate('+a+' 129.6 75)"/>').join('');
+  return '<svg viewBox="0 -18 270 194" role="img" aria-hidden="true">'
+   +'<ellipse cx="130" cy="164" rx="122" ry="8" fill="#000" opacity=".14"/>'
+   +'<g class="tn-cuerpo">'
+   // cinta de virutas y tacho (atrás a la derecha)
+   +'<polygon points="222,118 252,88 262,93 232,123" fill="#4E5963"/>'
+   +'<polygon points="252,88 262,93 262,103 252,98" fill="#3A444D"/>'
+   +'<line class="tn-cinta" x1="229" y1="119.5" x2="256" y2="92.5" stroke="#6F7B86" stroke-width="5" stroke-dasharray="1.6 3.2"/>'
+   +'<g class="tn-caen"><circle cx="258" cy="99" r="1.1" fill="#C9D0D6"/><circle cx="256" cy="99" r=".9" fill="#AEB7BF"/><circle cx="259" cy="99" r=".8" fill="#D8DEE3"/></g>'
+   +'<rect x="240" y="128" width="22" height="18" rx="2" fill="#2F3942"/><rect x="240" y="128" width="22" height="4" fill="#45515B"/>'
+   // base
+   +'<polygon points="12,148 202,148 202,160 12,160" fill="url(#tnBase)"/>'
+   +'<polygon points="202,148 238,130 238,142 202,160" fill="#141A1F"/>'
+   +'<polygon points="12,148 48,130 238,130 202,148" fill="#46525C"/>'
+   // cuerpo: techo, lado, frente
+   +'<polygon points="16,44 52,26 236,26 200,44" fill="url(#tnTecho)" stroke="#A5AEB7" stroke-width=".6"/>'
+   +'<polygon points="200,44 236,26 236,126 200,144" fill="url(#tnLado)" stroke="#86909A" stroke-width=".6"/>'
+   +'<rect x="16" y="44" width="184" height="100" fill="url(#tnFrente)" stroke="#A5AEB7" stroke-width=".6"/>'
+   // rejillas del lado
+   +[0,1,2,3,4].map(k=>'<line x1="208" y1="'+(62+k*5)+'" x2="228" y2="'+(52+k*5)+'" stroke="#7E8892" stroke-width="1.2" stroke-linecap="round"/>').join('')
+   // banda inferior oscura
+   +'<rect x="16" y="128" width="184" height="16" fill="url(#tnBanda)"/>'
+   +'<polygon points="200,128 236,110 236,126 200,144" fill="#232B32"/>'
+   +'<rect x="24" y="132" width="40" height="8" rx="1.5" fill="#1B2228" stroke="#56626C" stroke-width=".5"/>'
+   // franja superior con marca
+   +'<rect x="16" y="44" width="184" height="9" fill="#1F5F8B"/>'
+   +'<polygon points="16,44 52,26 56,26 20,44" fill="#2B76AA"/>'
+   +'<text x="22" y="51.3" font-size="6.2" font-weight="700" fill="#fff" font-family="Arial,sans-serif" letter-spacing=".8">SMEC  SL2000</text>'
+   +'<text x="166" y="51.3" font-size="5" fill="#CFE3F2" font-family="Arial,sans-serif" letter-spacing=".5">CNC</text>'
+   // puerta corrediza
+   +'<rect x="24" y="58" width="140" height="66" rx="4" fill="url(#tnMarco)" stroke="#97A1AB" stroke-width=".8"/>'
+   +'<rect x="30" y="63" width="128" height="56" rx="3" fill="url(#tnInterior)"/>'
+   // interior: bancada, husillo, plato, pieza, torreta, refrigerante
+   +'<polygon points="30,108 158,108 158,119 30,119" fill="#1A232A"/>'
+   +'<polygon points="30,104 158,98 158,108 30,108" fill="#2C3741" opacity=".9"/>'
+   +'<rect x="30" y="70" width="18" height="34" fill="url(#tnHusillo)"/>'
+   +'<circle cx="60" cy="86" r="16.5" fill="#3E4851"/>'
+   +'<g class="tn-plato"><circle cx="63" cy="86" r="15.5" fill="url(#tnPlatoG)" stroke="#3D4750" stroke-width=".8"/>'
+   +'<circle cx="63" cy="86" r="11" fill="none" stroke="#7D8892" stroke-width=".6"/>'
+   +'<rect x="61.4" y="71.5" width="3.2" height="8" rx=".6" fill="#2E363D"/>'
+   +'<rect x="61.4" y="71.5" width="3.2" height="8" rx=".6" fill="#2E363D" transform="rotate(120 63 86)"/>'
+   +'<rect x="61.4" y="71.5" width="3.2" height="8" rx=".6" fill="#2E363D" transform="rotate(240 63 86)"/>'
+   +'<circle cx="63" cy="86" r="3.6" fill="#E3E7EB" stroke="#8A949E" stroke-width=".5"/></g>'
+   +'<rect x="76" y="82.5" width="34" height="7" rx="1.2" fill="url(#tnPieza)"/>'
+   +'<g clip-path="url(#tnClipPz)"><rect class="tn-brillo" x="76" y="81" width="34" height="1.4" fill="#fff" opacity="0"/><rect class="tn-brillo b2" x="76" y="81" width="34" height=".8" fill="#fff" opacity="0"/></g>'
+   +'<rect x="104" y="82.5" width="2" height="7" fill="#8C979F"/>'
+   // torreta
+   +'<rect x="118" y="88" width="24" height="16" rx="1.5" fill="#4C5761"/>'
+   +'<g class="tn-torreta"><circle cx="129.6" cy="75" r="12" fill="url(#tnTorretaG)" stroke="#47515B" stroke-width=".8"/>'
+   +herr
+   +'<circle cx="129.6" cy="75" r="4" fill="#6E7983" stroke="#3B444D" stroke-width=".5"/>'
+   +'<polygon points="111,84 117,82 118,86 112,87" fill="#E8B34A"/></g>'
+   +'<path class="tn-refri" d="M150 64 C150 72 140 78 116 81" stroke="#59A9E6" stroke-width="1.6" fill="none" stroke-linecap="round"/>'
+   +'<circle cx="116" cy="81.5" r="1.4" fill="#9FD3F5"/>'
+   +'<circle class="tn-gota" cx="114" cy="84" r="1" fill="#9FD3F5"/><circle class="tn-gota g2" cx="112" cy="84" r=".8" fill="#9FD3F5"/>'
+   +'<g class="tn-chispas">'+[[-7,-7],[-3,-9],[4,-8],[-8,2],[5,4],[-2,8]].map((v,i)=>'<circle class="ch" cx="110.5" cy="85.5" r="'+(i%2?.7:.95)+'" fill="'+(i%3?'#F2C14E':'#FFE6A0')+'" style="--dx:'+v[0]+'px;--dy:'+v[1]+'px;animation-delay:'+(i*0.11).toFixed(2)+'s"/>').join('')+'</g>'
+   // luz interior y vidrio
+   +'<rect x="34" y="64" width="120" height="3" rx="1.5" fill="#FFF8D8" opacity=".55"/>'
+   +'<rect x="30" y="63" width="128" height="56" rx="3" fill="url(#tnVidrio)"/>'
+   +'<polygon points="82,63 98,63 66,119 50,119" fill="#fff" opacity=".10"/>'
+   +'<polygon points="104,63 110,63 78,119 72,119" fill="#fff" opacity=".07"/>'
+   +'<rect x="30" y="63" width="128" height="56" rx="3" fill="none" stroke="#7F8A94" stroke-width="1"/>'
+   // manija
+   +'<rect x="160" y="72" width="3.4" height="30" rx="1.7" fill="#7A858F" stroke="#56606A" stroke-width=".5"/>'
+   // panel de control
+   +'<rect x="172" y="57" width="26" height="70" rx="3" fill="url(#tnPanel)" stroke="#161C21" stroke-width=".6"/>'
+   +'<rect x="174.5" y="60" width="21" height="18" rx="1.4" fill="#0A1015"/>'
+   +'<rect class="tn-pant" x="176" y="61.5" width="18" height="15" rx="1"/>'
+   +'<path class="tn-graf" d="M177.5 73 l3.5 -3.5 2.5 2 3.5 -4.5 3.5 3" stroke="#fff" stroke-width="1" fill="none" opacity=".8"/>'
+   +'<rect x="177.5" y="63" width="9" height="1.4" rx=".7" fill="#fff" opacity=".7"/>'
+   +teclas.replace(/x="(\d+(\.\d+)?)"/g,(m,v)=>'x="'+(parseFloat(v)-6.4)+'"')
+   +'<circle cx="180" cy="117.5" r="4.6" fill="url(#tnEstopG)" stroke="#5E1515" stroke-width=".5"/>'
+   +'<circle cx="191.5" cy="117.5" r="3.6" fill="#59636C" stroke="#2A323A" stroke-width=".5"/><line x1="191.5" y1="117.5" x2="191.5" y2="114.4" stroke="#E3E7EB" stroke-width="1"/>'
+   +'</g>'
+   // baliza de 3 colores
+   +'<g transform="translate(215.5 32) scale(1.6) translate(-215.5 -32)">'
+   +'<rect x="214.2" y="20" width="2.6" height="12" fill="#5B656E"/>'
+   +'<ellipse cx="215.5" cy="32" rx="5" ry="2" fill="#3C454E"/>'
+   +'<circle class="tn-halo" cx="215.5" cy="11" r="15" fill="url(#tnHaloG)" style="color:var(--c)"/>'
+   +'<rect class="l-r" x="210" y="0.8" width="11" height="6.4" rx="1.2"/>'
+   +'<rect class="l-a" x="210" y="7.2" width="11" height="6.4" rx="1.2"/>'
+   +'<rect class="l-g" x="210" y="13.6" width="11" height="6.4" rx="1.2"/>'
+   +'<rect x="210" y="0.8" width="11" height="19.2" rx="1.2" fill="url(#tnLuzVidrio)"/>'
+   +'<ellipse cx="215.5" cy="0.9" rx="5.5" ry="1.3" fill="#2B333B"/>'
+   +'</g></svg>';
+}
+function tnEstado(l){
+  const e=l.estado||{}, lim=Math.max(30,(E.config&&E.config.lector_seg?E.config.lector_seg*3:30));
+  if(l.activo===false) return {cls:'off',txt:'Desactivado'};
+  const seg=e.leido?segDesde(e.leido):null;
+  if(e.leido&&!e.error&&seg!=null&&seg<=lim) return {cls:'ok',txt:'Conectado',seg:seg};
+  return {cls:'bad',txt:e.leido||e.error?'Sin conexión':'Conectando...',seg:seg};
+}
+function renderTornos(){
+  const ls=(E.lectores||[]).slice().sort((a,b)=>String(a.maquina).localeCompare(String(b.maquina),'es',{numeric:true}));
+  if(!ls.length){$('tn-grid').innerHTML='<div class="empty" style="grid-column:1/-1">No hay tornos cargados. Agregalos en la pestaña Lectores.</div>';$('tn-resumen').textContent='';_tnFirma='';return;}
+  const datos=ls.map(l=>{
+    const st=tnEstado(l), m=(E.maquinas||[]).find(x=>String(x.codigo).toUpperCase()===String(l.maquina).toUpperCase())||{};
+    const prod=st.cls==='ok'&&m.codigo&&estadoMaq(m)[0]==='prod';
+    const al=(l.estado&&l.estado.alarmas)||[];
+    return {l,st,m,prod,al};
+  });
+  const firma=datos.map(d=>d.l.maquina+':'+d.st.cls+':'+(d.prod?1:0)+':'+d.al.length).join('|');
+  if(firma!==_tnFirma){
+    _tnFirma=firma;
+    $('tn-grid').innerHTML=datos.map(d=>'<div class="tn '+d.st.cls+(d.prod?' gira':'')+(d.al.length?' alarma':'')+'" title="Ver en Lectores" onclick="ir(\'lectores\')">'
+      +tnSvg()
+      +'<div class="tn-h"><span class="code">'+esc(d.l.maquina)+'</span><span class="mname">'+esc(d.m.nombre||'')+'</span><span class="tn-est" id="tn-est-'+esc(d.l.maquina)+'"></span></div>'
+      +'<div class="tn-info" id="tn-info-'+esc(d.l.maquina)+'"></div>'
+      +(d.al.length?'<div class="tn-al">⚠ Alarma '+esc(d.al[0].codigo)+' '+esc(d.al[0].texto||'')+'</div>':'')
+      +'</div>').join('');
+  }
+  datos.forEach(d=>{
+    const e=d.l.estado||{}, est=$('tn-est-'+d.l.maquina), inf=$('tn-info-'+d.l.maquina);
+    if(est) est.textContent=d.st.txt+(d.prod?' · produciendo':'');
+    if(!inf) return;
+    let t=esc(d.l.ip||'')+':'+esc(d.l.puerto||8193);
+    if(d.st.cls==='ok') t+=' · contador '+fN(e.contador)+' · hace '+d.st.seg+' s';
+    else if(d.st.cls==='off') t+=' · el lector está apagado';
+    else if(e.error) t+=' · '+esc(e.error);
+    else if(e.leido) t+=' · última lectura '+dh(e.leido);
+    else t+=' · esperando la primera lectura';
+    inf.innerHTML=t; inf.title=inf.textContent;
+  });
+  const nOk=datos.filter(d=>d.st.cls==='ok').length, nBad=datos.filter(d=>d.st.cls==='bad').length;
+  $('tn-resumen').innerHTML='<b style="color:var(--ok)">'+nOk+'</b> conectado'+(nOk===1?'':'s')+' · <b style="color:'+(nBad?'var(--bad)':'var(--muted)')+'">'+nBad+'</b> sin conexión';
+}
+function renderGrid(){
+  renderTornos();
+  const ms=(E.maquinas||[]).filter(m=>m.operacion||(m.local&&(m.local.hoy||m.local.sin_paquete))||m.desconocida||alarmasDe(m).length);
+  const hoy=(E.maquinas||[]).reduce((a,m)=>a+((m.local&&m.local.hoy)||0),0);
+  const prod=ms.filter(m=>estadoMaq(m)[0]==='prod').length, par=ms.filter(m=>estadoMaq(m)[0]==='par').length, nal=ms.filter(m=>alarmasDe(m).length).length;
+  $('resumen').innerHTML='<div class="kpi" style="--kc:var(--ok)"><b>'+prod+'</b><span>Produciendo</span></div><div class="kpi" style="--kc:var(--warn)"><b>'+par+'</b><span>Paradas</span></div>'+(nal?'<div class="kpi" style="--kc:var(--bad)"><b style="color:var(--bad)">'+nal+'</b><span>Con alarma</span></div>':'')+'<div class="kpi"><b>'+fN(hoy)+'</b><span>Piezas hoy</span></div><div class="kpi" style="--kc:var(--idle)"><b>'+hm(E.ultimo_envio)+'</b><span>Último envío</span></div>'
+    +'<button class="btn" id="b-enviar" onclick="enviarAhora()"'+(E.enviando?' disabled':'')+'>'+(E.enviando?'Enviando...':'Enviar ahora')+'</button>';
+  if(!ms.length){$('grid').innerHTML='<div class="empty">'+(E.tiene_clave?'Ninguna máquina tiene un bloque ahora en el Scheduling de MetalERP ni mandó piezas hoy. Planificalas en MetalERP → Scheduling de producción.':'Conectá la app con MetalERP en Configuración.')+'</div>';return;}
+  const pal=($('buscar').value||'').toLowerCase().split(/\s+/).filter(Boolean);
+  const vis=pal.length?ms.filter(m=>{const op=m.operacion||{};
+    const t=[m.codigo,m.nombre,op.ot,op.nombre,op.producto,op.descripcion,m.operario&&m.operario.nombre,m.operario&&m.operario.legajo].join(' ').toLowerCase();
+    return pal.every(p=>t.indexOf(p)>=0);}):ms;
+  if(!vis.length){$('grid').innerHTML='<div class="empty">Ninguna máquina coincide con la búsqueda.</div>';return;}
+  $('grid').innerHTML=vis.map(m=>{
+    const [cls,txt]=m.desconocida?['sin','No está en MetalERP']:estadoMaq(m), s=m.local||{}, op=m.operacion;
+    const pct=op&&op.pedidas?Math.min(100,Math.round(op.hechas/op.pedidas*100)):0;
+    let extra='';
+    if(m.desconocida) extra='<div class="warnline">El router manda este código pero no existe en MetalERP: sus piezas van a quedar rechazadas.</div>';
+    else if(!op) extra='<div class="warnline">Sin bloque ahora en el Scheduling de MetalERP (no está trabajando): las piezas quedan en espera.</div>';
+    else if(!m.operario) extra='<div class="warnline">El bloque del Scheduling de MetalERP no tiene operario: las piezas quedan en espera.</div>';
+    const lec=(E.lectores||[]).find(l=>String(l.maquina).toUpperCase()===String(m.codigo).toUpperCase()&&l.activo!==false);
+    if(lec&&lec.estado&&lec.estado.error) extra+='<div class="warnline">Lector: '+esc(lec.estado.error)+'</div>';
+    else if(lec&&lec.estado&&lec.estado.leido) extra+='<div class="help" style="font-size:12px">Lector '+esc(lec.tipo)+': contador '+fN(lec.estado.contador)+' a las '+hm(lec.estado.leido)+'</div>';
+    if(lec&&lec.estado&&(lec.estado.alarmas||[]).length) extra+=lec.estado.alarmas.map(a=>'<div class="warnline"><b>ALARMA '+esc(a.codigo)+'</b> '+esc(a.texto||'')+'</div>').join('');
+    else if(lec&&lec.estado&&lec.estado.alarma_error) extra+='<div class="help" style="font-size:12px">'+esc(lec.estado.alarma_error)+'</div>';
+    if(lec&&lec.estado&&lec.estado.parada) extra+='<div class="warnline"><b>Parada P-'+esc(lec.estado.parada.codigo)+' '+esc(lec.estado.parada.motivo)+'</b> desde las '+hm(lec.estado.parada.inicio)+'</div>';
+    else if(lec&&lec.estado&&lec.estado.parada_error) extra+='<div class="help" style="font-size:12px">'+esc(lec.estado.parada_error)+'</div>';
+    else if(lec&&lec.estado&&lec.estado.parada_valor&&!lec.estado.parada) extra+='<div class="help" style="font-size:12px">La variable de parada tiene '+esc(lec.estado.parada_valor)+', que no es un código válido</div>';
+    if(m.esperando) extra+='<div class="waitline">'+fN(m.esperando)+' piezas esperando en MetalERP</div>';
+    if(m.errores) extra+='<div class="warnline">'+fN(m.errores)+' piezas con error en MetalERP</div>';
+    return '<div class="card s-'+cls+'"><div class="c-head"><span class="code">'+esc(m.codigo)+'</span><span class="mname">'+esc(m.nombre)+'</span><span class="pill '+cls+'">'+txt+'</span></div>'
+      +'<div><span class="k">Operario (de MetalERP)</span>'+(m.operario?esc(m.operario.nombre)+' <span style="color:var(--muted)">('+esc(m.operario.legajo)+')</span>':'—')+'</div>'
+      +'<div><span class="k">Trabajo</span>'+(op?esc(op.ot)+' · paso '+esc(op.paso)+' '+esc(op.nombre)+'<br><span style="color:var(--muted)">'+esc(op.producto||op.descripcion||'')+'</span>':'—')+'</div>'
+      +'<div class="counter"><div class="cnt">'+fN(s.hoy||0)+'<small> hoy</small></div><div class="meta">'+(op?fN(op.hechas)+' / '+fN(op.pedidas)+' en MetalERP':'')+'<br>'
+      +(s.ciclo_prom?'ciclo '+fN(s.ciclo_prom)+' s · ':'')+'última '+hm(s.ultima)+(s.sin_paquete?'<br>'+fN(s.sin_paquete)+' para el próximo paquete':'')+'</div></div>'
+      +(op?'<div class="prog"><i style="width:'+pct+'%"></i></div>':'')+extra+'</div>';
+  }).join('');
+}
+async function enviarAhora(){await api('/api/enviar_ahora',{method:'POST'});toast('Mandando las piezas a MetalERP...');setTimeout(cargarEstado,1500);setTimeout(()=>{cargarEstado();if(vista==='paquetes')cargarPaquetes();},5000);}
+async function cargarPaquetes(){
+  const d=await api('/api/paquetes'); const tb=$('tb-paq');
+  if(!Array.isArray(d)||!d.length){tb.innerHTML='<tr><td colspan="7" class="empty">Todavía no se armó ningún paquete.</td></tr>';return;}
+  const col={'Enviado':'prod','Por enviar':'idle','Error':'sin'};
+  tb.innerHTML=d.map(k=>{const r=k.respuesta||{};
+    const resp=k.estado==='Enviado'?(fN(r.nuevas)+' nuevas'+(r.duplicadas?' · '+fN(r.duplicadas)+' repetidas':'')+(r.rechazadas?' · <span style="color:var(--bad)">'+fN(r.rechazadas)+' rechazadas</span>':'')):esc(k.error||'');
+    return '<tr><td>'+dh(k.creado)+'</td><td>'+dh(k.desde)+'</td><td>'+dh(k.hasta)+'</td><td class="num">'+fN(k.piezas)+'</td><td><span class="pill '+(col[k.estado]||'idle')+'">'+esc(k.estado)+'</span>'+(k.estado==='Error'?' <span class="help">reintenta '+hm(k.proximo_intento)+'</span>':'')+'</td><td>'+dh(k.enviado)+'</td><td style="white-space:normal">'+resp+'</td></tr>';}).join('');
+}
+let PZ_PAG=1;
+function pzF(d){const z=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate());}
+function pzRango(r){const hoy=new Date(); let a='',b='';
+  if(r==='hoy'){a=b=pzF(hoy);} else if(r==='ayer'){const y=new Date(hoy);y.setDate(y.getDate()-1);a=b=pzF(y);}
+  else if(r==='semana'){const y=new Date(hoy);y.setDate(y.getDate()-6);a=pzF(y);b=pzF(hoy);} else if(r==='mes'){a=pzF(new Date(hoy.getFullYear(),hoy.getMonth(),1));b=pzF(hoy);}
+  $('pz-desde').value=a;$('pz-hasta').value=b;pzBuscar(1);}
+function pzQs(){const q=new URLSearchParams(); if($('pz-maq').value)q.set('maquina',$('pz-maq').value); if($('pz-desde').value)q.set('desde',$('pz-desde').value); if($('pz-hasta').value)q.set('hasta',$('pz-hasta').value); return q;}
+function pzBuscar(p){PZ_PAG=p||1;cargarPiezas();}
+async function cargarPiezas(){
+  const q=pzQs(); q.set('pagina',PZ_PAG); q.set('por',500);
+  const r=await api('/api/piezas/historial?'+q.toString()); const tb=$('tb-pz');
+  if(r.error){toast(r.error);return;}
+  const sel=$('pz-maq'), ant=sel.value; sel.innerHTML='<option value="">Todas</option>'+(r.maquinas||[]).map(m=>'<option'+(m===ant?' selected':'')+'>'+esc(m)+'</option>').join('');
+  const filtro=$('pz-maq').value||$('pz-desde').value||$('pz-hasta').value;
+  $('pz-resumen').innerHTML='<div class="help" style="margin-bottom:6px"><b>'+fN(r.total)+'</b> piezas'+(filtro?' con este filtro':' en total')+(r.primera?' · guardadas desde el '+esc(String(r.primera).slice(0,10)):'')+'</div>'
+    +((r.resumen||[]).length>1||filtro&&(r.resumen||[]).length?'<div style="display:flex;gap:8px;flex-wrap:wrap">'+r.resumen.map(x=>'<span class="chip" style="cursor:pointer" title="Primera '+esc(x.primera)+' · última '+esc(x.ultima)+'" onclick="$(\'pz-maq\').value=\''+esc(x.maquina)+'\';pzBuscar(1)"><b>'+esc(x.maquina)+'</b> '+fN(x.piezas)+' pzs'+(x.ciclo_prom?' · ciclo '+fN(x.ciclo_prom)+' s':'')+'</span>').join('')+'</div>':'');
+  const pg=$('pz-pag'); pg.innerHTML=r.paginas>1?'<button class="btn" '+(r.pagina<=1?'disabled':'')+' onclick="pzBuscar('+(r.pagina-1)+')">← Más nuevas</button><span class="help">Página '+r.pagina+' de '+r.paginas+'</span><button class="btn" '+(r.pagina>=r.paginas?'disabled':'')+' onclick="pzBuscar('+(r.pagina+1)+')">Más viejas →</button>':'';
+  const d=r.piezas;
+  if(!Array.isArray(d)||!d.length){tb.innerHTML='<tr><td colspan="6" class="empty">No hay piezas'+(($('pz-maq').value||$('pz-desde').value||$('pz-hasta').value)?' con este filtro':' todavía')+'.</td></tr>';return;}
+  tb.innerHTML=d.map(p=>'<tr><td>'+esc(p.hora)+'</td><td>'+esc(p.maquina)+'</td><td class="num">'+(p.ciclo_seg?fN(p.ciclo_seg)+' s':'—')+'</td><td class="num">'+(p.contador==null?'—':p.contador)+'</td><td>'+esc(p.origen||'')+'</td><td>'+(p.paquete?esc(p.paquete_estado||''):'Próximo')+'</td></tr>').join('');
+}
+function renderSim(){
+  if(!E){return;}
+  const ms=(E.maquinas||[]).filter(m=>!m.desconocida);
+  if(!ms.length){$('sim').innerHTML='<div class="empty">Conectá la app con MetalERP para ver las máquinas.</div>';return;}
+  // Se rearma solo si cambian las máquinas o el automático, así no se pierde lo que se está escribiendo.
+  const clave=ms.map(m=>m.codigo+(autos[m.codigo]?'*':'')).join(',');
+  if(clave===_simClave&&$('sim').children.length)return; _simClave=clave;
+  $('sim').innerHTML=ms.map(m=>'<div class="sim-item"><b>'+esc(m.codigo)+'</b><button class="btn" onclick="simPieza(\''+esc(m.codigo)+'\')">+1 pieza</button>'
+    +'<input type="number" class="sim-n" id="simn-'+esc(m.codigo)+'" min="1" max="500" value="'+(simCant[m.codigo]||10)+'" oninput="simCant[\''+esc(m.codigo)+'\']=this.value" title="Cuántas piezas mandar de una vez">'
+    +'<button class="btn" onclick="simVarias(\''+esc(m.codigo)+'\')">Mandar</button><button class="btn'+(autos[m.codigo]?' on':'')+'" onclick="simAuto(\''+esc(m.codigo)+'\')" title="Una pieza cada 10 segundos">'+(autos[m.codigo]?'Parar':'Automático')+'</button></div>').join('');
+}
+let _simClave='', simCant={};
+async function simVarias(c){
+  const n=Math.max(1,Math.min(500,parseInt(($('simn-'+c)||{}).value,10)||0));
+  const r=await api('/senal?maquina='+encodeURIComponent(c)+'&piezas='+n+'&origen=simulador');
+  if(r.error)toast(r.error);else toast(fN(r.piezas)+' piezas de '+c+' registradas');cargarEstado();}
+async function simPieza(c){const r=await api('/senal?maquina='+encodeURIComponent(c)+'&origen=simulador');if(r.error)toast(r.error);else toast('Pieza de '+c+' registrada');cargarEstado();}
+function simAuto(c){if(autos[c]){clearInterval(autos[c]);delete autos[c];}else{autos[c]=setInterval(()=>api('/senal?maquina='+encodeURIComponent(c)+'&origen=simulador'),10000);}renderSim();}
+// ── Backup de programas ──
+let BK=null, BK_T=null;
+const fTam=b=>b==null?'—':(b<1024?b+' B':(b<1048576?(b/1024).toFixed(1)+' KB':(b/1048576).toFixed(1)+' MB'));
+async function cargarBackup(){
+  const r=await api('/api/backup'); if(r.error){toast(r.error);return;}
+  BK=r; renderBackup();
+  clearTimeout(BK_T); if(vista==='backup'&&(r.maquinas||[]).some(m=>m.estado&&m.estado.en_curso)) BK_T=setTimeout(cargarBackup,1500);
+}
+function bkEstadoTxt(e){
+  if(!e)return '';
+  if(e.en_curso)return '<div class="aviso warn" style="margin:8px 0">Haciendo backup... '+(e.total?(e.hechos+' de '+e.total+' programas'+(e.actual?' (bajando O'+String(e.actual).padStart(4,'0')+')':'')):'leyendo la lista de programas')+'</div>';
+  if(e.error)return '<div class="aviso bad" style="margin:8px 0">No se pudo hacer el backup: '+esc(e.error)+'</div>';
+  return '<div class="aviso ok" style="margin:8px 0">Backup listo a las '+hm(e.fin)+': '+fN(e.programas)+' programas.'+(e.errores&&e.errores.length?' No se pudieron bajar '+e.errores.length+': '+esc(e.errores.slice(0,5).join(' · ')):'')+'</div>';
+}
+function renderBackup(){
+  const ms=BK.maquinas||[], loc=BK.es_local;
+  $('bk-carpeta').textContent='Carpeta: '+(BK.carpeta||'');
+  $('bk-abrir').hidden=!loc;
+  $('bk-lista').innerHTML=ms.length?ms.map(m=>{const e=m.estado||{}, q=encodeURIComponent;
+    return '<div class="bk-card">'
+    +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b style="font-size:16px">'+esc(m.maquina)+'</b><span class="help">Fanuc '+esc(m.ip)+':'+esc(m.puerto||8193)+'</span>'
+    +'<span style="flex:1"></span><button class="btn" onclick="bkVerProg(\''+esc(m.maquina)+'\')">'+(BK_P[m.maquina]&&BK_P[m.maquina].abierto?'Ocultar programas':'Ver programas del torno')+'</button><button class="btn p" onclick="bkHacer(\''+esc(m.maquina)+'\')"'+(e.en_curso?' disabled':'')+'>'+(e.en_curso?'Haciendo backup...':'Hacer backup')+'</button></div>'
+    +bkEstadoTxt(m.estado)+bkProgHtml(m.maquina,loc)
+    +'<div class="tbl" style="margin-top:8px"><table><thead><tr><th>Fecha</th><th style="text-align:right">Programas</th><th style="text-align:right">Tamaño</th><th></th></tr></thead><tbody>'
+    +((m.backups||[]).length?m.backups.map(b=>'<tr><td>'+esc(b.fecha)+'</td><td style="text-align:right">'+fN(b.programas)+'</td><td style="text-align:right">'+fTam(b.tam)+'</td><td>'
+      +'<a class="btn" style="text-decoration:none;display:inline-block" href="/api/backup/zip?carpeta='+q(b.carpeta)+'">Descargar .zip</a>'+(loc?' <button class="btn" onclick="bkAbrir(\''+esc(b.carpeta)+'\')">Abrir carpeta</button>':'')+'</td></tr>').join('')
+      :'<tr><td colspan="4" class="empty">Todavía no hay backups de esta máquina.</td></tr>')
+    +'</tbody></table></div></div>';}).join('')
+    :'<div class="empty" style="padding:18px 0">No hay máquinas Fanuc cargadas. Agregalas en la pestaña Lectores (con su IP) y volvé acá.</div>';
+}
+// Programas sueltos: lista del torno y bajar uno
+const BK_P={};
+function bkProgHtml(maq,loc){
+  const p=BK_P[maq]; if(!p||!p.abierto)return '';
+  if(p.cargando)return '<div class="aviso warn" style="margin:8px 0">Leyendo la lista de programas de '+esc(maq)+'...</div>';
+  if(p.error)return '<div class="aviso bad" style="margin:8px 0">'+esc(p.error)+' <button class="btn" onclick="bkCargarProg(\''+esc(maq)+'\')">Reintentar</button></div>';
+  const todos=(p.programas||[]).concat(p.comp?p.comp.borrados:[]);
+  const f=(p.filtro||'').toLowerCase(), ls=todos.filter(x=>!p.soloCambios||!p.comp||(p.comp.map[x.numero]&&p.comp.map[x.numero].estado!=='igual')).filter(x=>!f||(x.nombre+' '+(x.comentario||'')).toLowerCase().includes(f));
+  return '<div style="margin:10px 0 4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>Programas en el torno ('+fN((p.programas||[]).length)+')</b><span class="help">leídos a las '+hm(p.hora)+'</span>'
+    +'<input placeholder="Buscar número o comentario" value="'+esc(p.filtro||'')+'" oninput="bkFiltro(\''+esc(maq)+'\',this)" style="min-width:220px" id="bkf-'+esc(maq)+'">'
+    +'<button class="btn" onclick="bkCargarProg(\''+esc(maq)+'\')">Actualizar</button>'
+    +'<button class="btn" onclick="bkComparar(\''+esc(maq)+'\')"'+(p.comparando?' disabled':'')+' title="Baja cada programa del torno y lo compara con el último backup (no cambia nada en la máquina)">'+(p.comparando?'Comparando...':'Comparar con último backup')+'</button>'+(loc?'<button class="btn" onclick="bkAbrir(\''+esc(maq)+'/sueltos\')">Abrir carpeta de sueltos</button>':'')+'</div>'
+    +(p.msg?'<div class="aviso '+(p.msg.ok?'ok':'bad')+'" style="margin:6px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span>'+esc(p.msg.t)+'</span>'+(p.msg.arch&&loc?'<button class="btn" onclick="bkAbrirArch(\''+esc(p.msg.arch)+'\')">Abrir carpeta donde se guardó</button>':'')+'</div>':'')
+    +(p.comparando?'<div class="aviso warn" style="margin:6px 0">Bajando cada programa de '+esc(maq)+' para compararlo con el último backup... puede tardar un minuto.</div>':'')
+    +bkCompResumen(maq,p)
+    +'<div class="tbl" style="max-height:340px;overflow:auto"><table><thead><tr><th>Programa</th><th>Comentario</th><th style="text-align:right">Tamaño</th>'+(p.comp?'<th>Contra el backup</th>':'')+'<th></th></tr></thead><tbody>'
+    +(ls.length?ls.map(x=>{const baj=p.bajando===x.numero, c=p.comp&&p.comp.map[x.numero], ocup=p.bajando!=null||p.comparando, bor=x.borrado;
+      return '<tr'+(bor?' style="opacity:.75"':'')+'><td><b>'+esc(x.nombre)+'</b></td><td>'+esc(x.comentario||'')+'</td><td style="text-align:right">'+(x.tam!=null?fTam(x.tam):'')+'</td>'
+      +(p.comp?'<td>'+bkCompEstado(c)+'</td>':'')
+      +'<td style="white-space:nowrap">'+(bor?'<span class="help">ya no está en el torno</span>':'<button class="btn" onclick="bkVer(\''+esc(maq)+'\','+x.numero+')"'+(ocup?' disabled':'')+'>Ver</button> '
+      +(c&&c.estado==='cambio'?'<button class="btn" onclick="bkDif(\''+esc(maq)+'\','+x.numero+')"'+(ocup?' disabled':'')+'>Ver cambios</button> ':'')
+      +'<button class="btn" onclick="bkBajarProg(\''+esc(maq)+'\','+x.numero+')"'+(ocup?' disabled':'')+'>'+(baj?'Bajando...':'Descargar')+'</button>')+'</td></tr>';}).join('')
+      :'<tr><td colspan="'+(p.comp?5:4)+'" class="empty">'+(f?'Ningún programa coincide con la búsqueda.':'El torno no tiene programas.')+'</td></tr>')
+    +'</tbody></table></div>';
+}
+function bkCompEstado(c){
+  if(!c)return '<span class="help">—</span>';
+  const t={igual:['Igual','var(--ok)'],cambio:['Cambió','var(--warn)'],nuevo:['Nuevo','var(--accent)'],borrado:['Borrado del torno','var(--bad)'],error:['No se pudo leer','var(--bad)']}[c.estado]||[c.estado,'inherit'];
+  return '<b style="color:'+t[1]+'"'+(c.detalle?' title="'+esc(c.detalle)+'"':'')+'>'+t[0]+'</b>';
+}
+function bkCompResumen(maq,p){
+  if(!p.comp)return ''; const k=p.comp.cuenta||{};
+  const dif=(k.cambio||0)+(k.nuevo||0)+(k.borrado||0);
+  return '<div class="aviso '+(dif?'warn':'ok')+'" style="margin:6px 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span>Comparado a las '+hm(p.comp.hora)+' con el backup del <b>'+esc(p.comp.backup)+'</b>: '
+    +(dif?'<b>'+(k.cambio||0)+'</b> cambiaron, <b>'+(k.nuevo||0)+'</b> nuevos, <b>'+(k.borrado||0)+'</b> borrados, ':'ningún cambio, ')+(k.igual||0)+' iguales'+(k.error?', '+k.error+' no se pudieron leer':'')+'.</span>'
+    +(dif?'<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" '+(p.soloCambios?'checked':'')+' onchange="BK_P[\''+esc(maq)+'\'].soloCambios=this.checked;renderBackup()"> Mostrar solo los distintos</label>':'')+'</div>';
+}
+async function bkComparar(maq){
+  const p=BK_P[maq]; if(!p)return; p.comparando=true; p.msg=null; renderBackup();
+  const r=await api('/api/backup/comparar',{method:'POST',body:JSON.stringify({maquina:maq})});
+  const q=BK_P[maq]; q.comparando=false;
+  if(r.error){q.msg={ok:false,t:r.error};}
+  else{const map={}; (r.programas||[]).forEach(x=>map[x.numero]=x);
+    q.comp={map:map,cuenta:r.cuenta,hora:r.hora,backup:r.backup,borrados:(r.programas||[]).filter(x=>x.estado==='borrado').map(x=>({numero:x.numero,nombre:x.nombre,comentario:x.comentario,borrado:true}))};
+    q.soloCambios=((r.cuenta.cambio||0)+(r.cuenta.nuevo||0)+(r.cuenta.borrado||0))>0;}
+  renderBackup();
+}
+function bkModal(titulo,html){
+  let o=$('bk-modal'); if(!o){o=document.createElement('div');o.id='bk-modal';document.body.appendChild(o);
+    o.addEventListener('click',e=>{if(e.target===o)o.hidden=true;}); document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('bk-modal'))$('bk-modal').hidden=true;});}
+  o.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px';
+  o.hidden=false;
+  o.innerHTML='<div style="background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:10px;width:min(900px,100%);max-height:88vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.3)">'
+    +'<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)"><b style="font-size:16px;flex:1">'+titulo+'</b><button class="btn" onclick="$(\'bk-modal\').hidden=true">Cerrar</button></div>'
+    +'<div style="overflow:auto;padding:10px 16px 16px">'+html+'</div></div>';
+}
+async function bkVer(maq,num){
+  const nom=num<10000?'O'+String(num).padStart(4,'0'):'O'+String(num).padStart(8,'0');
+  bkModal(esc(maq)+' · '+nom,'<div class="help">Leyendo el programa del torno...</div>');
+  const r=await api('/api/backup/programa?ver=1&maquina='+encodeURIComponent(maq)+'&numero='+num);
+  if(r.error){bkModal(esc(maq)+' · '+nom,'<div class="aviso bad">'+esc(r.error)+'</div>');return;}
+  const ls=String(r.texto||'').replace(/\n$/,'').split('\n');
+  bkModal(esc(maq)+' · '+esc(r.nombre)+' <span class="help" style="font-weight:400">('+fN(ls.length)+' líneas, leído ahora del torno)</span>',
+    '<pre style="margin:0;font:12.5px/1.45 var(--f-mono);white-space:pre">'+ls.map((l,i)=>'<span style="color:var(--muted);user-select:none;display:inline-block;min-width:4.5ch;text-align:right;margin-right:12px">'+(i+1)+'</span>'+esc(l)).join('\n')+'</pre>'
+    +'<div style="margin-top:10px"><button class="btn" onclick="$(\'bk-modal\').hidden=true;bkBajarProg(\''+esc(maq)+'\','+num+')">Descargar</button></div>');
+}
+async function bkDif(maq,num){
+  const nom=num<10000?'O'+String(num).padStart(4,'0'):'O'+String(num).padStart(8,'0');
+  bkModal('Cambios en '+esc(maq)+' · '+nom,'<div class="help">Bajando el programa del torno...</div>');
+  const r=await api('/api/backup/diferencias?maquina='+encodeURIComponent(maq)+'&numero='+num);
+  if(r.error){bkModal('Cambios en '+esc(maq)+' · '+nom,'<div class="aviso bad">'+esc(r.error)+'</div>');return;}
+  const st={'-':'background:rgba(200,40,40,.14)','+':'background:rgba(30,150,70,.16)','=':'','...':'color:var(--muted);font-style:italic'};
+  const num2=v=>'<span style="color:var(--muted);display:inline-block;min-width:4.5ch;text-align:right">'+(v||'')+'</span>';
+  bkModal('Cambios en '+esc(maq)+' · '+esc(r.nombre),
+    '<div class="help" style="margin-bottom:8px"><span style="background:rgba(200,40,40,.14);padding:1px 6px;border-radius:3px">− rojo</span> estaba en el backup del '+esc(r.backup)+' y ya no está · <span style="background:rgba(30,150,70,.16);padding:1px 6px;border-radius:3px">+ verde</span> está ahora en el torno</div>'
+    +'<pre style="margin:0;font:12.5px/1.45 var(--f-mono);white-space:pre">'+(r.lineas||[]).map(x=>'<div style="'+st[x.t]+'">'+(x.t==='...'?'          '+esc(x.l):num2(x.a)+' '+num2(x.b)+'  '+(x.t==='='?' ':x.t)+' '+esc(x.l))+'</div>').join('')+'</pre>');
+}
+function bkVerProg(maq){const p=BK_P[maq]; if(p&&p.abierto){p.abierto=false;renderBackup();return;} bkCargarProg(maq);}
+async function bkCargarProg(maq){
+  const ant=BK_P[maq]||{}; if(ant.comparando)return; BK_P[maq]={abierto:true,cargando:true,filtro:ant.filtro||''}; renderBackup();
+  const r=await api('/api/backup/programas?maquina='+encodeURIComponent(maq));
+  BK_P[maq]=r.error?{abierto:true,error:r.error,filtro:ant.filtro||''}:{abierto:true,programas:r.programas||[],hora:r.hora,filtro:ant.filtro||''};
+  renderBackup();
+}
+function bkFiltro(maq,inp){const p=BK_P[maq]; if(!p)return; p.filtro=inp.value; const pos=inp.selectionStart; renderBackup();
+  const n=$('bkf-'+maq); if(n){n.focus(); try{n.setSelectionRange(pos,pos);}catch(e){}}}
+async function bkBajarProg(maq,num){
+  const p=BK_P[maq]; if(!p)return; p.bajando=num; p.msg=null; renderBackup();
+  const nom=num<10000?'O'+String(num).padStart(4,'0'):'O'+String(num).padStart(8,'0');
+  try{
+    const res=await fetch('/api/backup/programa?maquina='+encodeURIComponent(maq)+'&numero='+num);
+    if(!res.ok||(res.headers.get('content-type')||'').includes('json')){let e='No se pudo bajar '+nom; try{e=(await res.json()).error||e;}catch(x){} p.msg={ok:false,t:e};}
+    else{const b=await res.blob(), u=URL.createObjectURL(b), a=document.createElement('a'); a.href=u; a.download=maq+'_'+nom+'.NC'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(u),5000);
+      p.msg={ok:true,t:nom+' descargado ('+fTam(b.size)+'). También quedó guardado en la carpeta de sueltos de '+maq+'.',arch:res.headers.get('X-Archivo')||''};}
+  }catch(e){p.msg={ok:false,t:'No se pudo bajar '+nom+': '+e};}
+  p.bajando=null; renderBackup();
+}
+function bkMsg(ok,t){const e=$('bk-msg');e.hidden=false;e.className='aviso '+(ok?'ok':'bad');e.textContent=t;}
+async function bkHacer(m){
+  if(!confirm('¿Hacer backup de todos los programas de '+m+'? Baja los programas a esta PC, no cambia nada en la máquina.'))return;
+  const r=await api('/api/backup',{method:'POST',body:JSON.stringify({maquina:m})});
+  if(r.error){bkMsg(false,r.error);return;}
+  $('bk-msg').hidden=true; cargarBackup();
+}
+async function bkAbrirArch(a){const r=await api('/api/backup/abrir',{method:'POST',body:JSON.stringify({archivo:a})}); if(r.error)bkMsg(false,r.error);}
+async function bkAbrir(c){const r=await api('/api/backup/abrir',{method:'POST',body:JSON.stringify({carpeta:c})}); if(r.error)bkMsg(false,r.error);}
+// ── Paradas (variable de macro que carga el operario) ──
+function durTxt(seg){if(seg==null)return '—';seg=Math.round(seg);const h=Math.floor(seg/3600),m=Math.floor(seg%3600/60),s=seg%60;return h?h+' h '+String(m).padStart(2,'0')+' min':(m?m+' min '+String(s).padStart(2,'0')+' s':s+' s');}
+async function cargarParadas(){
+  const r=await api('/api/paradas'); if(r.error){toast(r.error);return;}
+  const b=r.base||0;
+  $('pa-ayuda').innerHTML='El operario, al parar, carga en la variable <b>#'+esc(r.variable)+'</b> el número '+esc(b)+' + código (por ejemplo baño = <b>'+(b+16)+'</b>) y al volver la pone en <b>0</b>. El Monitor la lee junto con el contador. Si la máquina vuelve a sacar piezas con la parada abierta, la parada se cierra sola. Las paradas terminadas viajan a MetalERP con el paquete y quedan como Trabajo no productivo del operario de la máquina.';
+  $('pa-ayuda-al').innerHTML=r.leer_alarmas?'<b>Alarmas de la máquina:</b> el Monitor también lee las alarmas activas del control (por ejemplo sobrecalentamiento de husillo o servo, sobrecarrera, alarmas del fabricante). Cada alarma queda como parada desde que aparece hasta que se borra de la pantalla ALARM, y viaja a MetalERP como Trabajo no productivo "ALARMA código texto". Las de menos de '+esc(r.alarma_min_seg||0)+' s se anotan acá pero no se mandan. Si el torno se apaga o se desconecta con una alarma, se cierra a la hora de la última lectura.':'<b>Alarmas de la máquina:</b> la lectura de alarmas está apagada.';
+  $('pa-cfg').hidden=!(E&&E.es_local); if(!paCfgTocado){$('pa-al-on').checked=!!r.leer_alarmas; $('pa-al-min').value=r.alarma_min_seg??10;}
+  $('pa-cods').innerHTML=(r.codigos||[]).map((c,i)=>'<div><b>'+(b+i+1)+'</b> · P-'+(i+1)+' '+esc(c)+'</div>').join('');
+  const cerro={operario:'Operario (0)',cambio:'Otro código',piezas:'Volvió a producir',alarma:'Se borró la alarma',sin_conexion:'Sin conexión'};
+  $('tb-pa').innerHTML=(r.paradas||[]).length?r.paradas.map(p=>{const ab=!p.fin; const dur=ab?segDesde(p.inicio):p.duracion_seg;
+    const est=ab?'<span style="color:var(--warn)">En curso</span>':(p.estado==='Enviada'?'<span style="color:var(--ok)">Enviada</span>':(p.estado==='Por enviar'?'Por enviar':p.estado==='Corta'?'<span style="color:var(--muted)" title="Duró menos que el mínimo: no se manda">Corta, no se manda</span>':'<span style="color:var(--bad)" title="'+esc(p.error||'')+'">'+esc(p.estado)+'</span>'));
+    return '<tr><td><b>'+esc(p.maquina)+'</b></td><td>'+(p.tipo==='alarma'?'<b style="color:var(--bad)">'+esc(p.alarma)+'</b>':'P-'+esc(p.codigo))+'</td><td>'+esc(p.motivo)+'</td><td>'+esc(p.inicio)+'</td><td>'+(p.fin?esc(p.fin.slice(11)):'—')+'</td><td style="text-align:right">'+durTxt(dur)+'</td><td>'+esc(cerro[p.cerrada_por]||'')+'</td><td>'+est+(p.error&&p.estado!=='Enviada'?'<br><span class="help" style="white-space:normal">'+esc(p.error)+'</span>':'')+'</td></tr>';}).join('')
+    :'<tr><td colspan="8" class="empty">Todavía no hay paradas cargadas desde las máquinas.</td></tr>';
+}
+let paCfgTocado=false;
+document.addEventListener('input',e=>{if(e.target&&(e.target.id==='pa-al-on'||e.target.id==='pa-al-min'))paCfgTocado=true;});
+async function paGuardarAl(){const r=await api('/api/config',{method:'PUT',body:JSON.stringify({leer_alarmas:$('pa-al-on').checked,alarma_min_seg:$('pa-al-min').value})});
+  if(r.error)toast(r.error);else{paCfgTocado=false;toast('Guardado');cargarParadas();}}
+// ── Enviar programa (carpeta FTP) ──
+let EN=null, EN_TXT='', EN_NOM='';
+async function cargarEnvio(){
+  const r=await api('/api/envio'); if(r.error){toast(r.error);return;}
+  EN=r; const sel=$('en-maq'), ant=sel.value;
+  sel.innerHTML=(r.maquinas||[]).map(m=>'<option value="'+esc(m.maquina)+'">'+esc(m.maquina)+' ('+esc(m.ip)+')</option>').join('')||'<option value="">No hay máquinas Fanuc en Lectores</option>';
+  if(ant&&(r.maquinas||[]).some(m=>m.maquina===ant))sel.value=ant;
+  const f=r.ftp||{}, av=$('en-ftp');
+  if(!r.es_local){av.hidden=false;av.className='aviso warn';av.textContent='Los programas se dejan solo desde la PC donde corre la app.';}
+  else if(!f.habilitado){av.hidden=false;av.className='aviso warn';av.textContent='El FTP está apagado: los tornos no ven la carpeta. Encendelo abajo.';}
+  else if(!f.ok){av.hidden=false;av.className='aviso bad';av.textContent='FTP: '+(f.error||'no arrancó');}
+  else av.hidden=true;
+  $('en-btn').disabled=!r.es_local||!(r.maquinas||[]).length;
+  $('en-cfg').hidden=!r.es_local;
+  if(document.activeElement!==$('en-puerto'))$('en-puerto').value=f.puerto||21;
+  if(document.activeElement!==$('en-clave'))$('en-clave').value=f.clave||'';
+  $('en-act').checked=!!f.habilitado;
+  $('tb-env').innerHTML=(r.historial||[]).length?r.historial.map(h=>{const bad=/incorrect|cortó|distinto|falló|ya estaba/i.test(h.evento), ok=/igual|bajó|entró|vio la lista|bien/i.test(h.evento);
+    return '<tr><td>'+esc(h.hora)+'</td><td>'+esc(h.maquina||'')+'</td><td>'+esc(h.programa||'')+'</td><td style="color:'+(bad?'var(--bad)':(ok?'var(--ok)':'inherit'))+'">'+esc(h.evento)+'</td><td style="white-space:normal;max-width:420px">'+esc([h.archivo,h.detalle,h.desde?'desde '+h.desde:''].filter(Boolean).join(' · '))+'</td></tr>';}).join('')
+    :'<tr><td colspan="5" class="empty">Todavía no hay movimientos.</td></tr>';
+  enRender();
+}
+function enRender(){
+  if(!EN)return; const m=(EN.maquinas||[]).find(x=>x.maquina===$('en-maq').value); const loc=EN.es_local;
+  $('en-maq-tit').textContent=m?m.maquina:'';
+  $('tb-enarch').innerHTML=m&&m.archivos.length?m.archivos.map(a=>'<tr><td><b>'+esc(a.nombre)+'</b></td><td>'+esc(a.comentario||'')+'</td><td style="text-align:right">'+fTam(a.tam)+'</td><td>'+esc(a.fecha)+'</td><td><button class="btn" onclick="enVerificar(\''+esc(m.maquina)+'\',\''+esc(a.nombre)+'\')">Verificar</button>'+(loc?' <button class="btn p" onclick="enDirecto(\''+esc(m.maquina)+'\',\''+esc(a.nombre)+'\')" title="Lo carga en la memoria del torno por la red, sin que el operario haga nada">Mandar al torno</button>':'')+(loc?' <button class="btn" onclick="enQuitar(\''+esc(m.maquina)+'\',\''+esc(a.nombre)+'\')">Sacar</button>':'')+'</td></tr>').join('')
+    :'<tr><td colspan="5" class="empty">La carpeta está vacía.</td></tr>';
+  const f=EN.ftp||{};
+  if(m&&!m.misma_red&&loc&&f.ok&&f.habilitado){const av=$('en-ftp');av.hidden=false;av.className='aviso bad';
+    av.textContent='La PC no tiene IP en la red de '+m.maquina+' ('+m.ip+'): el torno no va a poder entrar. Revisá que el cable de red de la PC esté enchufado al switch de los tornos y que esa placa tenga la IP 192.168.10.5.';}
+  $('en-datos').innerHTML=m?('<b>1. Datos en el torno '+esc(m.maquina)+'</b> (una sola vez): SYSTEM → ▶ → <b>[EMBED PORT]</b> → <b>[FTP TRANS]</b>. El título tiene que decir <b>FTP TRANS:SETTING [EMBEDDED]</b>; si dice [PCMCIA], cambiá de página con la tecla EMB/PCMCIA. Cargá en CONNECT 1, cada dato con INPUT:'
+    +'<table style="margin:8px 0;width:auto"><tbody>'
+    +'<tr><td>HOST NAME (IP)</td><td><b style="font-family:var(--f-mono)">'+esc(m.ip_pc)+'</b></td></tr>'
+    +'<tr><td>PORT NUMBER</td><td><b style="font-family:var(--f-mono)">'+esc(f.puerto||21)+'</b></td></tr>'
+    +'<tr><td>USER NAME</td><td><b style="font-family:var(--f-mono)">'+esc(m.usuario)+'</b></td></tr>'
+    +'<tr><td>PASSWORD</td><td><b style="font-family:var(--f-mono)">'+(loc?esc(String(f.clave||'').toUpperCase()):'(se ve en la PC de la app)')+'</b> <span style="color:var(--muted)">(mayúsculas o minúsculas, da igual)</span></td></tr>'
+    +'<tr><td>LOGIN FOLDER</td><td><i>vacío</i></td></tr></tbody></table>'
+    +'Después <b>[HOST SELECT]</b> → elegí <b>CONNECT 1</b>, revisá en [COMMON] que la IP del torno sea <b>'+esc(m.ip)+'</b> con máscara 255.255.255.0, y <b>apagá y prendé el torno</b>.'
+    +'<br><b>2. Traer un programa:</b> modo <b>EDIT</b> → <b>PROG</b> → (OPRT) o ▶ → <b>[DEVICE CHANGE]</b> → <b>[EMBED]</b>: aparece la lista de esta carpeta. Escribí el número (ej. O9999) → <b>[F INPUT]</b> o <b>[READ]</b> → <b>[EXEC]</b>. Para volver: [DEVICE CHANGE] → [CNC MEM]. Las teclas pueden llamarse distinto según el torno.'
+    +'<br><b>3.</b> Tocá <b>Verificar</b> en la lista de arriba para comparar lo que quedó en el torno con el archivo.'):'';
+}
+function enArchivo(inp){
+  const f=inp.files&&inp.files[0]; if(!f)return; EN_NOM=f.name;
+  if(f.size>2*1024*1024){enMsg(false,'El archivo es muy grande para un programa (más de 2 MB).');return;}
+  const rd=new FileReader(); rd.onload=()=>{EN_TXT=String(rd.result||'');
+    const m=EN_TXT.match(/^\s*%?\s*O(\d{1,8})/m); if(m)$('en-num').value=parseInt(m[1],10);
+    const p=$('en-prev'); p.hidden=false; const ls=EN_TXT.replace(/\r/g,'').split('\n'); p.textContent=ls.slice(0,40).join('\n')+(ls.length>40?'\n... ('+ls.length+' líneas)':''); $('en-msg').hidden=true;};
+  rd.readAsText(f,'latin1');
+}
+function enMsg(ok,t,warn){const e=$('en-msg');e.hidden=false;e.className='aviso '+(warn?'warn':(ok?'ok':'bad'));e.textContent=t;}
+async function enDejar(reemplazar){
+  const maq=$('en-maq').value, num=parseInt($('en-num').value,10);
+  if(!maq){enMsg(false,'Elegí la máquina');return;} if(!EN_TXT){enMsg(false,'Elegí el archivo del programa');return;} if(!num){enMsg(false,'Poné el número de programa');return;}
+  const r=await api('/api/envio',{method:'POST',body:JSON.stringify({maquina:maq,numero:num,texto:EN_TXT,archivo:EN_NOM,reemplazar:reemplazar})});
+  if(r.existe){ if(confirm(r.programa+'.NC ya está en la carpeta de '+maq+'. ¿Reemplazarlo por este archivo?'))return enDejar(true); return; }
+  if(r.ok)enMsg(true,r.archivo+' quedó en la carpeta de '+maq+'. Ahora el operario lo carga desde el torno; después tocá Verificar.');
+  else enMsg(false,r.error||'No se pudo dejar el programa');
+  cargarEnvio();
+}
+async function enQuitar(m,n){
+  if(!confirm('¿Sacar '+n+' de la carpeta de '+m+'? No cambia nada en la máquina.'))return;
+  const r=await api('/api/envio/quitar',{method:'POST',body:JSON.stringify({maquina:m,nombre:n})}); if(r.error)enMsg(false,r.error); cargarEnvio();
+}
+async function enDirecto(m,n){
+  if(!confirm('¿Mandar '+n+' directo a la memoria de '+m+'?\n\nNo reemplaza: si el programa ya está en el torno no hace nada. Conviene con el torno parado y fuera de MDI.'))return;
+  enMsg(true,'Mandando '+n+' a '+m+'... (puede tardar unos segundos)',true);
+  const r=await api('/api/envio/directo',{method:'POST',body:JSON.stringify({maquina:m,nombre:n})});
+  if(r.error)enMsg(false,r.error); else enMsg(!!r.ok,r.resultado+(r.ok||!r.diagnostico?'':' · Detalle técnico: '+r.diagnostico),r.existe);
+  cargarEnvio();
+}
+async function enVerificar(m,n){
+  enMsg(true,'Leyendo '+n+' de '+m+'...',true);
+  const r=await api('/api/envio/verificar',{method:'POST',body:JSON.stringify({maquina:m,nombre:n})});
+  if(r.error)enMsg(false,r.error); else enMsg(r.igual===true,r.resultado,r.igual==null);
+  cargarEnvio();
+}
+async function enProbarFtp(){
+  const maq=$('en-maq').value; if(!maq){enMsg(false,'Elegí la máquina');return;}
+  enMsg(true,'Probando el FTP de la PC para '+maq+'...',true);
+  const r=await api('/api/envio/probar',{method:'POST',body:JSON.stringify({maquina:maq})});
+  if(r.error)enMsg(false,r.error); else enMsg(!!r.ok,r.resultado);
+  cargarEnvio();
+}
+async function enGuardarFtp(){
+  const r=await api('/api/envio/ftp',{method:'PUT',body:JSON.stringify({puerto:$('en-puerto').value,clave:$('en-clave').value.trim(),activo:$('en-act').checked})});
+  if(r.error)enMsg(false,r.error); else enMsg(true,'FTP guardado. Si cambiaste puerto o clave, cargalos también en el torno.');
+  cargarEnvio();
+}
+// ── Lectores ──
+let LEC=[], LEC_LOCAL=false;
+const LEC_PUERTO={fanuc:8193,haas:5051};
+async function cargarLectores(){
+  const r=await api('/api/lectores'); if(r.error){toast(r.error);return;}
+  LEC=(r.lectores||[]).map(x=>Object.assign({},x)); LEC_LOCAL=r.es_local; lecRender();
+  $('l-local').textContent=LEC_LOCAL?'':'Los lectores solo se cambian desde la PC donde corre la app.';
+  ['l-agregar','l-guardar'].forEach(id=>$(id).disabled=!LEC_LOCAL);
+}
+function lecLeerFilas(){
+  document.querySelectorAll('#tb-lec tr[data-i]').forEach(tr=>{const i=+tr.dataset.i, q=s=>tr.querySelector(s);
+    Object.assign(LEC[i],{maquina:q('.l-maq').value.trim().toUpperCase(),tipo:q('.l-tipo').value,ip:q('.l-ip').value.trim(),
+      puerto:q('.l-puerto').value,multiplo:q('.l-mult').value,activo:q('.l-act').checked});});
+}
+function lecEstadoTxt(e){
+  if(!e)return '<span class="help">Todavía no leyó</span>';
+  if(e.error)return '<span style="color:var(--bad);white-space:normal">'+esc(e.error)+'</span>'+(e.leido?'<br><span class="help">última buena '+hm(e.leido)+'</span>':'');
+  return '<b>'+fN(e.contador)+'</b> <span class="help">('+esc(e.origen||'')+') '+hm(e.leido)+(e.piezas?' · '+fN(e.piezas)+' pzs cargadas':'')+'</span>';
+}
+function lecRender(){
+  const opts=(E&&E.maquinas||[]).filter(m=>!m.desconocida).map(m=>'<option value="'+esc(m.codigo)+'">'+esc(m.nombre||'')+'</option>').join('');
+  const dis=LEC_LOCAL?'':' disabled';
+  $('tb-lec').innerHTML=LEC.length?LEC.map((l,i)=>'<tr data-i="'+i+'">'
+    +'<td><input class="l-maq" list="l-maqs" value="'+esc(l.maquina||'')+'" style="width:90px"'+dis+'></td>'
+    +'<td><select class="l-tipo" onchange="lecTipo(this)"'+dis+'><option value="fanuc"'+(l.tipo==='fanuc'?' selected':'')+'>Fanuc (FOCAS)</option><option value="haas"'+(l.tipo==='haas'?' selected':'')+'>Haas</option></select></td>'
+    +'<td><input class="l-ip" value="'+esc(l.ip||'')+'" placeholder="192.168.1.200" style="width:130px"'+dis+'></td>'
+    +'<td><input class="l-puerto" type="number" value="'+esc(l.puerto||LEC_PUERTO[l.tipo||'fanuc'])+'" style="width:75px"'+dis+'></td>'
+    +'<td><input class="l-mult" type="number" min="1" max="100" value="'+esc(l.multiplo||1)+'" style="width:55px"'+dis+'></td>'
+    +'<td><input class="l-act" type="checkbox"'+(l.activo!==false?' checked':'')+dis+'></td>'
+    +'<td class="l-est" style="white-space:normal;min-width:180px">'+lecEstadoTxt(l.estado)+'</td>'
+    +'<td><button class="btn" onclick="lecProbar('+i+')"'+dis+'>Probar</button> <button class="btn" onclick="lecQuitar('+i+')"'+dis+'>Quitar</button></td></tr>').join('')
+    :'<tr><td colspan="8" class="empty">No hay máquinas con lector. Tocá "+ Agregar máquina".</td></tr>';
+  if(!$('l-maqs')){const dl=document.createElement('datalist');dl.id='l-maqs';document.body.appendChild(dl);} $('l-maqs').innerHTML=opts;
+}
+function lecEstados(){
+  const por={}; (E.lectores||[]).forEach(l=>por[String(l.maquina).toUpperCase()]=l.estado);
+  document.querySelectorAll('#tb-lec tr[data-i]').forEach(tr=>{const l=LEC[+tr.dataset.i]; if(l&&l.maquina) tr.querySelector('.l-est').innerHTML=lecEstadoTxt(por[String(l.maquina).toUpperCase()]);});
+}
+function lecTipo(sel){const p=sel.closest('tr').querySelector('.l-puerto'); if(!p.value||Object.values(LEC_PUERTO).includes(+p.value)) p.value=LEC_PUERTO[sel.value];}
+function lecAgregar(){lecLeerFilas(); LEC.push({maquina:'',tipo:'fanuc',ip:'',puerto:8193,multiplo:1,activo:true}); lecRender();}
+function lecQuitar(i){lecLeerFilas(); LEC.splice(i,1); lecRender();}
+function lecMsg(ok,t){const e=$('l-msg');e.hidden=false;e.className='aviso '+(ok?'ok':'bad');e.textContent=t;}
+async function lecGuardar(){
+  lecLeerFilas();
+  const r=await api('/api/lectores',{method:'PUT',body:JSON.stringify({lectores:LEC})});
+  if(r.error){lecMsg(false,r.error);return;}
+  lecMsg(true,'Guardado. La app empieza a leer en unos segundos.'); LEC=(r.lectores||[]).map(x=>Object.assign({},x)); lecRender();
+}
+async function lecProbar(i){
+  lecLeerFilas(); const l=LEC[i]; lecMsg(true,'Probando '+(l.ip||'')+'...');
+  const r=await api('/api/lectores/probar',{method:'POST',body:JSON.stringify(l)});
+  if(r.ok){const c=r.sysinfo&&Object.keys(r.sysinfo).length?' Control: '+[r.sysinfo.cnc,r.sysinfo.tipo,r.sysinfo.serie,r.sysinfo.version].filter(Boolean).join(' ')+'.':'';
+    lecMsg(true,'Conecta. Contador de piezas: '+fN(r.contador)+' ('+(r.origen||'')+').'+c+' Si está bien, tocá Guardar lectores.');}
+  else lecMsg(false,'No conecta: '+(r.error||'error desconocido'));
+}
+async function cargarConfig(){
+  const c=await api('/api/config');
+  $('c-url').value=c.metalerp_url||''; $('c-int').value=c.intervalo_min; $('c-par').value=c.parada_seg; $('c-tok').value=c.senal_token||''; $('c-key').value='';
+  $('c-key').placeholder=c.api_key_fin?'Guardada (termina en '+c.api_key_fin+'). Dejala vacía para no cambiarla':'Pegá la clave que te da MetalERP';
+  const loc=c.es_local; ['c-url','c-usr','c-pw','c-conectar','c-key','c-int','c-par','c-tok','c-guardar'].forEach(id=>$(id).disabled=!loc);
+  $('c-local').textContent=loc?(c.api_key_fin?'Conectada con la clave que termina en '+c.api_key_fin+'.':'Todavía no está conectada.'):'La configuración solo se cambia desde la PC donde corre la app.';
+  const base=location.protocol+'//'+location.host;
+  $('ej1').textContent=base+'/senal?maquina=T16'; $('ej2').textContent=base+'/senal?maquina=T16&contador=18452';
+}
+function msg(ok,t){const e=$('c-msg');e.hidden=false;e.className='aviso '+(ok?'ok':'bad');e.textContent=t;}
+async function conectar(){
+  msg(true,'Conectando...');
+  const r=await api('/api/vincular',{method:'POST',body:JSON.stringify({metalerp_url:$('c-url').value,username:$('c-usr').value,password:$('c-pw').value})});
+  $('c-pw').value='';
+  if(r.ok){msg(true,'Conectada con MetalERP. Ya puede mandar las piezas.');cargarConfig();cargarEstado();}
+  else msg(false,'No se pudo conectar: '+(r.error||'error desconocido'));
+}
+async function guardarConfig(){
+  const r=await api('/api/config',{method:'PUT',body:JSON.stringify({metalerp_url:$('c-url').value,api_key:$('c-key').value,intervalo_min:$('c-int').value,parada_seg:$('c-par').value,senal_token:$('c-tok').value})});
+  if(r.error){msg(false,r.error);return;} toast('Guardado'); cargarConfig(); probar();
+}
+async function probar(){
+  const r=await api('/api/probar',{method:'POST'});
+  msg(r.ok, r.ok?'Conectada con MetalERP ('+(r.app||'')+').':'No conecta: '+(r.error||''));
+  cargarEstado();
+}
+cargarEstado(); setInterval(cargarEstado,5000);
+</script>
+</body>
+</html>

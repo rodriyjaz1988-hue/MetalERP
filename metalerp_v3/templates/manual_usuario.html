@@ -1,0 +1,923 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MetalERP — Manual de usuario</title><style>
+:root{--bg:#fff;--fg:#1a1a1a;--mut:#666;--bd:#e0e0d8;--ac:#185FA5}
+*{box-sizing:border-box}body{margin:0;font-family:-apple-system,Segoe UI,Arial,sans-serif;color:var(--fg);line-height:1.55;font-size:15px}
+#toc{position:fixed;top:0;left:0;bottom:0;width:270px;overflow:auto;background:#f4f4f2;border-right:1px solid var(--bd);padding:14px 12px;font-size:13px}
+#toc .brand{font-weight:700;font-size:16px;margin-bottom:10px}#toc small{font-weight:400;color:var(--mut)}
+#toc a{display:block;color:#333;text-decoration:none;padding:3px 6px;border-radius:5px}#toc a:hover{background:#e6e6e0}
+#toc a.l1{font-weight:600;margin-top:6px}#toc a.l3{padding-left:16px}#toc .tarea{margin:10px 0 2px;font-size:11px;text-transform:uppercase;color:var(--mut);letter-spacing:.5px}
+#toc a.dl{margin-top:8px;border:1px solid var(--bd);text-align:center;background:#fff}
+main{margin-left:270px;padding:28px 44px;max-width:1000px}
+h1{font-size:24px;border-bottom:2px solid var(--ac);padding-bottom:4px;margin-top:38px}h2{font-size:19px;margin-top:34px;color:#0C447C}h2.area{font-size:13px;text-transform:uppercase;letter-spacing:1px;color:#fff;background:var(--ac);padding:6px 12px;border-radius:5px;margin-top:40px}
+h3{font-size:15px;margin:18px 0 6px}
+table{border-collapse:collapse;margin:10px 0;font-size:13px;width:100%}th,td{border:1px solid var(--bd);padding:5px 9px;text-align:left;vertical-align:top}th{background:#f4f4f2}
+section{scroll-margin-top:12px}section:target{animation:flash 1.6s}@keyframes flash{from{background:#fff7d6}to{background:transparent}}
+code{background:#f0f0ec;padding:1px 5px;border-radius:3px;font-size:13px}
+.portada{padding:60px 0 20px;border-bottom:1px solid var(--bd)}.portada h1{border:0;font-size:40px;margin:0}.portada p{color:var(--mut);font-size:16px;margin:4px 0}
+@media(max-width:800px){#toc{position:static;width:auto;border:0}main{margin:0;padding:16px}}
+@media print{#toc{display:none}main{margin:0;padding:0;max-width:none}h1{page-break-before:always}h2.area{page-break-after:avoid}.portada h1{page-break-before:avoid}}
+</style></head><body><nav id="toc"><div class="brand">MetalERP<br><small>Manual de usuario · v149</small></div><a class="l1" href="#ch-intro">1. Introducción</a><a class="l1" href="#ch-conceptos">2. Conceptos generales</a><a class="l1" href="#ch-cambios">Novedades de la versión 149</a><a class="l1" href="#ch-modulos">3. Módulos del sistema</a><div class="tarea">Área Principal</div><a class="l3" href="#ch-dash_operativo">3.1. Dashboard Producción</a><a class="l3" href="#ch-dash_economico">3.2. Dashboard Económico</a><div class="tarea">Área Producción</div><a class="l3" href="#ch-ordenes">3.3. Órdenes de trabajo (OT)</a><a class="l3" href="#ch-procesos">3.4. Procesos / Productos</a><a class="l3" href="#ch-ops_sector">3.5 bis. Operaciones por sector</a><a class="l3" href="#ch-scheduling">3.5 ter. Scheduling de producción</a><a class="l3" href="#ch-ctrl_prod">3.5. Control de producción</a><a class="l3" href="#ch-novedades_ot">3.6. Novedades por OT</a><a class="l3" href="#ch-mrp">3.7. Planificación MRP</a><a class="l3" href="#ch-ott">3.8. OTT — Terceros</a><div class="tarea">Área Recursos</div><a class="l3" href="#ch-maquinas">3.9. Máquinas</a><a class="l3" href="#ch-rrhh">3.10. Recursos humanos</a><a class="l3" href="#ch-rendimiento">3.11. Rendimiento operarios</a><div class="tarea">Área Depósito</div><a class="l3" href="#ch-inventario">3.12. Inventario</a><a class="l3" href="#ch-recepciones">3.12 bis. Recepción de material / insumo</a><a class="l3" href="#ch-movimientos">3.13. Movimientos</a><a class="l3" href="#ch-lotes">3.14. Lotes</a><a class="l3" href="#ch-remitir">3.15. Remitir a cliente</a><a class="l3" href="#ch-remitos_emitidos">3.16. Remitos emitidos</a><div class="tarea">Área Ventas</div><a class="l3" href="#ch-presupuestos">3.17. Presupuestos</a><a class="l3" href="#ch-clientes">3.18. Clientes</a><a class="l3" href="#ch-oc_clientes">3.19. Pedidos de clientes</a><a class="l3" href="#ch-pronostico_ventas">3.20. Pronóstico de ventas</a><div class="tarea">Área Compras</div><a class="l3" href="#ch-solicitudes">3.21. Compras (Solicitudes, Cotizaciones y Órdenes de compra)</a><a class="l3" href="#ch-proveedores">3.22. Proveedores</a><div class="tarea">Área Calidad</div><a class="l3" href="#ch-lotes_liberacion">3.23. Liberación de lotes</a><div class="tarea">Área Sistema</div><a class="l3" href="#ch-configuracion">3.24. Configuración</a><a class="l3" href="#ch-usuarios">3.25. Usuarios</a><a class="l3" href="#ch-carga_masiva">3.26. Carga masiva</a><a class="l3" href="#ch-etiquetas">Embalado y etiquetado (etiquetas por bulto)</a><a class="l1" href="#ch-flujos">4. Flujos de trabajo típicos</a><a class="l1" href="#ch-faq">5. Preguntas frecuentes</a><a class="l1" href="#ch-glosario">6. Glosario</a><a class="dl" href="/manual/pdf">⬇ Descargar PDF</a><a class="dl" href="/manual/docx">⬇ Descargar Word</a></nav><main><div class="portada"><h1>MetalERP</h1><p>Sistema de Gestión para Taller Metalúrgico</p><p><b>Mecanizado Ituzaingo</b></p><p style="margin-top:24px;font-size:22px">MANUAL DE USUARIO</p><p>Versión 149 · Guía completa de funciones</p></div><section id="ch-intro"><h1>1. Introducción</h1><p>MetalERP es el sistema de gestión integral del taller. Cubre todo el ciclo productivo de un taller metalúrgico: desde el pedido del cliente y el diseño del proceso de fabricación, pasando por la planificación de materiales, la ejecución en planta, el control de calidad de lotes y la tercerización de operaciones, hasta la entrega final y la facturación.</p>
+<p>Este manual describe cada uno de los módulos de la aplicación, cómo se relacionan entre sí y los flujos de trabajo típicos. Está pensado tanto para usuarios nuevos que necesitan aprender el sistema como para consulta puntual de una función específica.</p>
+<h3>
+1.1. Cómo está organizado el sistema
+</h3>
+<p>La aplicación se divide en módulos agrupados por área de trabajo. El menú lateral izquierdo refleja esta organización:</p>
+<table style="width:97%;">
+<colgroup>
+<col style="width: 22%" />
+<col style="width: 74%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th style="text-align: left;"><strong>Área</strong></th>
+<th style="text-align: left;"><strong>Módulos que incluye</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">Principal</td>
+<td style="text-align: left;">Dashboard Producción, Dashboard Económico</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Producción</td>
+<td style="text-align: left;">Órdenes de trabajo, Procesos / Productos, Operaciones por sector, Control de producción, Novedades por OT, Planificación MRP, OTT – Terceros</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Recursos</td>
+<td style="text-align: left;">Máquinas, Recursos humanos, Rendimiento operarios</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Depósito</td>
+<td style="text-align: left;">Inventario, Movimientos, Lotes, Remitir a cliente, Remitos emitidos</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Ventas</td>
+<td style="text-align: left;">Presupuestos, Clientes, Pedidos de clientes, Pronóstico de ventas</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Compras</td>
+<td style="text-align: left;">Solicitudes / Compras, Recepción de material/insumo, Proveedores</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Calidad</td>
+<td style="text-align: left;">Liberación de lotes</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Sistema</td>
+<td style="text-align: left;">Configuración, Usuarios, Carga masiva</td>
+</tr>
+</tbody>
+</table>
+<table>
+<colgroup>
+<col style="width: 100%" />
+</colgroup>
+<tbody>
+<tr class="odd">
+<td><p><strong>Nota sobre permisos</strong></p>
+<p>No todos los usuarios ven todos los módulos. El menú se adapta a los permisos de cada persona: un operario de planta verá principalmente Producción, mientras que un administrador verá todo. Ver la sección de Usuarios para más detalle.</p></td>
+</tr>
+</tbody>
+</table>
+<h3>
+1.2. Requisitos y acceso
+</h3>
+<ul>
+<li><p><strong>Navegador web:</strong> la aplicación funciona desde el navegador (Chrome, Edge, Firefox). No requiere instalación en cada equipo.</p></li>
+<li><p><strong>Dirección de acceso:</strong> la aplicación se abre en <strong>http://localhost:5000</strong> (o la dirección del servidor del taller).</p></li>
+<li><p><strong>Servidor:</strong> el sistema corre sobre un servidor central. Todos los equipos se conectan a la misma base de datos, por lo que la información está siempre sincronizada.</p></li>
+</ul>
+<h3>
+1.3. Ingreso al sistema (login)
+</h3>
+<p>Al abrir la aplicación se solicita usuario y contraseña. Las credenciales iniciales de administrador son:</p>
+<table style="width:97%;">
+<colgroup>
+<col style="width: 31%" />
+<col style="width: 66%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th style="text-align: left;"><strong>Campo</strong></th>
+<th style="text-align: left;"><strong>Valor por defecto</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">Usuario</td>
+<td style="text-align: left;"><strong>admin</strong></td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Contraseña</td>
+<td style="text-align: left;"><strong>admin</strong></td>
+</tr>
+</tbody>
+</table>
+<table>
+<colgroup>
+<col style="width: 100%" />
+</colgroup>
+<tbody>
+<tr class="odd">
+<td><p><strong>Importante — seguridad</strong></p>
+<p>Cambiá la contraseña de administrador apenas ingreses por primera vez, desde el módulo Usuarios. Creá un usuario propio para cada persona del taller en lugar de compartir el usuario admin.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="ch-conceptos"><h1>2. Conceptos generales</h1><p>Antes de recorrer los módulos conviene entender algunos conceptos que se usan en todo el sistema.</p>
+<h3>
+2.1. Elementos de la interfaz
+</h3>
+<ul>
+<li><p><strong>Barra de herramientas (Toolbar):</strong> arriba de cada módulo. Contiene el buscador, el botón de recargar y el botón principal de "Nuevo" para crear registros.</p></li>
+<li><p><strong>Buscador:</strong> filtra la lista en pantalla a medida que se escribe. Busca por código, nombre u otros campos relevantes del módulo.</p></li>
+<li><p><strong>Tarjetas y tablas:</strong> la información se muestra en tablas. Muchas filas tienen botones de acción a la derecha (ver, editar, borrar, y acciones específicas).</p></li>
+<li><p><strong>Ventanas modales:</strong> los formularios de alta y edición se abren en una ventana emergente sobre la pantalla. Se confirman con "Guardar" o se cierran con "Cancelar".</p></li>
+<li><p><strong>Insignias de estado (badges):</strong> etiquetas de color que indican el estado de un registro (verde "Completada", ámbar "Pendiente", rojo un desvío).</p></li>
+<li><p><strong>Notificaciones (toasts):</strong> mensajes breves que aparecen al guardar o cuando hay un error.</p></li>
+</ul>
+<h3>
+2.2. Roles de usuario
+</h3>
+<p>Cada usuario tiene un rol que define qué puede hacer. Los roles del sistema son:</p>
+<table style="width:97%;">
+<colgroup>
+<col style="width: 16%" />
+<col style="width: 22%" />
+<col style="width: 58%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th style="text-align: left;"><strong>Rol</strong></th>
+<th style="text-align: left;"><strong>Orientado a</strong></th>
+<th style="text-align: left;"><strong>Alcance típico</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">admin</td>
+<td style="text-align: left;">Administración</td>
+<td style="text-align: left;">Acceso total, incluida la gestión de usuarios y permisos.</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">operario</td>
+<td style="text-align: left;">Planta</td>
+<td style="text-align: left;">Producción: órdenes, control de producción, carga de novedades.</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">vendedor</td>
+<td style="text-align: left;">Ventas</td>
+<td style="text-align: left;">Clientes, presupuestos, pedidos de clientes, pronósticos.</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">almacen</td>
+<td style="text-align: left;">Depósito</td>
+<td style="text-align: left;">Inventario, movimientos, lotes, remitos.</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">logistica</td>
+<td style="text-align: left;">Logística / MRP</td>
+<td style="text-align: left;">MRP, inventario, movimientos, lotes, remitir, clientes, compras.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<colgroup>
+<col style="width: 100%" />
+</colgroup>
+<tbody>
+<tr class="odd">
+<td><p><strong>Permisos finos</strong></p>
+<p>Más allá del rol, un administrador puede activar o desactivar módulos individuales por usuario, y controlar si la persona puede ver valores monetarios (precios y costos). Esto permite, por ejemplo, que un operario cargue producción sin ver los precios de venta.</p></td>
+</tr>
+</tbody>
+</table>
+<p>Además de estos cinco roles, el administrador puede <strong>crear roles propios</strong> desde Configuración → Roles y permisos (ver capítulo Configuración).</p>
+<p><strong>Permiso de valores monetarios:</strong> toda cifra de dinero (precios, costos, montos, totales) se oculta para los usuarios sin este permiso, en todo el sistema.</p>
+<h3>
+2.3. El ciclo de vida de una fabricación
+</h3>
+<p>Para ubicarse, este es el recorrido habitual de un trabajo dentro del sistema, de principio a fin:</p>
+<ol type="1">
+<li><p><strong>Cliente y pedido:</strong> se registra el cliente y su pedido (Orden de Compra de cliente).</p></li>
+<li><p><strong>Producto y proceso:</strong> el producto a fabricar tiene definido su proceso (secuencia de operaciones, materiales, máquinas y herramientas).</p></li>
+<li><p><strong>Explosión a OTs:</strong> el pedido se "explota" y genera automáticamente las Órdenes de Trabajo (OT) necesarias, incluso en varios niveles.</p></li>
+<li><p><strong>Planificación de materiales (MRP):</strong> el sistema calcula qué materiales hacen falta y ayuda a generar solicitudes de compra.</p></li>
+<li><p><strong>Compras y recepción:</strong> se compran los materiales a proveedores y se reciben como lotes.</p></li>
+<li><p><strong>Calidad:</strong> los lotes recibidos se aprueban (liberan) antes de poder usarse.</p></li>
+<li><p><strong>Producción:</strong> en planta se asignan los materiales a la OT y se cargan las novedades de cada operación.</p></li>
+<li><p><strong>Tercerización (si aplica):</strong> las operaciones que hace un tercero se gestionan como OTT.</p></li>
+<li><p><strong>Entrega:</strong> el producto terminado se remite al cliente y queda en Remitos emitidos.</p></li>
+<li><p><strong>Seguimiento:</strong> los dashboards muestran el avance productivo y económico en todo momento.</p></li>
+</ol>
+</section>
+<section id="ch-cambios"><h1>Novedades de la versión 149</h1><ul>
+<li><p>Órdenes de trabajo y Procesos/Productos: botones en barra de herramientas con selección de renglón; botón <strong>Avance</strong> por operación; proceso en aviso flotante; textos en una línea.</p></li>
+<li><p><strong>La OT es independiente del proceso:</strong> se copia al generarse y sus materiales se editan por operación en la OT.</p></li>
+<li><p>Nuevo módulo <strong>Operaciones por sector</strong>.</p></li>
+<li><p><strong>OTT</strong> rediseñada (insumo obligatorio, solicitud de compra por envío, autorización automática, OTT manual).</p></li>
+<li><p>Compras: <strong>Anular</strong> y <strong>Completar</strong> OC (directa pide remito).</p></li>
+<li><p>Recepción de material/insumo: según OC o sin OC; historial pasa a Movimientos con filtros.</p></li>
+<li><p>Inventario: Producto terminado por cliente; código de barras / QR / DataMatrix en artículos.</p></li>
+<li><p><strong>Embalado y etiquetado</strong> por bulto.</p></li>
+<li><p><strong>Roles</strong> editables desde Configuración.</p></li>
+<li><p>Documentación de artículos con <strong>carpetas</strong>.</p></li>
+<li><p>Permiso de <strong>valores monetarios</strong> revisado en todo el sistema.</p></li>
+<li><p><strong>Manual</strong> integrado a la aplicación: enlace 📖 en cada módulo que abre su capítulo.</p></li>
+<li><p><strong>v148:</strong> OT independiente del proceso y materiales editables por operación; Movimientos con <em>Origen</em> clasificado; cliente visible en Productos terminados; roles como simple lista (permisos por usuario); valores monetarios filtrados por el servidor; control de versión entre pantalla y servidor.</p></li>
+<li><p><strong>v149:</strong> nuevo módulo <em>Scheduling de producción</em> (Gantt por máquina con operario y jornada de 9 o 12 horas).</p></li>
+</ul>
+</section>
+<section id="ch-modulos"><h1>3. Módulos del sistema</h1><p>Cada módulo se describe en su propio capítulo, agrupados por área como en el menú lateral.</p></section>
+<h2 class="area">Área Principal</h2>
+<section id="ch-dash_operativo"><h2>3.1. Dashboard Producción</h2><p><strong>Área:</strong> Principal. <strong>Propósito:</strong> ofrecer una vista rápida del estado de la planta.</p>
+<p>Es la pantalla de inicio orientada a producción. Reúne indicadores clave para saber, de un vistazo, cómo viene el trabajo del taller.</p>
+<h3>
+Qué muestra
+</h3>
+<ul>
+<li><p>Cantidad de órdenes de trabajo por estado (pendientes, en proceso, completadas).</p></li>
+<li><p>Rendimiento promedio del período y evolución del rendimiento semanal.</p></li>
+<li><p>Órdenes recientes y su avance.</p></li>
+<li><p>Indicadores de máquinas y de carga de planta.</p></li>
+</ul>
+<table>
+<colgroup>
+<col style="width: 100%" />
+</colgroup>
+<tbody>
+<tr class="odd">
+<td><p><strong>Cómo usarlo</strong></p>
+<p>No requiere carga de datos: se alimenta solo con lo que se registra en el resto de los módulos. Es de solo lectura, pensado para el seguimiento diario.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="ch-dash_economico"><a id="ch-dash_requerimientos"></a><h2>3.2. Dashboard Económico</h2><p><strong>Área:</strong> Principal. <strong>Propósito:</strong> mostrar la salud económica del negocio.</p>
+<p>Versión económica del panel. Reúne la información monetaria del taller.</p>
+<h3>
+Qué muestra
+</h3>
+<ul>
+<li><p>Facturación del período y facturación por cliente (top de clientes).</p></li>
+<li><p>Pipeline de ventas: presupuestos y pedidos en curso.</p></li>
+<li><p>Compras pendientes y comprometidas con proveedores.</p></li>
+</ul>
+<table>
+<colgroup>
+<col style="width: 100%" />
+</colgroup>
+<tbody>
+<tr class="odd">
+<td><p><strong>Requiere permiso monetario</strong></p>
+<p>Solo lo ven los usuarios con permiso para ver valores monetarios. Un usuario sin ese permiso no verá este panel ni los precios en el resto del sistema.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<h2 class="area">Área Producción</h2>
+<section id="ch-ordenes"><h2>3.3. Órdenes de trabajo (OT)</h2><p><strong>Área:</strong> Producción. <strong>Propósito:</strong> gestionar cada trabajo de fabricación en planta.</p>
+<p>La Orden de Trabajo es el corazón de la producción. Representa la fabricación de una cantidad determinada de un producto. Cada OT tiene número, producto, cliente, cantidad, prioridad y estado.</p>
+<h3>
+Barra de herramientas y selección
+</h3>
+<p>Los botones de acción ya no están en cada renglón. Junto a los filtros hay una <strong>barra de herramientas</strong>: se marca una OT con el selector de la primera columna (queda resaltada) y se aprieta el botón de la acción deseada. Los botones se habilitan según el estado de la OT seleccionada y según el rol del usuario.</p>
+<ul>
+<li><strong>Editar:</strong> modifica cantidad, prioridad, fechas y estado.</li>
+<li><strong>Materiales:</strong> ver y asignar lotes a los materiales de la OT.</li>
+<li><strong>Operaciones:</strong> ver la secuencia de operaciones.</li>
+<li><strong>Avance:</strong> despliega, debajo de la OT seleccionada, todas sus operaciones con la cantidad producida y el porcentaje de avance de cada una. Volver a apretarlo lo contrae.</li>
+<li><strong>PDF:</strong> documento imprimible de la OT.</li>
+</ul>
+<p>Todos los textos de la lista se muestran en <strong>una sola línea</strong>; si la tabla es más ancha que la pantalla se desplaza horizontalmente.</p>
+<p><strong>Estados de una OT:</strong> Pendiente, En proceso, Completada, Cancelada.</p>
+<h3>
+La OT es independiente del proceso
+</h3>
+<p>Cuando la OT se genera por primera vez se <strong>copia</strong> el proceso del producto (operaciones y materiales de cada operación). A partir de ahí <strong>no tiene más vínculos ni validaciones con el proceso</strong>: si después se cambia el proceso del producto, las OT ya generadas no se modifican.</p>
+<p><strong>Editar materiales de la OT:</strong> en el detalle de la OT, <em>Operaciones → Editar</em> (o <em>Agregar operación</em>) hay una sección <strong>Materiales / insumos de esta operación</strong>. Ahí se agregan, cambian o quitan materiales y cantidades por unidad. Si la lista queda vacía, la operación no consume material y la OT no pide lote de materia prima para ella. Al guardar, la lista de materiales de la OT y las cantidades requeridas se recalculan. Una operación tercerizada siempre debe conservar su insumo de retorno.</p>
+<h3>
+Asignación de materiales y lotes
+</h3>
+<p>La vinculación de un lote a un material de la OT se hace desde el botón “Materiales” con “Asignar lote”. Luego, al cargar novedades, el sistema consume el lote ya vinculado.</p>
+</section>
+<section id="ch-procesos"><h2>3.4. Procesos / Productos</h2><p><strong>Área:</strong> Producción. <strong>Propósito:</strong> definir qué se fabrica y cómo se fabrica.</p>
+<p>Catálogo de productos terminados y definición de su proceso de fabricación (operaciones, materiales, máquinas, herramientas).</p>
+<h3>
+Barra de herramientas y selección
+</h3>
+<p>Igual que en Órdenes de trabajo, los botones (Ver proceso, Editar, Copiar, Clientes, Archivos, etc.) están en la barra junto a los filtros. Se selecciona un artículo con el selector de la primera columna y se aprieta la acción. <strong>El proceso ya no se muestra debajo de la tabla: se abre en un aviso flotante (toast)</strong> sobre la pantalla, que se cierra con la ✕ o haciendo clic afuera.</p>
+<h3>
+Datos de un producto
+</h3>
+<ul>
+<li>Código, nombre, categoría y cliente dueño.</li>
+<li>Unidad, precio de venta, peso y tiempos.</li>
+<li><strong>Código de barras / QR / DataMatrix:</strong> campo libre que se guarda con el artículo (y en su ficha de inventario). Todavía no se usa para lectura; queda disponible para las próximas versiones y se imprime en las etiquetas si está cargado.</li>
+</ul>
+<h3>
+El proceso: operaciones
+</h3>
+<ul>
+<li><strong>Operación interna:</strong> categoría de máquina o máquina específica, tiempo de setup y de ciclo.</li>
+<li><strong>Operación tercerizada:</strong> proveedor predeterminado y precio acordado. <strong>Obligatoriamente</strong> debe llevar un <strong>insumo</strong> (el material que vuelve del tercero, que es el mismo que se ingresará cuando llegue el remito). Sin ese insumo el sistema no permite guardar la operación. Ver el capítulo OTT.</li>
+<li><strong>Materiales e insumos</strong> y <strong>herramientas</strong> de cada operación.</li>
+</ul>
+<p><strong>Otras acciones:</strong> Copiar (duplica con operaciones y materiales), Clientes adicionales, Archivos adjuntos con carpetas (ver más abajo) y Versiones.</p>
+<h3>
+Documentación del artículo con carpetas
+</h3>
+<p>En Archivos, además de subir documentos, se pueden <strong>crear carpetas y subcarpetas</strong> (por ejemplo <em>Planos / Rev A</em>, <em>Certificados</em>, <em>Fotos</em>). Se navega con la ruta que aparece arriba de los archivos (“Raíz / Planos / Rev A”). Botón <strong>+ Carpeta</strong> para crear, y los archivos nuevos se suben a la carpeta en la que se está parado. Solo el administrador puede eliminar archivos y carpetas (la carpeta debe estar vacía). En el servidor las carpetas se guardan dentro de <code>documentos/&lt;código&gt;__&lt;id&gt;/</code>.</p>
+<p><strong>Permiso monetario:</strong> precio de venta, costos y precio de terceros solo se ven con el permiso <em>ver valores monetarios</em>.</p>
+</section>
+<section id="ch-ops_sector"><h2>3.5 bis. Operaciones por sector</h2><p><strong>Área:</strong> Producción. <strong>Propósito:</strong> ver qué operaciones hay para hacer, agrupadas por sector de máquinas.</p>
+<p>Lista los <strong>renglones de operaciones pendientes y en proceso</strong> de todas las órdenes de trabajo que están en estado Pendiente o En proceso. Cada renglón muestra OT, producto, cliente, número y nombre de la operación, sector, máquina, estado, avance (producido / requerido y lo que falta), prioridad y fecha de entrega. Se ordena por fecha de entrega.</p>
+<h3>
+Filtros
+</h3>
+<ul>
+<li><strong>Sector:</strong> categoría de máquinas (torneado, fresado, etc.). La opción <em>Tercerizadas</em> muestra las operaciones que hace un proveedor externo.</li>
+<li><strong>Estado:</strong> pendiente, en proceso o ambos.</li>
+<li><strong>Buscador:</strong> por OT, operación, producto, código o cliente.</li>
+</ul>
+<p>Sobre los filtros aparece un resumen con la cantidad de operaciones por sector. Es una vista de consulta: no modifica datos.</p>
+</section>
+<section id="ch-scheduling"><h2>3.5 ter. Scheduling de producción</h2><p><strong>Área:</strong> Producción. <strong>Propósito:</strong> planificar en un diagrama de Gantt qué operación de qué OT se hace en cada máquina, con qué operario y en qué jornada. Reemplaza a la planilla de <em>Carga de máquina</em>.</p>
+<h3>
+Cómo se lee la pantalla
+</h3>
+<ul>
+<li><strong>Derecha:</strong> el Gantt. Cada renglón es una <strong>máquina</strong>, agrupadas por sector (Corte láser, Balancines, CNC, Tornos, etc.). Los días van en columnas con marcas de hora; los sábados y domingos aparecen sombreados y una línea roja marca el momento actual. Tocar el nombre de un grupo lo pliega o despliega.</li>
+<li><strong>Izquierda:</strong> <em>Operaciones sin planificar</em>: las operaciones pendientes y en proceso de las OT activas (no incluye las tercerizadas, que van por OTT). Cada tarjeta muestra OT, operación, producto, cliente, sector, lo que falta producir, lo que ya está planificado y la fecha de entrega.</li>
+<li>Cada <strong>barra</strong> del Gantt es un bloque de trabajo: una jornada de <strong>9 o 12 horas</strong> de una operación, en esa máquina, con su operario. Dice OT, operación, operario, horas y cantidad. Pasando el mouse por encima se ve el detalle completo.</li>
+<li>Colores: la barra tiene el color de su OT (así se ven juntas las operaciones de una misma orden). El borde izquierdo verde indica operación <em>en proceso</em>; naranja, <em>pendiente</em>. Borde punteado: <strong>sin operario</strong>. Borde rojo con ⚠: <strong>termina después de la fecha de entrega</strong> de la OT.</li>
+<li>En la etiqueta de cada máquina se ven las <strong>horas planificadas</strong> en la vista y un aviso si la máquina no está operativa.</li>
+</ul>
+<h3>
+Planificar una operación
+</h3>
+<ol type="1">
+<li>Arrastrá la tarjeta desde el panel izquierdo hasta el renglón de la máquina, en el horario que quieras (se ajusta a la media hora). También podés apretar <strong>Asignar</strong> en la tarjeta. Al arrastrar, las máquinas del sector de la operación quedan resaltadas.</li>
+<li>En la ventana elegí la <strong>máquina</strong>, el <strong>operario</strong> (los habilitados en ese sector aparecen primero), la <strong>jornada (9 o 12 horas)</strong>, la <strong>fecha y hora de inicio</strong> (hay botones con los horarios habituales: 06:00, 13:00, 14:00, 18:00, 22:00) y la <strong>cantidad a producir</strong> en la jornada.</li>
+<li>El sistema sugiere la cantidad según el tiempo de ciclo y el setup de la operación: capacidad de la jornada, sin pasar de lo que falta planificar. Podés cambiarla.</li>
+<li><strong>Repetir:</strong> para cargar el mismo trabajo varios días seguidos, como en la planilla (mismo operario, misma máquina, todos los días), indicá cuántos días repetir y si son hábiles (lunes a viernes) o corridos. Se crean todos juntos; si uno de los días tiene un choque no se crea ninguno.</li>
+<li>Guardar. Una operación puede planificarse en varios bloques (por ejemplo, un bloque por día) hasta cubrir la cantidad requerida.</li>
+</ol>
+<h3>
+Mover y editar
+</h3>
+<ul>
+<li><strong>Arrastrá una barra</strong> a otro horario o a otra máquina para moverla.</li>
+<li><strong>Clic en una barra</strong> abre la ventana para cambiar operario, jornada, hora, cantidad u observaciones, o para eliminar el bloque.</li>
+</ul>
+<h3>
+Reglas que controla el sistema
+</h3>
+<ul>
+<li>Una <strong>máquina</strong> no puede tener dos bloques que se superpongan.</li>
+<li>Un <strong>operario</strong> no puede estar en dos bloques a la vez, aunque sean en máquinas distintas.</li>
+<li>La jornada solo puede ser de 9 o 12 horas.</li>
+<li>No se programan operaciones ya completadas o canceladas.</li>
+<li>Estos casos <strong>avisan pero dejan guardar</strong>: operario no habilitado en el sector, bloque sin operario, máquina fuera de servicio o de otro sector, y bloque que termina después de la fecha de entrega.</li>
+</ul>
+<h3>
+Filtros y vista
+</h3>
+<ul>
+<li>Botones ◀ ▶ y selector de fecha para moverse en el tiempo; <em>Hoy</em> vuelve a la semana actual.</li>
+<li><strong>Escala:</strong> semana, 2 semanas, 3 días o 1 día por hora.</li>
+<li>Filtro por <strong>sector</strong>, casilla <em>Solo máquinas con carga</em> y buscador que resalta las barras de una OT, producto, cliente u operario.</li>
+</ul>
+<p><strong>Importante:</strong> el Scheduling es solo planificación. No modifica las OT ni sus operaciones, y el avance real se sigue cargando en Control de producción. Pueden modificar la planificación los usuarios con rol administrador u operario; el resto solo la consulta. El módulo se habilita por usuario desde Usuarios, con el permiso <em>Scheduling de producción</em>.</p>
+</section>
+<section id="ch-ctrl_prod"><h2>3.5. Control de producción</h2><p><strong>Área:</strong> Producción. <strong>Propósito:</strong> seguir el avance operación por operación.</p>
+<p>Vista operativa del piso de planta. Permite ver, para las órdenes en proceso, el estado de cada operación y su porcentaje de avance, y ajustar estados cuando hace falta.</p>
+<ul>
+<li><p>Muestra las operaciones de cada OT con su cantidad requerida y producida.</p></li>
+<li><p>Permite marcar una operación como completada o volver a ponerla en proceso.</p></li>
+</ul>
+<table>
+<colgroup>
+<col style="width: 100%" />
+</colgroup>
+<tbody>
+<tr class="odd">
+<td><p><strong>Relación con Novedades</strong></p>
+<p>El avance que se ve acá se alimenta de las novedades cargadas. Si una operación llegó al 100% se marca Completada automáticamente; se puede reabrir manualmente para seguir cargando.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="ch-novedades_ot"><h2>3.6. Novedades por OT</h2><p><strong>Área:</strong> Producción. <strong>Propósito:</strong> registrar la producción real de cada operación.</p>
+<p>Una novedad es el parte de producción: registra cuánto se produjo de una operación, en qué tiempo, y con qué resultado de calidad. Es la carga diaria del operario y la fuente del cálculo de rendimiento.</p>
+<h3>
+Qué se carga en una novedad
+</h3>
+<ul>
+<li><p>La OT y la operación sobre la que se trabajó.</p></li>
+<li><p>El empleado que la realizó y el turno.</p></li>
+<li><p>Cantidad de piezas OK (producidas) y, si corresponde, piezas NO OK (observadas).</p></li>
+<li><p>Tiempo real trabajado y, opcionalmente, tiempo perdido (aparte del trabajado).</p></li>
+</ul>
+<h3>
+Cómo se calcula el rendimiento
+</h3>
+<p>El rendimiento compara la producción real contra el estándar de la operación. En términos simples, mide cuántas piezas por minuto se lograron respecto de las que se esperaban según el tiempo de ciclo estándar:</p>
+<table>
+<colgroup>
+<col style="width: 100%" />
+</colgroup>
+<tbody>
+<tr class="odd">
+<td><p><strong>Fórmula de rendimiento</strong></p>
+<p>Rendimiento (%) = (cantidad producida ÷ tiempo real trabajado) ÷ (1 ÷ tiempo de ciclo estándar) × 100</p>
+<p>Si el rendimiento es menor a 80%, la novedad se marca como desvío (en rojo) para su análisis.</p></td>
+</tr>
+</tbody>
+</table>
+<h3>
+Correcciones y edición
+</h3>
+<ul>
+<li><p><strong>Editar / borrar:</strong> una novedad se puede editar o eliminar; el sistema ajusta los consumos de stock por la diferencia.</p></li>
+<li><p><strong>Novedades eliminadas:</strong> las novedades borradas quedan registradas y se pueden restaurar.</p></li>
+<li><p><strong>Corregir rendimiento:</strong> herramienta para recalcular el rendimiento de novedades cuando cambian los estándares.</p></li>
+</ul>
+<table>
+<colgroup>
+<col style="width: 100%" />
+</colgroup>
+<tbody>
+<tr class="odd">
+<td><p><strong>Reglas importantes de carga</strong></p>
+<p>• Las operaciones tercerizadas no se cargan por novedades: se completan solas cuando vuelve y se aprueba el lote del proveedor.</p>
+<p>• Si una operación tercerizada anterior aún no entregó, la operación siguiente solo puede cargar hasta lo que el tercero ya entregó y se aprobó (uso incremental).</p>
+<p>• Una operación marcada Completada no admite más novedades hasta reabrirla.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="ch-mrp"><a id="ch-requerimientos_productivos"></a><h2>3.7. Planificación MRP</h2><p><strong>Área:</strong> Producción. <strong>Propósito:</strong> calcular qué materiales comprar y cuándo.</p>
+<p>El MRP (Planificación de Requerimientos de Materiales) cruza lo que hay que fabricar contra lo que hay en stock, y determina los faltantes. Es el puente entre producción y compras.</p>
+<h3>
+Qué hace
+</h3>
+<ul>
+<li><p>Consolida las necesidades de material de las órdenes de trabajo abiertas.</p></li>
+<li><p>Descuenta el stock disponible y los lotes aprobados.</p></li>
+<li><p>Muestra los faltantes netos que hay que comprar.</p></li>
+<li><p>Permite generar solicitudes de compra a partir de esos faltantes.</p></li>
+</ul>
+<h3>
+MRP con pronóstico
+</h3>
+<p>Además de las órdenes reales, el MRP puede incorporar el pronóstico de ventas por meses, para anticipar compras de materiales antes de que lleguen los pedidos en firme. Ver el módulo Pronóstico de ventas.</p>
+<table>
+<colgroup>
+<col style="width: 100%" />
+</colgroup>
+<tbody>
+<tr class="odd">
+<td><p><strong>Flujo recomendado</strong></p>
+<p>Revisá el MRP periódicamente, consolidá las necesidades y generá las solicitudes de compra desde acá. Así las compras responden a la demanda real de producción y no a estimaciones sueltas.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="ch-ott"><h2>3.8. OTT — Terceros</h2><p><strong>Área:</strong> Producción. <strong>Propósito:</strong> gestionar las operaciones tercerizadas.</p>
+<p>OTT es la Orden de Trabajo de Terceros. Se usa cuando una operación se hace fuera del taller (tratamiento térmico, zincado, etc.).</p>
+<h3>
+Circuito completo
+</h3>
+<ol type="1">
+<li><strong>Definición en el proceso:</strong> una operación tercerizada exige un <strong>insumo obligatorio</strong>: es el material que se genera cuando el proveedor devuelve las piezas (el mismo que se ingresa con el remito).</li>
+<li><strong>Generación de la OTT:</strong> al preparar la OT se genera una OTT para el <strong>proveedor predeterminado</strong> de la fórmula. <strong>Antes de iniciarse</strong> (antes del primer envío) se puede cambiar el proveedor y el precio desde <em>Editar</em>; después del primer envío queda bloqueado.</li>
+<li><strong>Primer envío:</strong> al emitir el remito de traslado se genera automáticamente una <strong>solicitud de compra por la cantidad enviada</strong>.</li>
+<li><strong>Compras confirma el precio y emite la OC.</strong> Si el precio coincide con el de la lista de precios del proveedor, la OC obtiene <strong>autorización automática</strong>. Si difiere, queda pendiente de aprobación.</li>
+<li><strong>Retorno:</strong> cuando el proveedor devuelve el material, se ingresa el remito en el módulo <strong>Recepción de material/insumo</strong> como cualquier material. La recepción <strong>descuenta las cantidades pendientes de la OTT</strong>.</li>
+<li><strong>Cierre:</strong> al completarse las cantidades la OTT queda cerrada y la operación de la OT se da por cumplida.</li>
+</ol>
+<h3>
+OTT manual
+</h3>
+<p>El botón <strong>+ Nueva OTT manual</strong> genera una OTT sin pasar por una OT: se elige el proveedor, el <strong>material como insumo</strong> (el mismo que ingresará con el remito), la cantidad y el precio acordado. Sigue el mismo circuito de envío, solicitud de compra, OC y recepción.</p>
+<p><strong>Etiquetado:</strong> al emitir el remito de envío y al registrar el retorno se abre el aviso de <strong>Embalado y etiquetado</strong> para imprimir las etiquetas por bulto.</p>
+<p><strong>Multinivel:</strong> una OTT de último nivel deja el retorno listo para remitir; una intermedia devuelve un semielaborado que sigue en otra OT.</p>
+<p><strong>Columnas:</strong> N°, OT origen, producto, <strong>material</strong>, proveedor, nivel, <strong>SC</strong> vinculadas, estado, cantidades y precio (el precio solo se ve con el permiso monetario).</p>
+</section>
+<h2 class="area">Área Recursos</h2>
+<section id="ch-maquinas"><h2>3.9. Máquinas</h2><p><strong>Área:</strong> Recursos. <strong>Propósito:</strong> administrar el parque de máquinas y su mantenimiento.</p>
+<p>Registra las máquinas del taller y organiza su mantenimiento. Está dividido en tres pestañas.</p>
+<h3>
+Pestaña Listado
+</h3>
+<ul>
+<li>Alta y edición de máquinas: código, nombre, categoría, ubicación y estado (Operativa, En mantenimiento, Fuera de servicio).</li>
+</ul>
+<h3>
+Pestaña Plan de mantenimiento
+</h3>
+<ul>
+<li><p>Tareas de mantenimiento preventivo por máquina, con tipo, frecuencia (cada X días/semanas/meses/horas de uso) y responsable.</p></li>
+<li><p>Las fechas próximas se resaltan: en rojo si están vencidas, en ámbar si vencen dentro de la semana.</p></li>
+</ul>
+<h3>
+Pestaña Tickets de reparación
+</h3>
+<ul>
+<li><p>Registro de fallas y reparaciones, con tipo, prioridad, estado, horas de paro, costo y solución.</p></li>
+<li><p>Se pueden filtrar por estado (Abierto, En proceso, Cerrado). Al cerrar un ticket se registra la fecha de cierre.</p></li>
+</ul>
+</section>
+<section id="ch-rrhh"><h2>3.10. Recursos humanos</h2><p><strong>Área:</strong> Recursos. <strong>Propósito:</strong> administrar el legajo de empleados.</p>
+<p>Registro de los empleados del taller. Cada empleado tiene legajo, nombre, cargo, turno y un tipo que distingue si su trabajo es directo (produce piezas) o indirecto (apoyo).</p>
+<ul>
+<li><p>Los empleados directos son los que aparecen al cargar novedades de producción.</p></li>
+<li><p>El tipo directo/indirecto es relevante para el análisis de rendimiento y costos.</p></li>
+</ul>
+</section>
+<section id="ch-rendimiento"><h2>3.11. Rendimiento operarios</h2><p><strong>Área:</strong> Recursos. <strong>Propósito:</strong> analizar el desempeño del personal de planta.</p>
+<p>Consolida las novedades cargadas para mostrar el rendimiento de cada operario. Permite ver quién está por encima o por debajo del estándar y detectar desvíos.</p>
+<ul>
+<li><p>Rendimiento promedio por empleado y por período.</p></li>
+<li><p>Detalle de rendimiento por días.</p></li>
+<li><p>Se complementa con el registro de trabajo no productivo, que contabiliza el tiempo del personal que no se dedicó a producción directa (limpieza, capacitación, esperas, etc.).</p></li>
+</ul>
+</section>
+<h2 class="area">Área Depósito</h2>
+<section id="ch-inventario"><h2>3.12. Inventario</h2><p><strong>Área:</strong> Depósito. <strong>Propósito:</strong> administrar el catálogo de materiales y su stock.</p>
+<p>Catálogo de materiales, insumos, herramientas y productos terminados con su stock. Cada artículo tiene código, descripción, categoría, unidad, stock, precio unitario (con permiso monetario) y <strong>código de barras / QR / DataMatrix</strong>.</p>
+<h3>
+<table>
+<thead>
+<tr class="header">
+<th style="text-align: left;">tegorías</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;"><strong>Categoría</strong> <strong>Uso</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Material Materia prima que se transforma.</p>
+<p>Insumo Consumibles de proceso.</p>
+<p>Herramienta Utillaje y herramientas.</p>
+<p>Producto terminado Artículo que pertenece a un <strong>cliente</strong>. ———————————————————————–</p>
+<p><strong>Regla del producto terminado:</strong> (en la pestaña <em>Productos terminados</em> la columna Cliente muestra el cliente asignado) la categoría <em>Producto terminado</em> se asigna a un artículo <strong>cuando se le asigna un cliente</strong>. En el alta o edición aparece el campo <em>Cliente</em>; al elegirlo la categoría pasa automáticamente a Producto terminado y queda bloqueada. Si se quita el cliente, vuelve a Material.</p>
+</section>
+<section id="ch-recepciones"><h2>3.12 bis. Recepción de material / insumo</h2><p><strong>Área:</strong> Compras / Depósito. <strong>Propósito:</strong> registrar el ingreso físico de mercadería.</p>
+<p>La pantalla tiene dos botones principales:</p>
+<ul>
+<li><strong>Recepcionar según OC:</strong> se elige una orden de compra pendiente de recibir, se cargan las cantidades reales y opcionalmente el <strong>remito</strong> del proveedor. Genera el lote (pendiente de Calidad) o suma stock según la categoría.</li>
+<li><strong>Recepcionar sin OC:</strong> ingreso libre de un material o insumo: material, cantidad, proveedor, remito y precio (con permiso monetario).</li>
+</ul>
+<p>Debajo se listan los <strong>pendientes de OTT</strong>: el retorno de un tercero se registra desde aquí con el botón <em>Registrar retorno</em> (con el número de remito) y descuenta lo pendiente de la OTT. Los ítems de OC vinculados a una OTT solo se reciben por esta vía.</p>
+<p>Al terminar cualquier recepción se abre el aviso de <strong>Embalado y etiquetado</strong>.</p>
+<p>El <strong>historial de recepciones</strong> se consulta en <em>Movimientos</em>, con sus filtros.</p>
+<h3>Etiquetas por bulto</h3><p>Aviso flotante que se abre automáticamente al emitir un envío o registrar un retorno de OTT y al terminar una recepción de material/insumo, y manualmente desde <strong>Lotes</strong> con el botón 🏷 de cada lote.</p>
+<ol type="1">
+<li>Indicar la <strong>cantidad total</strong> y la <strong>unidad</strong>.</li>
+<li>Indicar la <strong>cantidad de bultos</strong> o la <strong>cantidad por bulto</strong>; el otro valor se calcula solo. Si la división no es exacta, el último bulto lleva el resto.</li>
+<li>Completar o corregir artículo, referencia y lote. El <strong>código de barras</strong> del artículo se usa como base; si no tiene, se usa el lote o la referencia.</li>
+<li><strong>Imprimir etiquetas:</strong> se genera una etiqueta de 100 × 60 mm por bulto con empresa, artículo, cantidad, “Bulto i / N”, referencia, lote, fecha y un código de barras Code 128 (identificador <em>base-i/N</em>).</li>
+</ol>
+<p>Si el navegador bloquea la ventana de impresión hay que permitir las ventanas emergentes para el sitio.</p>
+</section>
+<section id="ch-movimientos"><h2>3.13. Movimientos</h2><p><strong>Área:</strong> Depósito. <strong>Propósito:</strong> consultar y registrar entradas y salidas de stock.</p>
+<p>Historial de todos los movimientos de inventario: material, tipo, cantidad, lote, referencia y usuario. <strong>Aquí se consulta el historial de recepciones</strong> (ya no aparece en el módulo de Recepción).</p>
+<h3>
+Filtros
+</h3>
+<ul>
+<li><strong>Origen:</strong> cada movimiento se clasifica automáticamente (columna <em>Origen</em>): recepción según OC, recepción sin OC, retorno de terceros (OTT), alta/aprobación de lote, consumo de producción, remito a cliente, devolución/reenvío o ajuste manual. <em>Recepciones (todas)</em> agrupa las tres primeras.</li>
+<li><strong>Desde / Hasta:</strong> rango de fechas.</li>
+<li><strong>Buscador:</strong> por material, referencia, remito o lote.</li>
+<li><strong>Limpiar filtros</strong> restablece la vista.</li>
+</ul>
+<p><strong>Tipos:</strong> Entrada (+), Salida (−) y Ajuste. En las recepciones, el número de remito figura en la referencia.</p>
+<p><strong>Alta manual:</strong> material, tipo, cantidad y referencia. Para ingresos de proveedor conviene usar Recepción para mantener la trazabilidad.</p>
+</section>
+<section id="ch-lotes"><h2>3.14. Lotes</h2><p><strong>Área:</strong> Depósito. <strong>Propósito:</strong> trazar el material por lote desde el ingreso hasta el consumo.</p>
+<p>Un lote es una partida identificada de material, normalmente proveniente de una compra o de un retorno de tercero. Trabajar por lotes permite trazabilidad completa: saber de qué partida salió cada pieza.</p>
+<h3>
+<table>
+<thead>
+<tr class="header">
+<th style="text-align: left;">tos y estados de un lote</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;"><strong>Estado</strong> <strong>Significado</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Ingresado Recién recibido; aún no aprobado por calidad. No se puede consumir.</p>
+<p>Aprobado Liberado por calidad; disponible para asignar y consumir.</p>
+<p>Rechazado No apto; bloqueado para uso.</p>
+<p>Agotado Consumido en su totalidad. ———————————————————————–</p>
+<ul>
+<li>Cada lote lleva su cantidad original, disponible y activa (aprobada), proveedor, referencia y certificado de calidad.</li>
+</ul>
+<h3>
+Trazabilidad
+</h3>
+<p>El botón de trazabilidad de cada lote muestra su historia completa: los movimientos asociados y las órdenes de trabajo que consumieron ese lote, con producto y cliente. Es la herramienta clave ante un reclamo de calidad.</p>
+<p><strong>Etiquetas:</strong> cada lote tiene un botón 🏷 que abre el aviso de <strong>Embalado y etiquetado</strong> para imprimir etiquetas por bulto.</p>
+</section>
+<section id="ch-remitir"><h2>3.15. Remitir a cliente</h2><p><strong>Área:</strong> Depósito. <strong>Propósito:</strong> preparar y emitir la entrega de productos.</p>
+<p>Desde acá se generan los remitos de entrega al cliente. Se seleccionan los productos terminados disponibles y se documenta la salida.</p>
+<ul>
+<li><p>Toma los productos terminados disponibles en stock.</p></li>
+<li><p>Vincula la entrega al pedido del cliente para ir descontando el avance.</p></li>
+</ul>
+</section>
+<section id="ch-remitos_emitidos"><h2>3.16. Remitos emitidos</h2><p><strong>Área:</strong> Depósito. <strong>Propósito:</strong> consultar el historial de entregas.</p>
+<p>Listado de todos los remitos ya emitidos, para consulta y reimpresión. Permite verificar qué se entregó, cuándo y a quién.</p>
+</section>
+<h2 class="area">Área Ventas</h2>
+<section id="ch-presupuestos"><h2>3.17. Presupuestos</h2><p><strong>Área:</strong> Ventas. <strong>Propósito:</strong> cotizar trabajos a los clientes.</p>
+<p>Permite armar presupuestos para los clientes, con los productos o servicios a cotizar y sus precios. Es el paso previo al pedido en firme.</p>
+<ul>
+<li><p>Se arma el presupuesto con su detalle y total.</p></li>
+<li><p>Sirve como base para el pipeline comercial que muestra el Dashboard Económico.</p></li>
+</ul>
+</section>
+<section id="ch-clientes"><h2>3.18. Clientes</h2><p><strong>Área:</strong> Ventas. <strong>Propósito:</strong> administrar la cartera de clientes.</p>
+<p>Registro de clientes: razón social, CUIT, contacto y categoría. Al ver los artículos de un cliente se muestran solo <strong>dos valores</strong>: el <strong>precio de venta</strong> y el <strong>precio de la OC de cliente más reciente</strong> (con su número y fecha). No se muestran los costos del proceso, que sí están en Procesos / Productos. Ambos precios requieren el permiso monetario.</p>
+</section>
+<section id="ch-oc_clientes"><h2>3.19. Pedidos de clientes</h2><p><strong>Área:</strong> Ventas. <strong>Propósito:</strong> gestionar las órdenes de compra de los clientes.</p>
+<p>Registra los pedidos (órdenes de compra) que hacen los clientes. Cada pedido tiene uno o varios renglones, cada uno con un producto, cantidad, precio y fecha deseada.</p>
+<h3>
+Acciones sobre un pedido
+</h3>
+<ul>
+<li><p><strong>Crear / editar:</strong> alta del pedido con sus renglones.</p></li>
+<li><p><strong>Ver avance:</strong> muestra, por renglón, cuánto se entregó y con qué remitos, con su porcentaje de cumplimiento.</p></li>
+<li><p><strong>Explotar a OTs:</strong> genera automáticamente las órdenes de trabajo para fabricar lo pedido. Si un producto se compone de subproductos con proceso propio, la explosión es multinivel y crea las OTs hijas necesarias.</p></li>
+<li><p><strong>Vincular OTs manualmente:</strong> además de la explosión automática, se pueden vincular o desvincular OTs existentes a un renglón del pedido.</p></li>
+</ul>
+<table>
+<colgroup>
+<col style="width: 100%" />
+</colgroup>
+<tbody>
+<tr class="odd">
+<td><p><strong>Explosión: una sola vez</strong></p>
+<p>Un pedido ya explotado no se vuelve a explotar (queda "En proceso"). Revisá los renglones antes de explotar.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="ch-pronostico_ventas"><h2>3.20. Pronóstico de ventas</h2><p><strong>Área:</strong> Ventas. <strong>Propósito:</strong> anticipar la demanda para planificar compras.</p>
+<p>Permite cargar pronósticos de venta por cliente y producto, distribuidos en el tiempo. Sirve para que el MRP anticipe necesidades de material antes de que lleguen los pedidos en firme.</p>
+<ul>
+<li><p>Se define el pronóstico con su tabla de cantidades por período.</p></li>
+<li><p>El MRP puede consolidar estos pronósticos por meses para planificar compras anticipadas.</p></li>
+</ul>
+</section>
+<h2 class="area">Área Compras</h2>
+<section id="ch-solicitudes"><a id="ch-indicadores_compras"></a><h2>3.21. Compras (Solicitudes, Cotizaciones y Órdenes de compra)</h2><p><strong>Área:</strong> Compras. <strong>Propósito:</strong> gestionar el abastecimiento.</p>
+<p>Circuito: solicitud de compra → cotización → orden de compra → recepción.</p>
+<p><strong>Solicitudes:</strong> pedido interno de material; pueden ser <em>productivas</em> (directas, para producción), <em>indirectas</em> (gastos, insumos generales) o generadas por una <strong>OTT</strong> (una por cada envío a un tercero).</p>
+<p><strong>Cotizaciones:</strong> se registran las de cada proveedor y se selecciona la elegida. Las solicitudes de OTT ya traen precargados el proveedor y el precio acordado; Compras confirma el precio y emite la OC.</p>
+<h3>
+<table>
+<thead>
+<tr class="header">
+<th style="text-align: left;">denes de compra</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;"><strong>Estado de la OC</strong> <strong>Significado</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Pendiente aprobación El monto supera el límite (por defecto $50.000) o, en OC de OTT, el precio difiere de la lista del proveedor.</p>
+<p>Aprobada Autorizada; lista para enviar y recibir.</p>
+<p>Parcial Recibida en parte.</p>
+<p>Completada Cerrada manualmente.</p>
+<p>Anulada Cancelada, con motivo. ———————————————————————–</p>
+<h3>
+Botones de la OC (directas e indirectas)
+</h3>
+<ul>
+<li><strong>Anular OC:</strong> pide el motivo y la deja anulada. Disponible para OC directas e indirectas.</li>
+<li><strong>Completar OC:</strong> cierra la OC aunque no se haya recibido todo. En una <strong>OC directa</strong> el sistema <strong>pide vincular el remito</strong> correspondiente; en una indirecta el remito es opcional.</li>
+<li>La aprobación automática de OC de OTT se da cuando todos los precios coinciden con la lista de precios del proveedor.</li>
+</ul>
+<p><strong>Recepción:</strong> se hace en el módulo Recepción de material/insumo, no desde Compras.</p>
+<p>Los importes solo se muestran con el permiso <em>ver valores monetarios</em>.</p>
+</section>
+<section id="ch-proveedores"><h2>3.22. Proveedores</h2><p><strong>Área:</strong> Compras. <strong>Propósito:</strong> administrar proveedores y sus listas de precios.</p>
+<p>Registro de proveedores con razón social, CUIT, contacto, plazo de entrega, calificación y estado. Además, gestiona la lista de precios de cada proveedor.</p>
+<h3>
+Lista de precios
+</h3>
+<ul>
+<li><p>Para cada proveedor se pueden vincular los materiales que provee, con su precio y plazo.</p></li>
+<li><p>Se puede marcar un proveedor como principal para un material.</p></li>
+<li><p>Esta información alimenta las cotizaciones y las órdenes de compra.</p></li>
+</ul>
+</section>
+<h2 class="area">Área Calidad</h2>
+<section id="ch-lotes_liberacion"><a id="ch-liberacion"></a><h2>3.23. Liberación de lotes</h2><p><strong>Área:</strong> Calidad. <strong>Propósito:</strong> aprobar o rechazar el material recibido.</p>
+<p>El control de calidad decide si un lote recibido puede usarse. Mientras un lote está en estado Ingresado no se puede consumir; recién al aprobarlo (liberarlo) queda disponible para producción.</p>
+<h3>
+Operación
+</h3>
+<ul>
+<li><p><strong>Aprobar (liberar):</strong> el lote pasa a Aprobado y su cantidad queda activa y disponible para asignar a OTs.</p></li>
+<li><p><strong>Rechazar:</strong> el lote queda bloqueado y no se puede usar.</p></li>
+</ul>
+<table>
+<colgroup>
+<col style="width: 100%" />
+</colgroup>
+<tbody>
+<tr class="odd">
+<td><p><strong>Punto de control clave</strong></p>
+<p>Todo material comprado y todo retorno de tercero pasa por acá antes de entrar a producción. Es el filtro de calidad del taller. Sin liberación no hay consumo.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<h2 class="area">Área Sistema</h2>
+<section id="ch-configuracion"><h2>3.24. Configuración</h2><p><strong>Área:</strong> Sistema. <strong>Propósito:</strong> ajustar los parámetros generales.</p>
+<p><strong>Datos de la empresa y PDF:</strong> nombre, subtítulo, dirección, teléfono, email, color y opciones de los PDF, nota al pie de OT.</p>
+<p><strong>Categorías</strong> de productos y de máquinas.</p>
+<p><strong>Valor hora de mano de obra:</strong> solo se ve con el permiso monetario.</p>
+<h3>
+Roles de usuario
+</h3>
+<p>Lista de roles. El administrador puede <strong>agregar roles propios</strong> a los cinco de siempre (admin, operario, vendedor, almacén, logística).</p>
+<ul>
+<li>Cada rol tiene <strong>nombre</strong>, <strong>“Funciona como”</strong> (uno de los cinco roles base, que define qué acciones técnicas puede ejecutar) y una <strong>descripción</strong>.</li>
+<li>La descripción es solo informativa: sirve para saber qué función cumple la persona. <strong>El rol no lleva permisos.</strong></li>
+<li>Los permisos (módulos y <em>ver valores monetarios</em>) se editan <strong>por usuario</strong>, en Usuarios. Cambiar el rol de un usuario no modifica sus permisos.</li>
+<li>Los roles del sistema no se pueden eliminar ni renombrar. No se puede eliminar un rol con usuarios asignados.</li>
+</ul>
+</section>
+<section id="ch-usuarios"><h2>3.25. Usuarios</h2><p><strong>Área:</strong> Sistema. <strong>Propósito:</strong> administrar accesos y permisos. Solo administradores.</p>
+<p><strong>Alta:</strong> usuario, nombre, contraseña y <strong>rol</strong> (la lista incluye los roles creados en Configuración → Roles de usuario).</p>
+<p><strong>Permisos por módulo:</strong> casillas para cada módulo del sistema (incluido <em>Operaciones por sector</em>) y el interruptor <strong>ver valores monetarios</strong>.</p>
+<p><strong>Valores monetarios protegidos desde el servidor:</strong> si un usuario no tiene el permiso, el servidor <strong>no le envía</strong> precios, costos, importes ni totales (llegan en cero) y no se muestran las columnas correspondientes. Las acciones de precios (por ejemplo, crear órdenes de compra o presupuestos con importes) responden <em>403 Sin permiso</em> y editar un registro no pisa los precios guardados.</p>
+<p><strong>Permiso de valores monetarios (regla general):</strong> todo precio, costo, monto o total del sistema se enmascara como “$ —” y los campos de carga de precios se ocultan para quien no tiene este permiso. Esta regla se aplica a toda columna nueva que se agregue.</p>
+</section>
+<section id="ch-carga_masiva"><h2>3.26. Carga masiva</h2><p><strong>Área:</strong> Sistema. <strong>Propósito:</strong> importar datos en lote desde planilla.</p>
+<p>Herramienta para cargar información en cantidad a partir de una planilla, en lugar de dar de alta registro por registro. Es útil para la carga inicial del sistema o para altas masivas.</p>
+<ul>
+<li><p>El sistema ofrece un esquema (plantilla) que indica el formato esperado de la planilla.</p></li>
+<li><p>Se importa el archivo y el sistema procesa los registros.</p></li>
+</ul>
+</section>
+<section id="ch-etiquetas"><h2>Embalado y etiquetado (etiquetas por bulto)</h2><p>Aviso flotante que se abre automáticamente al emitir un envío o registrar un retorno de OTT y al terminar una recepción de material/insumo, y manualmente desde <strong>Lotes</strong> con el botón 🏷 de cada lote.</p>
+<ol type="1">
+<li>Indicar la <strong>cantidad total</strong> y la <strong>unidad</strong>.</li>
+<li>Indicar la <strong>cantidad de bultos</strong> o la <strong>cantidad por bulto</strong>; el otro valor se calcula solo. Si la división no es exacta, el último bulto lleva el resto.</li>
+<li>Completar o corregir artículo, referencia y lote. El <strong>código de barras</strong> del artículo se usa como base; si no tiene, se usa el lote o la referencia.</li>
+<li><strong>Imprimir etiquetas:</strong> se genera una etiqueta de 100 × 60 mm por bulto con empresa, artículo, cantidad, “Bulto i / N”, referencia, lote, fecha y un código de barras Code 128 (identificador <em>base-i/N</em>).</li>
+</ol>
+<p>Si el navegador bloquea la ventana de impresión hay que permitir las ventanas emergentes para el sitio.</p>
+</section>
+<section id="ch-flujos"><h1>4. Flujos de trabajo típicos</h1><p>Esta sección conecta los módulos mostrando cómo se encadenan en las tareas reales del taller. Sirve como guía paso a paso.</p>
+<h3>
+4.1. Dar de alta un producto nuevo y su proceso
+</h3>
+<ol type="1">
+<li><p>En <strong>Procesos / Productos</strong>, crear el producto (código, nombre, cliente, precio).</p></li>
+<li><p>Abrir el producto y agregar sus operaciones en orden, indicando para cada una si es interna o tercerizada.</p></li>
+<li><p>En cada operación interna, asignar máquina y tiempos; en las tercerizadas, proveedor y precio.</p></li>
+<li><p>Agregar a cada operación los materiales/insumos que consume y las herramientas que necesita.</p></li>
+<li><p>Adjuntar planos o PDFs técnicos si corresponde.</p></li>
+</ol>
+<h3>
+4.2. Del pedido del cliente a la producción
+</h3>
+<ol type="1">
+<li><p>Registrar el cliente en <strong>Clientes</strong> si es nuevo.</p></li>
+<li><p>Crear el pedido en <strong>Pedidos de clientes</strong> con sus renglones (producto, cantidad, fecha).</p></li>
+<li><p>Explotar el pedido a OTs. Se generan las <strong>Órdenes de trabajo</strong> automáticamente.</p></li>
+<li><p>Revisar el <strong>MRP</strong> para ver faltantes de material y generar solicitudes de compra.</p></li>
+<li><p>Comprar y recibir los materiales; aprobar los lotes en Calidad.</p></li>
+<li><p>En cada OT, asignar los materiales/lotes a los renglones.</p></li>
+<li><p>En planta, cargar las <strong>Novedades</strong> de cada operación a medida que se produce.</p></li>
+<li><p>Remitir el producto terminado al cliente desde <strong>Remitir a cliente</strong>.</p></li>
+</ol>
+<h3>
+4.3. Comprar material y dejarlo disponible
+</h3>
+<ol type="1">
+<li><p>Desde el <strong>MRP</strong> o manualmente, generar una solicitud de compra.</p></li>
+<li><p>Registrar cotizaciones de proveedores y seleccionar una.</p></li>
+<li><p>Emitir la <strong>Orden de compra</strong>. Si supera el límite, un administrador la aprueba.</p></li>
+<li><p>Al llegar la mercadería, registrar la recepción: se generan los lotes y se suma el stock.</p></li>
+<li><p>En <strong>Liberación de lotes</strong>, aprobar el lote para habilitarlo a producción.</p></li>
+</ol>
+<h3>
+4.4. Tercerizar una operación
+</h3>
+<ol type="1">
+<li>En el proceso, la operación tercerizada lleva proveedor predeterminado, precio e <strong>insumo obligatorio</strong> (material de retorno).</li>
+<li>Al generarse la OTT se puede cambiar el proveedor mientras no se haya enviado nada.</li>
+<li>Al emitir el primer remito de envío se genera una solicitud de compra por lo enviado; se imprimen las etiquetas de los bultos.</li>
+<li>Compras confirma el precio y emite la OC (autoaprobada si coincide con la lista del proveedor).</li>
+<li>Al volver las piezas se ingresa el remito en <strong>Recepción de material/insumo → Pendientes de OTT</strong>, que descuenta lo pendiente.</li>
+<li>Se aprueba el lote de retorno en Calidad y la OT continúa.</li>
+</ol>
+</section>
+<section id="ch-faq"><h1>5. Preguntas frecuentes</h1><h3>
+» Una función nueva da error 404 o el manual no abre, ¿qué hago?
+</h3>
+<p>Significa que el servidor sigue ejecutando una versión vieja de <code>server.py</code>. Al iniciar sesión, si la pantalla y el servidor no tienen la misma versión aparece un aviso rojo arriba. Solución: cerrar el servidor y volver a iniciarlo con <code>python server.py</code> (o con INICIAR_SERVIDOR.bat). Si se usa <code>MetalERP.exe</code>, hay que volver a generarlo con el <code>server.py</code> nuevo, porque el ejecutable lleva el código adentro.</p>
+<h3>
+» No veo un módulo en el menú, ¿por qué?
+</h3>
+<p>Probablemente tu usuario no tiene permiso para ese módulo. Pedí a un administrador que lo habilite desde Usuarios → Permisos.</p>
+<h3>
+» No veo los precios ni la facturación.
+</h3>
+<p>Tu usuario no tiene activado el permiso "ver valores monetarios". Es una restricción intencional que un administrador puede cambiar.</p>
+<p><strong>» Cargué una novedad pero no me deja, dice que la operación es tercerizada.</strong></p>
+<p>Las operaciones tercerizadas no se cargan por Novedades. Se completan solas cuando vuelve el lote del proveedor y se aprueba en Calidad.</p>
+<h3>
+» Asigné un lote pero no puedo consumirlo.
+</h3>
+<p>Verificá que el lote esté en estado Aprobado. Un lote Ingresado (recién recibido) debe liberarse en Calidad antes de poder usarse.</p>
+<h3>
+» Exploté un pedido dos veces y no generó nuevas OTs.
+</h3>
+<p>Un pedido ya explotado queda "En proceso" y no se vuelve a explotar. Si necesitás más OTs, vinculálas manualmente al renglón.</p>
+<h3>
+» ¿Dónde cambio el nombre del taller que sale en los PDF?
+</h3>
+<p>En Configuración → Datos de la empresa y PDF.</p>
+<p><strong>» ¿Cómo doy de alta a un nuevo empleado para que aparezca al cargar novedades?</strong></p>
+<p>En Recursos humanos, con tipo "Directo". Los empleados directos son los que producen y aparecen en las novedades.</p>
+</section>
+<section id="ch-glosario"><h1>6. Glosario</h1><table style="width:97%;">
+<colgroup>
+<col style="width: 21%" />
+<col style="width: 75%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th style="text-align: left;"><strong>Término</strong></th>
+<th style="text-align: left;"><strong>Definición</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">OT</td>
+<td style="text-align: left;">Orden de Trabajo. Un trabajo de fabricación de una cantidad de un producto.</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">OTT</td>
+<td style="text-align: left;">Orden de Trabajo de Terceros. Operación tercerizada enviada a un proveedor externo.</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">OC</td>
+<td style="text-align: left;">Orden de Compra. A un proveedor (compras) o de un cliente (pedido).</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">MRP</td>
+<td style="text-align: left;">Planificación de Requerimientos de Materiales. Calcula faltantes de material.</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Lote</td>
+<td style="text-align: left;">Partida identificada de material, con trazabilidad desde el ingreso al consumo.</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Novedad</td>
+<td style="text-align: left;">Parte de producción de una operación: cantidad, tiempo y rendimiento.</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Rendimiento</td>
+<td style="text-align: left;">Producción real frente al estándar de la operación, en porcentaje.</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Desvío</td>
+<td style="text-align: left;">Novedad con rendimiento menor a 80%, marcada para análisis.</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Explosión</td>
+<td style="text-align: left;">Generación automática de OTs a partir de un pedido, en uno o varios niveles.</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Liberación</td>
+<td style="text-align: left;">Aprobación de calidad que habilita un lote para producción.</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Semielaborado</td>
+<td style="text-align: left;">Producto intermedio que aún requiere más operaciones.</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Remito</td>
+<td style="text-align: left;">Documento de entrega de mercadería al cliente.</td>
+</tr>
+</tbody>
+</table>
+<p><em>— Fin del manual —</em></p>
+</section></main></body></html>

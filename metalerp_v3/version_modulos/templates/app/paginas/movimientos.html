@@ -1,0 +1,47 @@
+    <div class="page" id="p-movimientos">
+      <div class="vhead">
+        <div class="vhead-card">
+          <div class="vhead-row vhead-top">
+            <div class="vhead-tit">
+              <div class="pt" title="Historial de entradas, salidas y ajustes por artículo">Movimientos de inventario</div>
+              <span class="vh-badge" id="mov-count-label" title="Movimientos mostrados">–</span>
+            </div>
+            <input type="hidden" id="mov-tipo-fil" value="">
+            <div class="tabs vh-tabs" id="mov-tabs"><div class="tab active" data-e="">Todos</div><div class="tab" data-e="entrada">Entradas</div><div class="tab" data-e="salida">Salidas</div><div class="tab" data-e="ajuste">Ajustes</div></div>
+            <div class="vh-acciones">
+              <button class="btn" onclick="loadMovimientos()" title="Volver a cargar la lista"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.6 8A5.6 5.6 0 1 1 11.9 4"/><path d="M12.4 1.6V4.4H9.6"/></svg>Actualizar</button>
+            </div>
+          </div>
+          <div class="vhead-row vhead-fil vhead-fil-wrap">
+            <div class="vh-fil-cli vh-fil-cli-w">
+              <input type="text" id="mov-mat-fil-txt" class="sel-fil" placeholder="🔍 Artículo: código o descripción" autocomplete="off"
+                oninput="filtrarMovMatFil()"
+                onfocus="if($('mov-mat-fil-txt').value)filtrarMovMatFil()"
+                onblur="setTimeout(function(){$('mov-mat-fil-drop').style.display='none';},150)">
+              <input type="hidden" id="mov-mat-fil" value="">
+              <div id="mov-mat-fil-drop" class="vh-pop"></div>
+            </div>
+            <select id="mov-origen-fil" class="sel-fil vh-fil-sel-w" onchange="loadMovimientos()" title="Origen del movimiento">
+              <option value="">Todos los orígenes</option>
+              <option value="recepciones">Recepciones (todas)</option>
+              <option value="oc">Recepción según OC</option>
+              <option value="directa">Recepción sin OC</option>
+              <option value="ott">Retorno de terceros (OTT)</option>
+              <option value="lotes">Alta / aprobación de lote</option>
+              <option value="consumos">Consumo de producción</option>
+              <option value="remitos">Remito a cliente</option>
+              <option value="devolucion">Devolución / reenvío</option>
+              <option value="ajustes">Ajuste manual</option>
+            </select>
+            <span class="vh-fil-lbl">Desde</span><input type="date" id="mov-desde-fil" class="sel-fil" onchange="loadMovimientos()">
+            <span class="vh-fil-lbl">Hasta</span><input type="date" id="mov-hasta-fil" class="sel-fil" onchange="loadMovimientos()">
+            <input type="text" id="mov-q-fil" class="sel-fil vh-fil-wide" placeholder="🔍 Referencia o lote" oninput="loadMovimientos()" autocomplete="off">
+            <button class="vh-fil-clear" onclick="clearMovFiltros()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.2 2.8h11.6L9.3 8.2v4.4l-2.6 1.3V8.2z"/><path d="M2 14 14 2"/></svg>Limpiar filtros</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div id="mov-list" class="nowrap-tbl"><div class="em">Seleccioná un artículo o dejá en blanco para ver todos.</div></div>
+      </div>
+    </div>
+

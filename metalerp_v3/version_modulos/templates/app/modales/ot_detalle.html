@@ -1,0 +1,35 @@
+<!-- OT DETAIL: operaciones y materiales -->
+<div class="ov" id="mo-ot-detail"><div class="mo" style="width:720px">
+  <div class="mh" id="ot-detail-title">Detalle de OT <span class="mx" onclick="closeMo('mo-ot-detail')">×</span></div>
+  <div class="tabs" id="ot-det-tabs" style="margin-bottom:12px">
+    <div class="tab active" data-dt="ops">Operaciones</div>
+    <div class="tab" data-dt="mats">Lotes asignados</div>
+  </div>
+  <div id="ot-det-ops"></div>
+  <div id="ot-det-mats" style="display:none"></div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-ot-detail')">Cerrar</button></div>
+</div></div>
+
+
+<!-- EDITAR MATERIAL -->
+<div class="ov" id="mo-edit-mat"><div class="mo">
+  <div class="mh">Editar artículo <span class="mx" onclick="closeMo('mo-edit-mat')">×</span></div>
+  <input type="hidden" id="emat-id">
+  <div class="fg2">
+    <div class="fg"><label>Código</label><input id="emat-cod"></div>
+    <div class="fg" id="emat-cod-hint" style="display:none;grid-column:1/-1;font-size:11px;color:var(--color-text-secondary);margin-top:-6px">Código generado por el sistema a partir del producto al que pertenece (semielaborado).</div>
+    <div class="fg"><label>Tipo</label><select id="emat-tip"><option>Material</option><option>Insumo</option><option>Herramienta</option><option>Producto terminado</option><option>Semielaborado</option></select></div>
+    <div class="fg s2"><label>Cliente</label><select id="emat-cli"></select></div>
+    <div class="fg s2"><label>Código de barras / QR / DataMatrix <span style="font-size:10px;color:var(--color-text-secondary)">(uso futuro)</span></label><input id="emat-bar" placeholder="Valor leído por el lector"></div>
+    <div class="fg s2"><label>Descripción <span class="req">*</span></label><input id="emat-des"></div>
+    <div class="fg"><label>Categoría de producto</label><select id="emat-cp"></select></div>
+    <div class="fg"><label>Unidad</label><select id="emat-uni"><option>kg</option><option>m</option><option>m2</option><option>m3</option><option>unid</option><option>litro</option><option>botellón</option><option>rollo</option></select></div>
+    <div class="fg"><label>Stock mínimo</label><input type="number" id="emat-min" placeholder="0" min="0" step="0.01"></div>
+    <div class="fg"><label>Stock máximo</label><input type="number" id="emat-max" placeholder="0" min="0" step="0.01"></div>
+    <div class="fg" id="emat-pre-wrap"><label>Precio unitario ($)</label><input type="number" id="emat-pre" placeholder="0" min="0"></div>
+    <div class="fg"><label>Proveedor principal</label><select id="emat-prv"></select></div>
+    <div class="fg s2"><label>Observaciones</label><textarea id="emat-obs" style="min-height:45px"></textarea></div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-edit-mat')">Cancelar</button><button class="btn btn-p" onclick="saveEditMat()">Guardar cambios</button></div>
+</div></div>
+

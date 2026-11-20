@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>HMI máquina · PRUEBA · MetalERP</title>
+<style>
+:root{--bg:#0f1418;--panel:#1a2229;--panel2:#222c35;--line:#2f3b46;--tx:#e9eef2;--mut:#93a3b1;
+  --ok:#2fbf71;--warn:#f0b429;--err:#e5484d;--acc:#3b9eff;--sim:#b07cff}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--tx);font-family:"Segoe UI",Roboto,Arial,sans-serif;user-select:none}
+body{display:flex;flex-direction:column}
+.sim-banda{background:var(--sim);color:#140a24;font-weight:700;text-align:center;padding:4px 8px;font-size:14px;letter-spacing:.3px}
+header{display:flex;align-items:center;gap:16px;padding:10px 18px;background:var(--panel);border-bottom:1px solid var(--line)}
+header .maq{font-size:22px;font-weight:700}
+header .maq small{display:block;font-size:13px;color:var(--mut);font-weight:400}
+header .sp{flex:1}
+.chip{display:flex;align-items:center;gap:7px;padding:6px 12px;border-radius:999px;background:var(--panel2);font-size:15px;white-space:nowrap}
+.dot{width:11px;height:11px;border-radius:50%;background:var(--mut)}
+.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.err{background:var(--err)}
+.reloj{font-size:22px;font-variant-numeric:tabular-nums;color:var(--mut)}
+main{flex:1;overflow:auto;padding:18px}
+.vista{display:none;height:100%}
+.vista.on{display:flex;flex-direction:column}
+h1{font-size:30px;margin:0 0 6px}
+.sub{color:var(--mut);font-size:17px;margin:0 0 16px}
+.btn{border:0;border-radius:14px;font-size:22px;font-weight:700;padding:18px 26px;min-height:72px;cursor:pointer;color:#fff;background:var(--panel2)}
+.btn:active{transform:scale(.98);filter:brightness(1.15)}
+.btn.ok{background:var(--ok);color:#06210f}.btn.warn{background:var(--warn);color:#2a1d00}.btn.err{background:var(--err)}
+.btn.acc{background:var(--acc)}.btn.sim{background:transparent;border:2px dashed var(--sim);color:var(--sim)}
+.btn:disabled{opacity:.35}
+.fila{display:flex;gap:14px;flex-wrap:wrap}
+/* Identificación */
+.ident{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:14px}
+.huella{width:170px;height:170px;border-radius:50%;border:4px solid var(--acc);display:flex;align-items:center;justify-content:center;animation:pulso 2s infinite}
+.huella svg{width:110px;height:110px;stroke:var(--acc)}
+@keyframes pulso{0%,100%{box-shadow:0 0 0 0 rgba(59,158,255,.5)}50%{box-shadow:0 0 0 22px rgba(59,158,255,0)}}
+.huella.err{border-color:var(--err);animation:none}.huella.err svg{stroke:var(--err)}
+.msg-ident{font-size:20px;min-height:28px}
+.msg-ident.err{color:var(--err)}
+.sim-box{margin-top:10px;border:2px dashed var(--sim);border-radius:14px;padding:12px;max-width:900px}
+.sim-box p{margin:0 0 10px;color:var(--sim);font-weight:700}
+.sim-box .fila{justify-content:center}
+.sim-box .btn{font-size:17px;min-height:56px;padding:10px 16px}
+/* Selección */
+.oplist{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px}
+.op{background:var(--panel);border:2px solid var(--line);border-radius:14px;padding:14px 16px;cursor:pointer;text-align:left;color:var(--tx)}
+.op.sel{border-color:var(--acc);background:#13283d}
+.op .ot{font-size:15px;color:var(--mut)}
+.op .pz{font-size:21px;font-weight:700;margin:2px 0}
+.op .nm{font-size:18px}
+.op .bar{height:8px;background:var(--panel2);border-radius:4px;margin-top:10px;overflow:hidden}
+.op .bar i{display:block;height:100%;background:var(--ok)}
+.op .meta{display:flex;justify-content:space-between;font-size:15px;color:var(--mut);margin-top:6px}
+.aviso{background:#3a2e10;color:var(--warn);border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:16px}
+.pie{display:flex;gap:14px;justify-content:space-between;align-items:center;margin-top:16px;padding-top:12px;border-top:1px solid var(--line)}
+/* Producción */
+.prod{flex:1;display:grid;grid-template-columns:1.4fr 1fr;gap:16px}
+.caja{background:var(--panel);border-radius:16px;padding:16px 18px}
+.estado-grande{font-size:26px;font-weight:800;padding:10px 16px;border-radius:12px;display:inline-block}
+.estado-grande.prod{background:#103d26;color:var(--ok)}.estado-grande.pausa{background:#3a2e10;color:var(--warn)}
+.contador{font-size:150px;line-height:1;font-weight:800;font-variant-numeric:tabular-nums;margin:10px 0 0}
+.contador small{font-size:34px;color:var(--mut);font-weight:600}
+.prog{height:22px;background:var(--panel2);border-radius:11px;overflow:hidden;margin:14px 0 6px}
+.prog i{display:block;height:100%;background:var(--ok);transition:width .4s}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:18px}
+.kv b{color:var(--mut);font-weight:500}
+.big{font-size:40px;font-weight:700;font-variant-numeric:tabular-nums}
+.flash{animation:flash .5s}
+@keyframes flash{0%{color:var(--ok)}100%{color:var(--tx)}}
+/* Resumen */
+.res{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.stepper{display:flex;align-items:center;gap:14px}
+.stepper .btn{width:80px;font-size:34px;padding:0}
+.stepper .v{font-size:56px;font-weight:800;min-width:110px;text-align:center;font-variant-numeric:tabular-nums}
+/* Confirmación */
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;z-index:50}
+.ov.on{display:flex}
+.dlg{background:var(--panel);border-radius:18px;padding:26px;max-width:620px;width:92%;text-align:center}
+.dlg p{font-size:24px;margin:0 0 22px}
+.dlg .fila{justify-content:center}
+@media (max-width:820px){.prod,.res{grid-template-columns:1fr}.contador{font-size:110px}}
+</style>
+</head>
+<body>
+<div class="sim-banda">MODO PRUEBA · huella y pulsos SIMULADOS · los ciclos SÍ se registran en el servidor</div>
+<header>
+  <div class="maq" id="h-maq">Cargando…<small>&nbsp;</small></div>
+  <div class="sp"></div>
+  <div class="chip" id="h-oper" style="display:none"><span>👷</span><span id="h-oper-n"></span></div>
+  <div class="chip"><span class="dot" id="h-srv"></span><span id="h-srv-t">Servidor</span></div>
+  <div class="chip" id="h-cola" style="display:none"><span>⏳</span><span id="h-cola-t"></span></div>
+  <div class="chip"><span class="dot" id="h-sen"></span><span id="h-sen-t">Contador</span></div>
+  <div class="reloj" id="h-reloj">--:--</div>
+</header>
+<main>
+  <!-- A. Identificación -->
+  <section class="vista on" id="v-ident">
+    <div class="ident">
+      <div class="huella" id="huella"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.4" stroke-linecap="round"><path d="M12 11c0 3-1 6-3 8"/><path d="M8.5 6.5A6 6 0 0 1 18 11c0 2-.3 4-1 6"/><path d="M6 9.5A6 6 0 0 0 6 13c0 1.5-.4 3-1 4"/><path d="M15 11a3 3 0 0 0-6 0c0 2.5-.6 5-2 7"/><path d="M12 14c0 2-.4 4-1.5 6"/><path d="M14.5 15c-.2 1.8-.7 3.5-1.5 5"/></svg></div>
+      <h1>Apoyá el dedo en el lector</h1>
+      <div class="msg-ident" id="msg-ident">&nbsp;</div>
+      <div class="sim-box">
+        <p>SIMULADOR DE HUELLA — en la versión real esto no existe: lo resuelve el lector</p>
+        <div class="fila" id="sim-emps"></div>
+        <div class="fila" style="margin-top:10px">
+          <button class="btn sim" onclick="simHuellaMala()">Huella no reconocida</button>
+          <button class="btn sim" onclick="simLectorCaido()">Lector desconectado</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- B. Selección del trabajo -->
+  <section class="vista" id="v-sel">
+    <h1>Elegí el trabajo</h1>
+    <p class="sub">Operaciones cargadas por producción para esta máquina. Tocá una y después «Iniciar trabajo».</p>
+    <div class="aviso" id="sel-aviso" style="display:none"></div>
+    <div class="oplist" id="oplist"></div>
+    <div class="pie">
+      <button class="btn" onclick="pedirConfirm('¿Cerrar sesión de este operario?', salir)">Cambiar operario</button>
+      <button class="btn ok" id="btn-iniciar" disabled onclick="iniciar()">▶ Iniciar trabajo</button>
+    </div>
+  </section>
+
+  <!-- C. Producción -->
+  <section class="vista" id="v-prod">
+    <div class="prod">
+      <div class="caja">
+        <span class="estado-grande prod" id="p-estado">● PRODUCIENDO</span>
+        <div class="contador" id="p-cont">0 <small id="p-obj">/ 0</small></div>
+        <div class="prog"><i id="p-bar" style="width:0%"></i></div>
+        <div style="font-size:18px;color:var(--mut)" id="p-pct">0 % del objetivo de la operación</div>
+      </div>
+      <div class="caja">
+        <div class="kv">
+          <b>OT</b><span id="p-ot"></span>
+          <b>Pieza</b><span id="p-pz"></span>
+          <b>Operación</b><span id="p-op"></span>
+          <b>Operario</b><span id="p-emp"></span>
+          <b>Inicio</b><span id="p-ini"></span>
+        </div>
+        <div style="margin-top:16px;color:var(--mut);font-size:16px">Tiempo trabajado</div>
+        <div class="big" id="p-tiempo">00:00:00</div>
+        <div style="margin-top:10px;color:var(--mut);font-size:16px">Último ciclo / esperado</div>
+        <div class="big" style="font-size:30px" id="p-ciclo">— / —</div>
+        <div style="margin-top:10px;color:var(--mut);font-size:16px">Registro en el servidor</div>
+        <div style="font-size:18px" id="p-srv">—</div>
+      </div>
+    </div>
+    <div class="pie">
+      <div class="fila">
+        <button class="btn warn" id="btn-pausa" onclick="pausar()">⏸ Pausar</button>
+        <button class="btn err" onclick="pedirConfirm('¿Finalizar este trabajo?', finalizar)">■ Finalizar</button>
+      </div>
+      <div class="fila">
+        <button class="btn sim" onclick="simCiclo()">+1 ciclo (simulado)</button>
+        <button class="btn sim" id="btn-auto" onclick="toggleAuto()">Ciclos automáticos: NO</button>
+        <button class="btn sim" onclick="simDuplicado()">Reenviar último (duplicado)</button>
+        <button class="btn sim" id="btn-red" onclick="toggleRed()">Cortar red</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- D. Resumen -->
+  <section class="vista" id="v-res">
+    <h1>Resumen del trabajo</h1>
+    <p class="sub">El trabajo quedó en pausa. Declará las piezas NO OK y confirmá.</p>
+    <div class="res">
+      <div class="caja">
+        <div class="kv" id="r-kv"></div>
+      </div>
+      <div class="caja">
+        <div style="font-size:20px;margin-bottom:6px">Ciclos registrados en el servidor</div>
+        <div class="big" id="r-ciclos">0</div>
+        <div style="font-size:20px;margin:16px 0 6px">Piezas NO OK (rechazadas)</div>
+        <div class="stepper">
+          <button class="btn" onclick="nok(-1)">−</button>
+          <div class="v" id="r-nok">0</div>
+          <button class="btn" onclick="nok(1)">+</button>
+        </div>
+        <div style="font-size:20px;margin:16px 0 6px">Piezas OK a registrar</div>
+        <div class="big" style="color:var(--ok)" id="r-ok">0</div>
+      </div>
+    </div>
+    <div class="pie">
+      <button class="btn" onclick="volverProd()">◀ Seguir produciendo</button>
+      <button class="btn ok" onclick="confirmarRes()">✔ Confirmar</button>
+    </div>
+  </section>
+</main>
+
+<div class="ov" id="ov"><div class="dlg"><p id="ov-t"></p><div class="fila" id="ov-btns"></div></div></div>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// MÓDULO DE PRUEBA. La huella y los pulsos del contador se simulan acá (en la
+// versión real los resuelven el terminal biométrico y el servicio que lee la
+// máquina). Lo que es real: la sesión de trabajo y cada ciclo se guardan en el
+// servidor; cada ciclo viaja con un uid único, queda en una cola local hasta
+// que el servidor lo confirma, y un reenvío no suma dos veces.
+// ─────────────────────────────────────────────────────────────────────────────
+const MAQ = new URLSearchParams(location.search).get('maquina') || 'T16';
+const COLA_KEY = 'hmi_cola_' + MAQ;
+let D = null, emp = null, opSel = null, ses = null;
+let autoId = null, srvOk = false, redCortada = false, enviando = false, ultimoUid = null, nokN = 0;
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fN = n => (Math.round((+n || 0) * 100) / 100).toLocaleString('es-AR');
+const hhmm = d => d.toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'});
+const hora = s => s ? s.slice(11, 16) : '—';
+const dur = seg => { const s = Math.floor(seg); return [s/3600|0, (s%3600)/60|0, s%60].map(x => String(x).padStart(2,'0')).join(':'); };
+const nombreEmp = e => (e.nombre || '').trim() + ' ' + (e.apellido || '');
+
+function vista(v){ document.querySelectorAll('.vista').forEach(e => e.classList.toggle('on', e.id === 'v-' + v)); }
+
+// Cola local de ciclos sin confirmar (sobrevive a recargar la página).
+function leerCola(){ try{ return JSON.parse(localStorage.getItem(COLA_KEY) || '[]'); }catch(e){ return []; } }
+function guardarCola(c){ try{ localStorage.setItem(COLA_KEY, JSON.stringify(c)); }catch(e){} }
+
+async function api(url, body){
+  if (redCortada) throw new Error('red cortada (simulado)');
+  const r = await fetch(url, body === undefined ? {credentials:'same-origin', cache:'no-store'} :
+    {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  srvOk = true; pintarEstados();
+  let d = {}; try{ d = await r.json(); }catch(e){}
+  if (r.status === 401) throw Object.assign(new Error('Sesión de MetalERP vencida: volvé a entrar'), {status:401});
+  if (!r.ok) throw Object.assign(new Error(d.error || ('HTTP ' + r.status)), {status:r.status, data:d});
+  return d;
+}
+
+async function init(){
+  try{ D = await api('/api/hmi_test/datos?maquina=' + encodeURIComponent(MAQ)); }
+  catch(e){ srvOk = !!e.status; pintarEstados(); $('msg-ident').textContent = 'Sin conexión con el servidor: ' + e.message; $('msg-ident').className = 'msg-ident err'; return; }
+  const m = D.maquina;
+  $('h-maq').innerHTML = esc(m.codigo) + ' · ' + esc(m.nombre) + '<small>' + esc([m.marca, m.modelo].filter(Boolean).join(' ') || 'Terminal de máquina') + '</small>';
+  $('sim-emps').innerHTML = D.empleados.map(e =>
+    `<button class="btn sim" onclick="simHuella(${e.id})">${esc(e.apellido)}, ${esc(e.nombre)}<br><small>Legajo ${esc(e.legajo || '—')}</small></button>`).join('')
+    || '<span style="color:var(--mut)">No hay empleados activos cargados</span>';
+  // Recuperación: si quedó un trabajo abierto en esta máquina (corte de luz,
+  // recarga, tablet reiniciada), se retoma tal como está en el servidor.
+  if (D.sesion_activa){ tomarSesion(D.sesion_activa); aviso('Se recuperó el trabajo abierto en esta máquina.'); }
+  enviarCola();
+}
+
+// ── A. Identificación (simulada) ─────────────────────────────────────────────
+function simHuella(id){
+  emp = D.empleados.find(e => e.id === id);
+  $('huella').classList.remove('err'); $('msg-ident').className = 'msg-ident';
+  $('h-oper').style.display = ''; $('h-oper-n').textContent = nombreEmp(emp);
+  pintarOps(); vista('sel');
+}
+function simHuellaMala(){ $('huella').classList.add('err'); $('msg-ident').className = 'msg-ident err'; $('msg-ident').textContent = 'Huella no reconocida. Probá de nuevo o avisá al encargado.'; }
+function simLectorCaido(){ $('huella').classList.add('err'); $('msg-ident').className = 'msg-ident err'; $('msg-ident').textContent = 'Lector desconectado. Usá la alternativa (tarjeta o PIN) o avisá al encargado.'; }
+function salir(){ emp = null; opSel = null; ses = null; $('h-oper').style.display = 'none'; $('huella').classList.remove('err'); $('msg-ident').innerHTML = '&nbsp;'; vista('ident'); }
+
+// ── B. Selección ─────────────────────────────────────────────────────────────
+function pintarOps(){
+  const av = $('sel-aviso');
+  if (!D.por_maquina){ av.style.display = ''; av.textContent = `La máquina ${D.maquina.codigo} todavía no tiene operaciones asignadas en las rutas: se muestran todas las operaciones abiertas.`; }
+  else av.style.display = 'none';
+  $('oplist').innerHTML = D.operaciones.map(o => {
+    const req = +o.qty_requerida || 0, hecho = +o.qty_producida || 0, pct = req ? Math.min(100, hecho / req * 100) : 0;
+    return `<button class="op${opSel && opSel.id === o.id ? ' sel' : ''}" onclick="elegir(${o.id})">
+      <div class="ot">${esc(o.ot_numero)} · ${esc(o.ot_estado)}${o.fecha_entrega ? ' · entrega ' + esc(o.fecha_entrega) : ''}</div>
+      <div class="pz">${esc(o.pieza_codigo || '')} ${esc(o.pieza_nombre || '')}</div>
+      <div class="nm">Paso ${esc(o.paso)} · ${esc(o.nombre)}</div>
+      <div class="bar"><i style="width:${pct}%"></i></div>
+      <div class="meta"><span>${fN(hecho)} / ${fN(req)} piezas</span><span>ciclo ${o.tiempo_ciclo_seg ? fN(o.tiempo_ciclo_seg) + ' s' : '—'}</span></div>
+    </button>`; }).join('') || '<p class="sub">No hay operaciones abiertas cargadas por producción.</p>';
+  $('btn-iniciar').disabled = !opSel;
+}
+function elegir(id){ opSel = D.operaciones.find(o => o.id === id); pintarOps(); }
+
+// ── C. Producción ────────────────────────────────────────────────────────────
+async function iniciar(){
+  $('btn-iniciar').disabled = true;
+  try{
+    const s = await api('/api/hmi_test/sesiones', {maquina: MAQ, empleado_id: emp.id, orden_operacion_id: opSel.id});
+    tomarSesion(s);
+  }catch(e){
+    if (e.status === 409 && e.data && e.data.sesion_id){
+      aviso('Ya había un trabajo abierto en esta máquina: se retoma ese.');
+      tomarSesion(await api('/api/hmi_test/sesiones/' + e.data.sesion_id));
+    } else { aviso('No se pudo iniciar: ' + e.message); $('btn-iniciar').disabled = false; }
+  }
+}
+function tomarSesion(s){
+  ses = s; ses._t0 = Date.now();
+  emp = {id: s.empleado_id, nombre: s.emp_nombre, apellido: s.emp_apellido, legajo: s.legajo};
+  $('h-oper').style.display = ''; $('h-oper-n').textContent = nombreEmp(emp);
+  $('p-ot').textContent = s.ot_numero;
+  $('p-pz').textContent = (s.pieza_codigo || '') + ' ' + (s.pieza_nombre || '');
+  $('p-op').textContent = 'Paso ' + s.paso + ' · ' + s.op_nombre;
+  $('p-emp').textContent = nombreEmp(emp);
+  $('p-ini').textContent = hora(s.inicio);
+  pintarProd(); vista('prod');
+}
+function actualizarSesion(s){ const ult = ses && ses.ultCiclo; ses = Object.assign(s, {_t0: Date.now(), ultCiclo: ult, ultMs: ses && ses.ultMs}); }
+function trabajado(){ return ses.trabajado_seg + (ses.estado === 'Produciendo' ? (Date.now() - ses._t0) / 1000 : 0); }
+function pendientesSesion(){ return ses ? leerCola().filter(e => e.sid === ses.id).length : 0; }
+function pintarProd(){
+  if (!ses) return;
+  const req = +ses.qty_requerida || 0, prev = +ses.qty_producida || 0, pend = pendientesSesion();
+  const tot = prev + ses.ciclos;
+  $('p-cont').innerHTML = fN(ses.ciclos) + ` <small>esta sesión · ${fN(tot)} / ${fN(req)} total</small>`;
+  const pct = req ? Math.min(100, tot / req * 100) : 0;
+  $('p-bar').style.width = pct + '%';
+  $('p-pct').textContent = Math.round(pct) + ' % del objetivo de la operación' + (req && tot >= req ? ' · objetivo alcanzado' : '');
+  $('p-tiempo').textContent = dur(trabajado());
+  $('p-ciclo').textContent = (ses.ultCiclo ? fN(ses.ultCiclo) + ' s' : '—') + ' / ' + (ses.tiempo_ciclo_seg ? fN(ses.tiempo_ciclo_seg) + ' s' : '—');
+  $('p-srv').innerHTML = `Sesión #${ses.id} · ${fN(ses.ciclos)} ciclos confirmados` +
+    (ses.duplicados ? ` · <span style="color:var(--warn)">${fN(ses.duplicados)} duplicados ignorados</span>` : '') +
+    (pend ? ` · <span style="color:var(--warn)">${pend} sin enviar</span>` : '') +
+    (ses.ultimo_evento ? `<br><span style="color:var(--mut)">último recibido ${hora(ses.ultimo_evento)}</span>` : '');
+  const est = $('p-estado');
+  if (ses.estado === 'Pausada'){ est.className = 'estado-grande pausa'; est.textContent = '⏸ EN PAUSA'; $('btn-pausa').textContent = '▶ Reanudar'; }
+  else if (redCortada || !srvOk){ est.className = 'estado-grande pausa'; est.textContent = '⚠ SIN CONEXIÓN · se guarda y reenvía'; $('btn-pausa').textContent = '⏸ Pausar'; }
+  else { est.className = 'estado-grande prod'; est.textContent = '● PRODUCIENDO'; $('btn-pausa').textContent = '⏸ Pausar'; }
+}
+function simCiclo(){
+  // Pulso simulado. En la versión real lo genera el servicio que lee el
+  // contador de la máquina, no la pantalla.
+  if (!ses || ses.estado !== 'Produciendo') return;
+  const now = Date.now();
+  if (ses.ultMs) ses.ultCiclo = Math.round((now - ses.ultMs) / 100) / 10;
+  ses.ultMs = now;
+  const c = leerCola();
+  c.push({sid: ses.id, uid: ses.id + '-' + now.toString(36) + '-' + Math.random().toString(36).slice(2, 8),
+          seq: c.length + 1, ts: new Date().toISOString()});
+  guardarCola(c);
+  const el = $('p-cont'); el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+  pintarProd(); enviarCola();
+}
+async function enviarCola(){
+  if (enviando) return; enviando = true;
+  try{
+    let c = leerCola();
+    while (c.length){
+      const ev = c[0];
+      try{
+        const r = await api('/api/hmi_test/sesiones/' + ev.sid + '/eventos', ev);
+        ultimoUid = ev;
+        if (ses && ses.id === ev.sid){ ses.ciclos = r.ciclos; ses.duplicados = r.duplicados; }
+      }catch(e){
+        if (!e.status){ srvOk = redCortada ? srvOk : false; break; }   // sin red: queda en cola
+        if (e.status === 409 || e.status === 404) aviso('Ciclo descartado: ' + e.message);
+        else break;
+      }
+      c = leerCola(); c.shift(); guardarCola(c);
+    }
+  } finally { enviando = false; pintarEstados(); pintarProd(); }
+}
+async function simDuplicado(){
+  // Reenvía el último ciclo ya confirmado, como pasaría tras un corte de red
+  // a mitad de un envío. El servidor tiene que ignorarlo.
+  if (!ultimoUid){ aviso('Todavía no se envió ningún ciclo.'); return; }
+  try{
+    const r = await api('/api/hmi_test/sesiones/' + ultimoUid.sid + '/eventos', ultimoUid);
+    if (ses && ses.id === ultimoUid.sid){ ses.ciclos = r.ciclos; ses.duplicados = r.duplicados; }
+    aviso(r.duplicado ? `Duplicado recibido e ignorado: siguen ${fN(r.ciclos)} ciclos.` : 'El servidor lo contó como nuevo (no debería pasar).');
+    pintarProd();
+  }catch(e){ aviso('No se pudo reenviar: ' + e.message); }
+}
+function toggleAuto(){
+  if (autoId){ clearInterval(autoId); autoId = null; }
+  else autoId = setInterval(simCiclo, 3000);
+  $('btn-auto').textContent = 'Ciclos automáticos: ' + (autoId ? 'SÍ' : 'NO');
+}
+function toggleRed(){
+  redCortada = !redCortada;
+  $('btn-red').textContent = redCortada ? 'Volver a conectar' : 'Cortar red';
+  pintarEstados(); pintarProd();
+  if (!redCortada) enviarCola();
+}
+async function pausar(){
+  try{ actualizarSesion(await api('/api/hmi_test/sesiones/' + ses.id + (ses.estado === 'Pausada' ? '/reanudar' : '/pausa'), {})); }
+  catch(e){ aviso('No se pudo: ' + e.message); }
+  pintarProd();
+}
+// ── D. Resumen ───────────────────────────────────────────────────────────────
+async function finalizar(){
+  if (autoId) toggleAuto();
+  await enviarCola();
+  if (pendientesSesion()){ aviso('Hay ciclos sin enviar al servidor. Reconectá la red antes de finalizar.'); return; }
+  try{
+    if (ses.estado === 'Produciendo') actualizarSesion(await api('/api/hmi_test/sesiones/' + ses.id + '/pausa', {}));
+    else actualizarSesion(await api('/api/hmi_test/sesiones/' + ses.id));
+  }catch(e){ aviso('No se pudo finalizar: ' + e.message); return; }
+  nokN = 0; pintarRes(); vista('res');
+}
+function datosRes(fin){
+  return [
+    ['Operario', nombreEmp(emp) + ' (legajo ' + (emp.legajo || '—') + ')'],
+    ['Máquina', D.maquina.codigo + ' · ' + D.maquina.nombre],
+    ['OT', ses.ot_numero], ['Pieza', (ses.pieza_codigo || '') + ' ' + (ses.pieza_nombre || '')],
+    ['Operación', 'Paso ' + ses.paso + ' · ' + ses.op_nombre],
+    ['Inicio', hora(ses.inicio)], ['Fin', fin ? hora(ses.fin) : '(al confirmar)'],
+    ['Tiempo trabajado', dur(ses.trabajado_seg)], ['Sesión', '#' + ses.id + (ses.duplicados ? ' · ' + ses.duplicados + ' duplicados ignorados' : '')]
+  ].map(([k, v]) => `<b>${esc(k)}</b><span>${esc(v)}</span>`).join('');
+}
+function nok(d){ nokN = Math.max(0, Math.min(ses.ciclos, nokN + d)); pintarRes(); }
+function pintarRes(){ $('r-kv').innerHTML = datosRes(false); $('r-ciclos').textContent = fN(ses.ciclos); $('r-nok').textContent = fN(nokN); $('r-ok').textContent = fN(ses.ciclos - nokN); }
+async function volverProd(){
+  try{ actualizarSesion(await api('/api/hmi_test/sesiones/' + ses.id + '/reanudar', {})); }catch(e){ aviso('No se pudo reanudar: ' + e.message); return; }
+  pintarProd(); vista('prod');
+}
+function confirmarRes(){
+  pedirConfirm(`¿Cerrar el trabajo con ${fN(ses.ciclos - nokN)} OK y ${fN(nokN)} NO OK?`, async () => {
+    try{ actualizarSesion(await api('/api/hmi_test/sesiones/' + ses.id + '/finalizar', {nok: nokN})); }
+    catch(e){ aviso('No se pudo cerrar: ' + e.message); return; }
+    preguntarNovedad();
+  });
+}
+function preguntarNovedad(){
+  dialogo(`Trabajo cerrado en el servidor (sesión #${ses.id}): ${fN(ses.ciclos)} ciclos, ${fN(ses.nok)} NO OK.<br><br>` +
+    `¿Crear también la <b>novedad real</b> en MetalERP? Esto descuenta material y avanza la OT como cualquier novedad.`,
+    [['No, solo prueba', terminar, ''], ['Crear novedad real', crearNovedad, 'ok']]);
+}
+async function crearNovedad(){
+  const ok = ses.ciclos - ses.nok;
+  try{
+    const n = await api('/api/novedades', {
+      orden_id: ses.orden_id, orden_operacion_id: ses.orden_operacion_id, empleado_id: ses.empleado_id,
+      maquina_id: ses.maquina_id, cantidad_producida: ok, piezas_observadas: ses.nok,
+      tiempo_real_min: Math.max(0.1, Math.round(ses.trabajado_seg / 6) / 10),
+      obs: 'HMI de prueba · sesión #' + ses.id});
+    try{ actualizarSesion(await api('/api/hmi_test/sesiones/' + ses.id + '/novedad', {novedad_id: n.id})); }catch(e){}
+    dialogo(`Novedad <b>${esc(n.numero)}</b> creada: ${fN(ok)} OK y ${fN(ses.nok)} NO OK en ${esc(ses.ot_numero)}. La podés ver en Novedades.`, [['Listo', terminar, 'ok']]);
+  }catch(e){
+    dialogo('MetalERP rechazó la novedad: ' + esc(e.message) + '<br><br>La sesión queda guardada igual.', [['Reintentar', crearNovedad, ''], ['Cerrar', terminar, 'ok']]);
+  }
+}
+async function terminar(){
+  cerrarConfirm(); ses = null; opSel = null;
+  try{ const d = await api('/api/hmi_test/datos?maquina=' + encodeURIComponent(MAQ)); D.operaciones = d.operaciones; D.por_maquina = d.por_maquina; }catch(e){}
+  pintarOps(); vista('sel');
+}
+// ── Diálogos grandes (evitan toques accidentales) ────────────────────────────
+function dialogo(html, botones){
+  $('ov-t').innerHTML = html;
+  const fila = $('ov-btns');
+  fila.innerHTML = botones.map((b, i) => `<button class="btn ${b[2] || ''}" data-i="${i}">${esc(b[0])}</button>`).join('');
+  fila.querySelectorAll('button').forEach(el => el.onclick = () => { const b = botones[+el.dataset.i]; cerrarConfirm(); b[1](); });
+  $('ov').classList.add('on');
+}
+function pedirConfirm(t, fn){ dialogo(esc(t), [['Cancelar', () => {}, ''], ['Sí', fn, 'acc']]); }
+function cerrarConfirm(){ $('ov').classList.remove('on'); }
+let _avisoId = null;
+function aviso(t){
+  let el = $('aviso-flot');
+  if (!el){ el = document.createElement('div'); el.id = 'aviso-flot';
+    el.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#2b3641;color:#fff;padding:14px 22px;border-radius:12px;font-size:19px;z-index:60;max-width:90%;box-shadow:0 6px 24px rgba(0,0,0,.5)';
+    document.body.appendChild(el); }
+  el.textContent = t; el.style.display = '';
+  clearTimeout(_avisoId); _avisoId = setTimeout(() => el.style.display = 'none', 4500);
+}
+
+// ── Estado de servidor / cola / reloj ────────────────────────────────────────
+function pintarEstados(){
+  const ok = srvOk && !redCortada;
+  $('h-srv').className = 'dot ' + (ok ? 'ok' : 'err'); $('h-srv-t').textContent = redCortada ? 'Sin red (sim.)' : (srvOk ? 'Servidor' : 'Sin servidor');
+  $('h-sen').className = 'dot ok'; $('h-sen-t').textContent = 'Contador (sim.)';
+  const n = leerCola().length;
+  $('h-cola').style.display = n ? '' : 'none'; $('h-cola-t').textContent = n + ' sin enviar';
+}
+setInterval(() => { $('h-reloj').textContent = hhmm(new Date()); if (ses && $('v-prod').classList.contains('on')) pintarProd(); }, 1000);
+// Cada 2 s: reintenta la cola y relee la sesión del servidor (lo que ve el
+// operario es lo que el servidor confirmó, no lo que cree la pantalla).
+setInterval(async () => {
+  if (redCortada) return;
+  if (leerCola().length) enviarCola();
+  if (ses && $('v-prod').classList.contains('on')){
+    try{ actualizarSesion(await api('/api/hmi_test/sesiones/' + ses.id)); }
+    catch(e){ if (!e.status){ srvOk = false; pintarEstados(); } }
+  }
+}, 2000);
+$('h-reloj').textContent = hhmm(new Date());
+init();
+
+</script>
+</body>
+</html>

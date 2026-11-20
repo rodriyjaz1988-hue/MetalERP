@@ -1,0 +1,48 @@
+    <div class="page" id="p-scheduling">
+      <div class="vhead">
+        <div class="vhead-card">
+          <div class="vhead-row vhead-top">
+            <div class="vhead-tit">
+              <div class="pt" title="Gantt por máquina: asigná operaciones de OT a una máquina, un operario y una jornada de 9 o 12 horas">Scheduling de producción</div>
+            </div>
+            <div id="sch-resumen" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"></div>
+            <div class="vh-acciones">
+              <button class="btn" onclick="schRefrescar()" title="Volver a cargar"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.6 8A5.6 5.6 0 1 1 11.9 4"/><path d="M12.4 1.6V4.4H9.6"/></svg>Actualizar</button>
+            </div>
+          </div>
+          <div class="vhead-row vhead-fil">
+            <button class="btn" onclick="schMover(-1)" title="Período anterior">◀</button>
+            <input type="date" id="sch-fecha" class="sel-fil" onchange="schIr(this.value)" title="Fecha de inicio de la vista">
+            <button class="btn" onclick="schMover(1)" title="Período siguiente">▶</button>
+            <button class="btn" onclick="schHoyBtn()">Hoy</button>
+            <select id="sch-zoom" class="sel-fil vh-fil-sel-w" onchange="schRefrescar(true)" title="Escala de tiempo">
+              <option value="sem">Semana</option><option value="d14">2 semanas</option><option value="d3">3 días</option><option value="d1">1 día (por hora)</option>
+            </select>
+            <select id="sch-sector" class="sel-fil vh-fil-sel-w" onchange="schRender()"><option value="">Todos los sectores</option></select>
+            <input id="sch-q" class="sel-fil vh-fil-wide" placeholder="🔍 Resaltar OT / producto / operario" autocomplete="off" oninput="clearTimeout(window._schT);window._schT=setTimeout(schRender,250)">
+            <label class="sch-tools" style="font-size:12px"><input type="checkbox" id="sch-solo" onchange="schRender()"> Solo máquinas con carga</label>
+          </div>
+        </div>
+      </div>
+      <div class="sch-body">
+        <div class="card sch-pend">
+          <div class="ph"><span>Operaciones sin planificar</span><span id="sch-pcount" class="b bb">0</span></div>
+          <div class="pf">
+            <select id="sch-psec" onchange="schRenderPend()"><option value="">Todos los sectores</option></select>
+            <input type="text" id="sch-pq" placeholder="🔍 Buscar OT / producto / cliente" oninput="schRenderPend()" autocomplete="off">
+            <label style="font-size:11.5px;color:#555;display:flex;gap:4px;align-items:center"><input type="checkbox" id="sch-pall" onchange="schRenderPend()"> Mostrar también las ya planificadas</label>
+          </div>
+          <div id="sch-plist"></div>
+          <div style="font-size:11px;color:#888;margin-top:6px">Arrastrá una operación hasta una máquina del Gantt, o apretá <b>Asignar</b>. Arrastrá una barra para moverla; clic para editarla.</div>
+        </div>
+        <div class="sch-main">
+          <div id="sch-scroll"><div id="sch-gantt" class="sch-wrap"><div class="ld">Cargando...</div></div></div>
+          <div style="font-size:11px;color:#888;margin-top:6px;display:flex;gap:14px;flex-wrap:wrap">
+            <span><i style="display:inline-block;width:10px;height:10px;border-left:4px solid #3B6D11;background:#E3F2D6"></i> operación en proceso</span>
+            <span><i style="display:inline-block;width:10px;height:10px;border-left:4px solid #BA7517;background:#FBEBCB"></i> pendiente</span>
+            <span><i style="display:inline-block;width:10px;height:10px;border:1px dashed #BA7517"></i> sin operario</span>
+            <span><i style="display:inline-block;width:10px;height:10px;border:2px solid #A32D2D"></i> termina después de la fecha de entrega</span>
+          </div>
+        </div>
+      </div>
+    </div>

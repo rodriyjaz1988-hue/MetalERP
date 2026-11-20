@@ -1,0 +1,24 @@
+    <div class="page" id="p-rendimiento">
+      <div class="vhead">
+        <div class="vhead-card">
+          <div class="vhead-row vhead-top">
+            <div class="vhead-tit">
+              <div class="pt" title="Seleccioná un rango de fechas para ver el rendimiento diario de todos los operarios">Rendimiento por operario</div>
+              <span class="vh-badge" id="rend-sel-label" title="Operario seleccionado">–</span>
+            </div>
+            
+          </div>
+          <div class="vhead-row vhead-fil">
+            <input type="text" id="rend-buscar" class="sel-fil vh-fil-wide" placeholder="🔍 Buscar operario" autocomplete="off">
+            <input type="date" id="rend-global-desde" class="sel-fil" title="Desde" onchange="rendAplicarFechasGlobales()">
+            <span style="font-size:12px;color:var(--color-text-secondary)">a</span>
+            <input type="date" id="rend-global-hasta" class="sel-fil" title="Hasta" onchange="rendAplicarFechasGlobales()">
+            <button class="btn" id="rend-ranking-btn" onclick="toggleRendRanking()">Ranking</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div id="rend-list"><div class="ld">Cargando...</div></div>
+      </div>
+    </div>
+

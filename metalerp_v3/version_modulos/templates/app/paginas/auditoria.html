@@ -1,0 +1,53 @@
+    <div class="page" id="p-auditoria">
+      <div class="vhead">
+        <div class="vhead-card">
+          <div class="vhead-row vhead-top">
+            <div class="vhead-tit">
+              <div class="pt">Bitácora de auditoría</div>
+              <span class="vh-badge" id="aud-total" title="Asientos que cumplen el filtro">–</span>
+            </div>
+            <div class="tabs vh-tabs" id="aud-tabs">
+              <div class="tab active" data-ac="">Todas</div>
+              <div class="tab" data-ac="alta">Altas</div>
+              <div class="tab" data-ac="modificacion">Modificaciones</div>
+              <div class="tab" data-ac="baja">Bajas</div>
+            </div>
+            <div class="vh-acciones">
+              <button class="btn" onclick="loadAuditoria(1)" title="Volver a consultar"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.6 7.2A5.6 5.6 0 1 1 12 3.6"/><path d="M12.6 1.4v2.6h-2.6"/></svg>Actualizar</button>
+            </div>
+          </div>
+          <div class="vhead-row vhead-fil">
+            <input type="date" id="aud-desde" class="sel-fil" title="Desde" onchange="loadAuditoria(1)">
+            <input type="date" id="aud-hasta" class="sel-fil" title="Hasta" onchange="loadAuditoria(1)">
+            <select id="aud-origen" class="sel-fil" onchange="loadAuditoria(1)">
+              <option value="">Todo origen</option>
+              <option value="usuario">Usuario</option>
+              <option value="sistema">Sistema</option>
+            </select>
+            <select id="aud-usuario" class="sel-fil" onchange="loadAuditoria(1)"><option value="">Todos los autores</option></select>
+            <select id="aud-entidad" class="sel-fil" onchange="loadAuditoria(1)"><option value="">Todas las entidades</option></select>
+            <input type="text" id="aud-q" class="sel-fil vh-fil-wide" placeholder="🔍 Buscar en registro o valores" autocomplete="off" oninput="audBuscarDebounce()">
+            <button class="vh-fil-clear" onclick="clearFiltrosAud()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.2 2.8h11.6L9.3 8.2v4.4l-2.6 1.3V8.2z"/><path d="M2 14 14 2"/></svg>Limpiar filtros</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div id="aud-list" class="nowrap-tbl"><div class="ld">Cargando...</div></div>
+        <div id="aud-pager" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:11px;padding-top:11px;border-top:1px solid var(--color-border-tertiary)">
+          <span id="aud-rango" style="font-size:12px;color:var(--color-text-secondary)"></span>
+          <div style="display:flex;align-items:center;gap:6px">
+            <select id="aud-pp" class="sel-fil" onchange="loadAuditoria(1)" style="padding:4px 8px;font-size:12px">
+              <option value="25">25 por página</option>
+              <option value="50" selected>50 por página</option>
+              <option value="100">100 por página</option>
+              <option value="200">200 por página</option>
+            </select>
+            <button class="btn btn-s" id="aud-prev" onclick="audPagina(-1)">‹ Anterior</button>
+            <span id="aud-pag-lbl" style="font-size:12px;color:var(--color-text-secondary);min-width:90px;text-align:center"></span>
+            <button class="btn btn-s" id="aud-next" onclick="audPagina(1)">Siguiente ›</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Registro de cambios del sistema (historial de cambios de código, solo admin) -->

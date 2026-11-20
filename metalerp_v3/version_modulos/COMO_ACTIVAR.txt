@@ -1,0 +1,16 @@
+Version del codigo repartido en modulos (armada el 29/10/2026, 14:21).
+
+Por ahora NO se usa: el sistema sigue con server.py y templates\app.html de
+la carpeta principal. Esta carpeta queda guardada para mas adelante.
+
+Ojo: esta copia se armo a partir del server.py y el app.html del 29/10 a las
+14:21. Los cambios que se hagan despues en esos dos archivos NO estan aca.
+Cuando se quiera pasar a modulos conviene volver a armarla desde los archivos
+de ese momento (las herramientas estan en el proyecto, carpeta modulos\herramientas).
+
+Contenido:
+  server.py           arranque
+  metalerp\           el codigo del servidor, un archivo por area (ver metalerp\LEEME.md)
+  templates\app.html  indice de la pantalla principal
+  templates\app\      partes de la pantalla (paginas, modales, js, estilos)
+  ACTUALIZAR.bat      copia todo esto a otra instalacion

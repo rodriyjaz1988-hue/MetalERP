@@ -1,0 +1,59 @@
+<!-- USUARIO -->
+<div class="ov" id="mo-usr"><div class="mo" style="width:380px">
+  <div class="mh" id="mo-usr-title">Nuevo usuario <span class="mx" onclick="closeMo('mo-usr')">×</span></div>
+  <input type="hidden" id="usr-id">
+  <div class="fg2">
+    <div class="fg"><label>Username <span class="req">*</span></label><input id="usr-usr" autocomplete="off"></div>
+    <div class="fg"><label>Contraseña <span class="req" id="usr-pw-req">*</span></label><input type="password" id="usr-pw" autocomplete="new-password" placeholder=""></div>
+    <div class="fg"><label>Nombre completo</label><input id="usr-nom"></div>
+    <div class="fg"><label>Rol</label><select id="usr-rol"><option value="operario">operario</option><option value="vendedor">vendedor</option><option value="almacen">almacen</option><option value="logistica">logistica</option><option value="admin">admin</option></select></div>
+    <div class="fg" id="usr-activo-wrap" style="display:none"><label>Estado</label><select id="usr-activo"><option value="1">Activo</option><option value="0">Inactivo</option></select></div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-usr')">Cancelar</button><button class="btn btn-p" id="usr-save-btn" onclick="saveUsr()">Crear usuario</button></div>
+</div></div>
+
+<!-- ROL (Configuración) -->
+<div class="ov" id="mo-rol"><div class="mo" style="width:520px">
+  <div class="mh"><span id="rol-title">Nuevo rol</span> <span class="mx" onclick="closeMo('mo-rol')">×</span></div>
+  <input type="hidden" id="rol-id"><input type="hidden" id="rol-sistema">
+  <div class="fg2">
+    <div class="fg"><label>Nombre del rol <span class="req">*</span></label><input id="rol-nombre" placeholder="Ej: supervisor"></div>
+    <div class="fg"><label>Rol base <span class="req">*</span></label>
+      <select id="rol-base">
+        <option value="operario">Operario — producción</option>
+        <option value="vendedor">Vendedor — comercial y compras</option>
+        <option value="almacen">Almacén — inventario y recepción</option>
+        <option value="logistica">Logística — remitos y stock</option>
+        <option value="admin">Administrador — acceso total</option>
+      </select></div>
+    <div class="fg s2"><label>Descripción</label><input id="rol-desc" placeholder="Para qué se usa este rol"></div>
+  </div>
+  <div style="font-size:12px;font-weight:600;margin:10px 0 4px">Módulos visibles</div>
+  <div id="rol-modulos"></div>
+  <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--color-border-tertiary)">
+    <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer"><input type="checkbox" id="rol-ver-mon" style="width:15px;height:15px"> Puede ver valores monetarios (precios, costos, facturación)</label>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;margin-top:6px"><input type="checkbox" id="rol-ia" style="width:15px;height:15px"> Puede usar el asistente IA (Mártin)</label>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;margin-top:6px" id="rol-aplicar-wrap"><input type="checkbox" id="rol-aplicar" style="width:15px;height:15px"> Aplicar estos permisos a los usuarios que ya tienen este rol</label>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-rol')">Cancelar</button><button class="btn btn-p" onclick="saveRol()">Guardar rol</button></div>
+</div></div>
+
+<!-- EMPLEADO -->
+<div class="ov" id="mo-emp"><div class="mo">
+  <div class="mh">Empleado <span class="mx" onclick="closeMo('mo-emp')">×</span></div>
+  <input type="hidden" id="emp-id">
+  <div class="fg2">
+    <div class="fg"><label>Legajo <span class="req">*</span></label><input id="emp-leg" placeholder="Ej: 0042"></div>
+    <div class="fg"><label>Tipo</label><select id="emp-tipo"><option>Directo</option><option>Indirecto</option></select></div>
+    <div class="fg"><label>Nombre <span class="req">*</span></label><input id="emp-nom" placeholder="Juan"></div>
+    <div class="fg"><label>Apellido <span class="req">*</span></label><input id="emp-ape" placeholder="García"></div>
+    <div class="fg"><label>Cargo</label><input id="emp-car" placeholder="Operario CNC"></div>
+    <div class="fg"><label>Turno</label><select id="emp-tur"><option value="">—</option><option>Mañana</option><option>Tarde</option><option>Noche</option><option>Rotativo</option></select></div>
+    <div class="fg"><label>Dado de alta</label><input type="date" id="emp-alta"></div>
+    <div class="fg"><label>Dado de baja</label><input type="date" id="emp-baja"></div>
+    <div class="fg s2"><label>Grupos de máquinas que opera (Ctrl+clic para múltiples)</label><select id="emp-maq" multiple style="min-height:80px"></select></div>
+    <div class="fg s2"><label>Observaciones</label><textarea id="emp-obs" style="min-height:45px"></textarea></div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-emp')">Cancelar</button><button class="btn btn-p" onclick="saveEmp()">Guardar empleado</button></div>
+</div></div>
+

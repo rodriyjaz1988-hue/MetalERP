@@ -1,0 +1,1176 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0e1318">
+<meta name="mobile-web-app-capable" content="yes">
+<title>MetalERP · Tablet de máquina</title>
+<link rel="icon" href="data:,">
+<style>
+:root{
+  --bg:#0e1318; --bg2:#121920; --panel:#18212a; --panel2:#202b36; --panel3:#293643; --borde:#2b3a48; --borde2:#3a4b5d;
+  --texto:#f2f6fa; --texto2:#a3b3c3; --texto3:#6f8193;
+  --azul:#378ADD; --azul2:#2a6fb8; --azul-suave:rgba(55,138,221,.16);
+  --ok:#2ec27e; --ok2:#1f9461; --ok-suave:rgba(46,194,126,.13);
+  --nok:#f0544f; --nok2:#c23b37; --nok-suave:rgba(240,84,79,.13);
+  --amar:#f5a524; --amar2:#c7841a; --amar-suave:rgba(245,165,36,.15);
+  --radio:18px; --alto-cab:76px; --alto-pie:68px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--texto);
+  font-family:Roboto,"Segoe UI",system-ui,-apple-system,Arial,sans-serif;
+  -webkit-user-select:none;user-select:none;overscroll-behavior:none;-webkit-font-smoothing:antialiased}
+body{display:flex;flex-direction:column;height:100vh;height:100dvh;overflow:hidden}
+button{font:inherit;color:inherit;border:0;background:none;padding:0;cursor:pointer;touch-action:manipulation}
+button:disabled{opacity:.35;cursor:default}
+[hidden]{display:none!important}
+.ico{width:1em;height:1em;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-.14em}
+.ico.f{fill:currentColor;stroke:none}
+
+/* ── Cabecera ─────────────────────────────────────────── */
+.cab{flex:none;height:var(--alto-cab);display:flex;align-items:center;gap:18px;padding:0 22px;background:var(--bg2);border-bottom:1px solid var(--borde)}
+.marca{display:flex;align-items:center;gap:14px;min-width:0}
+.logo{width:48px;height:48px;border-radius:14px;background:var(--azul-suave);color:var(--azul);display:grid;place-items:center;font-size:30px;flex:none}
+.maq{min-width:0}
+.maq-cod{font-size:27px;font-weight:800;letter-spacing:.3px;line-height:1.05;white-space:nowrap}
+.maq-nom{font-size:14px;color:var(--texto2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px}
+.pasos{flex:1;display:flex;justify-content:center;align-items:center;gap:4px;min-width:0}
+.pasos span{display:flex;align-items:center;gap:9px;padding:7px 14px 7px 7px;border-radius:999px;color:var(--texto3);font-size:15px;font-weight:700;white-space:nowrap}
+.pasos span i{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-size:13px;background:var(--panel2);color:var(--texto2)}
+.pasos span.actual{background:var(--azul-suave);color:var(--texto)}
+.pasos span.actual i{background:var(--azul);color:#fff}
+.pasos span.hecho{color:var(--texto2)}
+.pasos span.hecho i{background:var(--ok2);color:#fff;font-size:15px}
+.pasos .sep{font-style:normal;color:var(--texto3);font-size:16px;display:grid;place-items:center}
+.cab-der{display:flex;align-items:center;gap:18px;margin-left:auto;flex:none}
+.quien{display:flex;align-items:center;gap:10px;padding:5px 16px 5px 5px;border-radius:999px;background:var(--panel);border:1px solid var(--borde)}
+.quien b{font-size:17px;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis}
+.hora{text-align:right;line-height:1.1}
+.hora b{display:block;font-size:28px;font-weight:700;font-variant-numeric:tabular-nums}
+.hora small{font-size:13px;color:var(--texto2)}
+
+.av{width:54px;height:54px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:19px;color:#fff;flex:none;letter-spacing:.5px}
+.av.chico{width:38px;height:38px;font-size:14px}
+.av.grande{width:66px;height:66px;font-size:24px}
+
+.banda{flex:none;display:none;align-items:center;gap:12px;padding:10px 22px;background:#3a2a0c;color:#ffd98a;font-size:17px;font-weight:600;border-bottom:1px solid #6b4b12}
+.banda.on{display:flex}
+.banda .ico{font-size:22px}
+
+/* ── Cuerpo ───────────────────────────────────────────── */
+main{flex:1;min-height:0;overflow:auto;padding:22px 24px;-webkit-overflow-scrolling:touch}
+.pant-cab{display:flex;align-items:flex-end;gap:16px;margin-bottom:18px}
+.pant-cab > div{flex:1;min-width:0}
+h1{margin:0;font-size:31px;font-weight:800;letter-spacing:-.2px}
+.pant-cab p{margin:6px 0 0;font-size:17px;color:var(--texto2)}
+.vacio{grid-column:1/-1;color:var(--texto3);font-size:19px;padding:40px 0;text-align:center}
+
+.bt{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:76px;padding:10px 22px;border-radius:16px;
+  font-size:22px;font-weight:700;background:var(--panel2);border:2px solid var(--borde2);color:var(--texto);transition:transform .06s,filter .1s}
+.bt:active{transform:scale(.97);filter:brightness(1.18)}
+.bt .ico{font-size:1.1em}
+.bt-sec{background:var(--panel)}
+.bt-chico{min-height:58px;font-size:18px;padding:8px 18px;border-radius:14px}
+.bt-azul{background:var(--azul);border-color:var(--azul2);color:#fff}
+.bt-ok{background:var(--ok);border-color:var(--ok2);color:#062615}
+.bt-nok{background:var(--nok);border-color:var(--nok2);color:#fff}
+.bt-amar{background:var(--amar);border-color:var(--amar2);color:#2b1c03}
+.bt-xl{min-height:96px;font-size:28px;padding:14px 34px;border-radius:20px}
+
+.aviso{display:flex;gap:12px;align-items:flex-start;padding:12px 16px;margin-bottom:16px;border-radius:14px;background:var(--amar-suave);border:1px solid rgba(245,165,36,.4);color:#ffd27a;font-size:16px;line-height:1.35}
+.aviso .ico{font-size:22px;margin-top:-1px}
+
+/* Centro (cargando / sin habilitar) */
+.centro{max-width:620px;margin:8vh auto 0;text-align:center}
+.centro-ico{width:110px;height:110px;margin:0 auto 18px;border-radius:30px;display:grid;place-items:center;background:var(--panel);border:2px solid var(--borde);color:var(--texto2);font-size:58px}
+.centro p{font-size:19px;color:var(--texto2);line-height:1.45}
+.giro{width:62px;height:62px;margin:0 auto 22px;border-radius:50%;border:6px solid var(--panel3);border-top-color:var(--azul);animation:gira 1s linear infinite}
+@keyframes gira{to{transform:rotate(360deg)}}
+
+/* ── Operarios ────────────────────────────────────────── */
+/* ── Huella ───────────────────────────────────────────── */
+.huella-pant{max-width:660px;margin:5vh auto 0;text-align:center}
+.huella-ico{position:relative;width:210px;height:210px;margin:0 auto 28px;border-radius:50%;display:grid;place-items:center;font-size:124px;
+  color:var(--azul);background:var(--azul-suave);border:3px solid rgba(55,138,221,.5)}
+.huella-ico::after{content:"";position:absolute;inset:-16px;border-radius:50%;border:3px solid rgba(55,138,221,.4);animation:onda 2.2s ease-out infinite}
+@keyframes onda{0%{transform:scale(.88);opacity:1}100%{transform:scale(1.28);opacity:0}}
+.huella-ico.apagado{color:var(--texto3);background:var(--panel);border-color:var(--borde)}
+.huella-ico.apagado::after{display:none}
+.huella-pant h1{font-size:40px}
+.huella-pant p{font-size:20px;color:var(--texto2);line-height:1.45;margin:12px 0 0}
+
+.letras{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+.letras button{min-width:60px;height:60px;padding:0 16px;border-radius:14px;background:var(--panel);border:2px solid var(--borde);font-size:22px;font-weight:800;color:var(--texto2)}
+.letras button.on{background:var(--azul);border-color:var(--azul2);color:#fff}
+.grilla-op{display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:14px}
+.op-card{display:flex;align-items:center;gap:14px;min-height:108px;padding:14px 16px;text-align:left;border-radius:var(--radio);background:var(--panel);border:2px solid var(--borde)}
+.op-card:active{border-color:var(--azul);background:var(--panel2)}
+.op-tx{min-width:0;flex:1}
+.op-tx b{display:block;font-size:22px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.op-tx .nom{display:block;font-size:18px;color:#d5dee7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.op-tx small{display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px;margin-top:7px;font-size:14px;color:var(--texto2)}
+.chip-t{padding:2px 9px;border-radius:999px;background:var(--panel3);color:var(--texto2);font-style:normal;font-size:13px;font-weight:700}
+
+.bt-admin{margin-top:34px}
+.admin-cab{display:flex;align-items:center;gap:12px;padding:10px 14px;margin-bottom:16px;border-radius:14px;background:var(--amar-suave);border:1px solid rgba(245,165,36,.4);color:#ffd27a;font-size:16px}
+.admin-cab .bt{margin-left:auto}
+.campo-tx{display:block;width:100%;height:62px;margin:6px 0 14px;padding:0 16px;border-radius:14px;background:var(--bg2);border:2px solid var(--borde2);color:var(--texto);font:inherit;font-size:22px;-webkit-user-select:text;user-select:text}
+.campo-tx:focus{outline:none;border-color:var(--azul)}
+.ven label{font-size:15px;color:var(--texto2);font-weight:700}
+
+/* ── Operaciones ──────────────────────────────────────── */
+.lista-ops{display:flex;flex-direction:column;gap:12px}
+.ops-sep{margin:14px 0 2px;font-size:17px;font-weight:800;color:var(--texto2);text-transform:uppercase;letter-spacing:.6px}
+.ot-card{display:grid;grid-template-columns:150px 1fr 240px 30px;align-items:center;gap:18px;min-height:108px;padding:14px 18px 14px 22px;text-align:left;
+  border-radius:var(--radio);background:var(--panel);border:2px solid var(--borde)}
+.ot-card:active{border-color:var(--azul);background:var(--panel2)}
+.ot-id b{display:block;font-size:27px;font-weight:800;letter-spacing:.2px;white-space:nowrap}
+.ot-id span{font-size:15px;color:var(--texto2);font-weight:700}
+.ot-det{min-width:0}
+.ot-det b{display:block;font-size:23px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ot-det .pz{display:block;font-size:15px;color:var(--texto2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chip-e{display:inline-block;margin-top:8px;padding:3px 11px;border-radius:999px;font-size:13px;font-weight:800;background:var(--panel3);color:var(--texto2)}
+.chip-e.venc{background:var(--nok-suave);color:#ff9d99}
+.chip-e.prox{background:var(--amar-suave);color:#ffc970}
+.ot-prog{text-align:right}
+.ot-num{font-size:16px;color:var(--texto2)}
+.ot-num b{font-size:25px;color:var(--texto)}
+.ot-prog > span{font-size:14px;color:var(--texto2)}
+.ot-flecha{color:var(--texto3);font-size:30px;display:grid;place-items:center}
+.barra{display:flex;height:11px;border-radius:6px;background:var(--panel3);overflow:hidden;margin:8px 0 6px}
+.barra i{display:block;height:100%;background:var(--azul)}
+.barra i.nueva{background:repeating-linear-gradient(-45deg,var(--ok) 0 6px,var(--ok2) 6px 12px)}
+
+/* ── Producción ───────────────────────────────────────── */
+main.pant-produciendo{display:flex;flex-direction:column}
+.prod{flex:1;min-height:0;width:100%;max-width:1320px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto;gap:16px}
+.tarea{grid-column:1/-1;display:grid;grid-template-columns:auto 1fr minmax(220px,300px) auto;align-items:center;gap:20px;padding:12px 16px 12px 20px;
+  border-radius:var(--radio);background:var(--panel);border:2px solid var(--borde)}
+.tarea .ot-id{padding-right:20px;border-right:1px solid var(--borde)}
+.t-det{min-width:0}
+.t-det b{display:block;font-size:25px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.t-det span{display:block;font-size:15px;color:var(--texto2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.t-num{font-size:16px;color:var(--texto2)}
+.t-num b{font-size:23px;color:var(--texto)}
+.t-num em{font-style:normal;font-weight:800;color:var(--ok);font-size:21px}
+.t-prog > span{font-size:13px;color:var(--texto2)}
+.t-aviso{display:flex;align-items:center;gap:8px;color:#ff9d99;font-weight:700;font-size:16px}
+.cont{display:flex;flex-direction:column;min-height:0;overflow:hidden;border-radius:22px;background:var(--panel);border:2px solid var(--borde);padding:14px 16px 16px}
+.cont-ok{border-color:rgba(46,194,126,.55);background:linear-gradient(180deg,var(--ok-suave),transparent 55%),var(--panel)}
+.cont-nok{border-color:rgba(240,84,79,.5);background:linear-gradient(180deg,var(--nok-suave),transparent 60%),var(--panel)}
+.cont-cab{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.cont h3{margin:0;font-size:19px;letter-spacing:1.6px;text-transform:uppercase}
+.cont-ok h3{color:var(--ok)}
+.cont-nok h3{color:var(--nok)}
+.bt-tec{display:inline-flex;align-items:center;gap:8px;height:50px;padding:0 15px;border-radius:13px;background:var(--panel2);border:1px solid var(--borde2);font-size:16px;font-weight:700;color:var(--texto2)}
+.bt-tec .ico{font-size:22px}
+.cont-n{flex:1;min-height:0;display:grid;place-items:center;container-type:size}
+.cont-n span{display:inline-block;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;
+  font-size:110px;font-size:clamp(56px,13vh,136px);font-size:min(136px,80cqh,26cqw)}
+.nok-fila{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1.3fr 1fr;grid-template-rows:minmax(0,1fr);align-items:center;gap:10px;margin-top:8px}
+.nok-fila .cont-n{align-self:stretch}
+.nok-fila .bt{height:min(76px,100%);min-height:52px;font-size:28px}
+.cont-nok .cont-n span{font-size:64px;font-size:min(78px,82cqh,56cqw)}
+.cont-bts{display:grid;grid-template-columns:1fr 2fr;gap:12px}
+.cont-bts .bt{min-height:94px;font-size:30px}
+.cont-bts .bt-mas{font-size:40px}
+.col-der{display:flex;flex-direction:column;gap:16px;min-height:0}
+.col-der .cont-nok{flex:1;justify-content:space-between}
+.reloj{border-radius:22px;background:var(--panel);border:2px solid var(--borde);padding:14px 18px;text-align:center}
+.r-est{display:inline-flex;align-items:center;gap:9px;padding:6px 15px;border-radius:999px;background:var(--ok-suave);color:#8ff0c0;font-weight:800;font-size:15px}
+.vivo{width:10px;height:10px;border-radius:50%;background:var(--ok);animation:late 1.6s infinite}
+@keyframes late{0%{box-shadow:0 0 0 0 rgba(46,194,126,.6)}70%{box-shadow:0 0 0 10px rgba(46,194,126,0)}100%{box-shadow:0 0 0 0 rgba(46,194,126,0)}}
+.r-t{font-size:60px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.1;margin-top:6px}
+.r-info{font-size:15px;color:var(--texto2);min-height:20px}
+.acciones{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr 2fr;gap:14px}
+.acciones .bt{min-height:86px}
+.bump{animation:bump .18s ease-out}
+@keyframes bump{40%{transform:scale(1.13)}}
+
+/* Pausa: tapa la pantalla para que no se cuente sin querer */
+.pausa-velo{position:fixed;left:0;right:0;top:var(--alto-cab);bottom:var(--alto-pie);z-index:20;display:none;align-items:center;justify-content:center;padding:24px;
+  background:rgba(14,19,24,.93)}
+.pausa-velo.on{display:flex}
+.pv-caja{text-align:center;max-width:640px;width:100%;padding:30px 30px 26px;border-radius:28px;background:var(--panel);border:3px solid var(--amar)}
+.pv-ico{width:98px;height:98px;margin:0 auto 10px;border-radius:50%;display:grid;place-items:center;background:var(--amar-suave);color:var(--amar);font-size:46px}
+.pv-caja h2{margin:0;font-size:34px}
+.pv-t{font-size:74px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--amar);line-height:1.15}
+.pv-caja p{font-size:17px;color:var(--texto2);margin:4px 0 22px}
+.pv-motivo{font-size:24px;font-weight:800;color:var(--texto);margin-top:6px}
+.pv-motivo:empty{display:none}
+.motivos{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:16px}
+.motivo{display:flex;align-items:center;gap:10px;min-height:70px;padding:10px 14px;border-radius:14px;background:var(--panel2);border:2px solid var(--borde2);
+  color:var(--texto);font:inherit;font-size:17px;font-weight:700;text-align:left;line-height:1.2}
+.motivo:active{border-color:var(--amar)}
+.motivo i{font-style:normal;color:var(--amar);font-size:19px;min-width:30px}
+.pv-caja .bt{width:100%}
+.pv-caja .bt + .bt{margin-top:12px}
+
+/* ── Ventanas ─────────────────────────────────────────── */
+.velo{position:fixed;inset:0;z-index:30;display:none;align-items:center;justify-content:center;padding:18px;background:rgba(5,8,11,.72)}
+.velo.on{display:flex}
+#velo-tec{z-index:40}
+.ven{width:100%;max-width:780px;max-height:94vh;overflow:auto;border-radius:26px;background:var(--panel);border:2px solid var(--borde2);padding:24px 26px;box-shadow:0 24px 70px rgba(0,0,0,.55)}
+.ven h2{margin:0;font-size:29px}
+.ven-sub{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 6px}
+.ven-sub span{padding:5px 12px;border-radius:999px;background:var(--panel2);font-size:15px;color:var(--texto2);font-weight:700}
+.ven-txt{font-size:18px;color:var(--texto2);margin:8px 0 0;line-height:1.4}
+.campo{display:flex;align-items:center;gap:16px;padding:14px 0;border-bottom:1px solid var(--borde)}
+.c-tx{flex:1;min-width:0}
+.c-tx b{display:block;font-size:22px}
+.c-tx small{display:block;font-size:14px;color:var(--texto2);margin-top:2px}
+.campo.ok .c-tx b{color:var(--ok)}
+.campo.nok .c-tx b{color:var(--nok)}
+.stepper{display:flex;align-items:center;gap:10px}
+.stepper .bt{min-width:78px;min-height:70px;padding:0 10px;font-size:28px}
+.valor.fijo{display:grid;place-items:center;border-style:solid;color:var(--texto2);margin-right:88px}
+.valor{min-width:124px;height:70px;border-radius:15px;background:var(--bg2);border:2px dashed var(--borde2);font-size:40px;font-weight:800;font-variant-numeric:tabular-nums}
+.ven-pie{display:flex;gap:14px;margin-top:20px}
+.ven-pie .bt{flex:1}
+.ven-pie .bt-azul,.ven-pie .bt-nok{flex:1.5}
+.ven-nota{font-size:14px;color:var(--texto3);margin-top:12px;text-align:center}
+.ven-tec{max-width:460px}
+.tec-disp{margin:14px 0;height:96px;border-radius:18px;background:var(--bg2);border:2px solid var(--borde2);display:flex;align-items:center;justify-content:flex-end;
+  padding:0 24px;font-size:62px;font-weight:800;font-variant-numeric:tabular-nums}
+.tec-disp.gris{color:var(--texto3)}
+.tec-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.tec-grid .bt{min-height:82px;font-size:34px}
+.reg{display:flex;gap:14px;align-items:flex-start;padding:14px 0;border-bottom:1px solid var(--borde)}
+.reg:last-child{border-bottom:0}
+.reg-ico{width:46px;height:46px;border-radius:13px;display:grid;place-items:center;font-size:23px;flex:none}
+.reg-tx{flex:1;min-width:0}
+.reg-tx b{display:block;font-size:18px;font-weight:700}
+.reg-tx small{font-size:14px;color:var(--texto2)}
+.est{align-self:center;padding:7px 13px;border-radius:11px;font-weight:800;font-size:14px;white-space:nowrap}
+.pend{background:var(--amar-suave);color:#ffcf73}
+.rec{background:var(--azul-suave);color:#9cc8f5}
+.okk{background:var(--ok-suave);color:#8ff0c0}
+.err{background:var(--nok-suave);color:#ffb0ab}
+.msgerr{margin-top:7px;padding:8px 11px;border-radius:11px;background:var(--nok-suave);color:#ffc1bd;font-size:14px;line-height:1.35}
+
+/* Confirmación grande al declarar */
+.exito{position:fixed;inset:0;z-index:50;display:none;align-items:center;justify-content:center;background:rgba(5,18,11,.84)}
+.exito.on{display:flex}
+.ex-caja{text-align:center;padding:34px 50px 30px;border-radius:30px;background:var(--panel);border:3px solid var(--ok);min-width:min(520px,90vw)}
+.ex-ico{width:116px;height:116px;margin:0 auto 14px;border-radius:50%;display:grid;place-items:center;background:var(--ok);color:#062615;font-size:66px;animation:pop .4s cubic-bezier(.2,1.5,.4,1)}
+.ex-ico .ico{stroke-width:3}
+@keyframes pop{0%{transform:scale(.3);opacity:0}100%{transform:scale(1);opacity:1}}
+.ex-caja h2{margin:0;font-size:34px}
+.ex-caja p{margin:8px 0 0;font-size:21px;color:var(--texto2)}
+.ex-caja .ex-nota{font-size:16px;color:#ffd27a}
+
+/* ── Pie ──────────────────────────────────────────────── */
+.pie{flex:none;height:var(--alto-pie);display:flex;align-items:center;gap:12px;padding:0 22px;background:var(--bg2);border-top:1px solid var(--borde)}
+.red{display:flex;align-items:center;gap:10px;font-size:16px;font-weight:700;color:var(--texto2);white-space:nowrap}
+.red i{width:12px;height:12px;border-radius:50%;background:var(--ok)}
+.red.off{color:#ffb0ab}
+.red.off i{background:var(--nok);animation:titila 1s infinite}
+@keyframes titila{50%{opacity:.25}}
+.chip{display:inline-flex;align-items:center;gap:7px;padding:9px 15px;border-radius:999px;font-size:15px;font-weight:800;white-space:nowrap}
+.esp{flex:1}
+.badge{min-width:26px;height:26px;padding:0 8px;border-radius:13px;background:var(--nok);color:#fff;font-size:14px;font-weight:800;display:inline-grid;place-items:center}
+
+.toast.ok{background:#0f3324;border-color:var(--ok);color:#c9f7df}
+.toast{position:fixed;left:50%;bottom:calc(var(--alto-pie) + 18px);transform:translateX(-50%);z-index:60;background:#3a1512;border:2px solid var(--nok);color:#ffd2cc;
+  padding:14px 24px;border-radius:16px;font-size:19px;font-weight:700;display:none;max-width:90vw;text-align:center}
+
+/* ── Tablets chicas y vertical ────────────────────────── */
+@media (max-width:1100px){ .pasos span b{display:none} .pasos span{padding-right:7px} }
+@media (max-height:720px) and (orientation:landscape){
+  :root{--alto-cab:64px;--alto-pie:58px}
+  main{padding:14px 18px}
+  .logo{width:42px;height:42px;font-size:26px}
+  .banda{padding:6px 16px;font-size:14px;gap:10px}
+  .banda .ico{font-size:18px}
+  .tarea{padding:8px 12px 8px 16px;gap:14px}
+  .tarea .ot-id{padding-right:14px}
+  .tarea .ot-id b{font-size:22px}
+  .t-det b{font-size:21px}
+  .t-num b{font-size:20px}
+  .tarea .bt-chico{min-height:50px}
+  .barra{margin:5px 0 4px}
+  .cont{padding:10px 14px 12px}
+  .bt-tec{height:42px}
+  .cont-bts .bt{min-height:70px}
+  .nok-fila .bt{min-height:50px}
+  .reloj{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:2px 14px;padding:8px 12px}
+  .r-est{font-size:13px;padding:4px 11px}
+  .r-t{font-size:38px;margin:0}
+  .r-info{flex-basis:100%;font-size:13px;min-height:0}
+  h1{font-size:26px}
+  .pant-cab{margin-bottom:12px}
+  .pant-cab p{font-size:15px}
+  .huella-pant{margin-top:2vh}
+  .huella-ico{width:150px;height:150px;font-size:88px;margin-bottom:20px}
+  .huella-pant h1{font-size:31px}
+  .ot-card{min-height:90px;padding:10px 16px 10px 20px}
+  .pv-caja{padding:18px 24px}
+  .pv-ico{width:64px;height:64px;font-size:32px;margin-bottom:6px}
+  .pv-caja h2{font-size:27px}
+  .pv-t{font-size:56px}
+  .pv-caja p{margin:2px 0 12px}
+  .pv-caja .bt-xl{min-height:76px}
+  .ven{padding:16px 20px}
+  .ven h2{font-size:24px}
+  .ven-sub{margin:8px 0 2px}
+  .campo{padding:8px 0}
+  .c-tx b{font-size:19px}
+  .stepper .bt{min-height:58px;min-width:70px}
+  .valor{height:58px;min-width:110px;font-size:34px}
+  .ven-pie{margin-top:12px}
+  .ven-pie .bt{min-height:64px}
+  .tec-disp{height:70px;margin:10px 0;font-size:48px}
+  .tec-grid .bt{min-height:60px;font-size:28px}
+  .acciones .bt{min-height:68px}
+  .prod{gap:12px}
+}
+/* Tablets de 8" (853×533) o con la barra de Android visible */
+@media (max-height:560px) and (orientation:landscape){
+  :root{--alto-cab:52px;--alto-pie:48px}
+  .cab{padding:0 14px;gap:12px}
+  .logo{width:36px;height:36px;font-size:22px;border-radius:11px}
+  .maq-cod{font-size:21px}
+  .maq-nom{font-size:12px}
+  .quien{padding:3px 12px 3px 3px}
+  .quien .av{width:32px;height:32px;font-size:12px}
+  .quien b{font-size:15px}
+  .hora b{font-size:22px}
+  .hora small{font-size:11px}
+  .pie{padding:0 14px}
+  .pie .bt-chico{min-height:40px;padding:4px 14px;font-size:15px}
+  .red{font-size:14px}
+  .chip{padding:6px 12px;font-size:13px}
+  .banda{padding:5px 12px;font-size:13px}
+  main{padding:8px 12px}
+  .prod,.col-der{gap:8px}
+  .tarea{padding:6px 10px 6px 14px;gap:12px}
+  .tarea .ot-id b{font-size:19px}
+  .tarea .ot-id span,.t-det span{font-size:13px}
+  .t-det b{font-size:18px}
+  .t-num{font-size:14px}
+  .t-num b{font-size:17px}
+  .t-prog > span{display:none}
+  .tarea .bt-chico{min-height:44px;font-size:16px}
+  .cont{padding:8px 12px 10px;border-radius:18px}
+  .cont h3{font-size:16px}
+  .bt-tec{height:36px;font-size:14px}
+  .cont-bts{gap:10px}
+  .cont-bts .bt{min-height:58px;font-size:26px}
+  .cont-bts .bt-mas{font-size:34px}
+  .nok-fila{margin-top:4px}
+  .nok-fila .bt{min-height:46px;font-size:24px}
+  .reloj{padding:6px 10px;border-radius:18px}
+  .r-t{font-size:32px}
+  .r-info{font-size:12px}
+  .acciones{gap:10px}
+  .acciones .bt{min-height:56px;font-size:20px}
+  .pv-ico{display:none}
+  .pv-t{font-size:48px}
+  .pv-caja .bt-xl{min-height:64px;font-size:24px}
+  .pv-caja .bt{min-height:56px}
+  .ven{padding:12px 16px;border-radius:20px}
+  .c-tx small,.ven-nota{display:none}
+  .campo{padding:6px 0}
+  .stepper .bt{min-height:50px}
+  .valor{height:50px;font-size:30px}
+  .ven-pie .bt{min-height:56px}
+  .tec-disp{height:58px;font-size:40px}
+  .tec-grid .bt{min-height:50px}
+  .ex-ico{width:80px;height:80px;font-size:44px}
+}
+@media (orientation:portrait){
+  .pasos{display:none}
+  .maq-nom{max-width:200px}
+  .prod{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto auto}
+  .tarea{grid-template-columns:auto 1fr auto;row-gap:12px}
+  .tarea .ot-id{grid-column:1;grid-row:1}
+  .t-det{grid-column:2;grid-row:1}
+  .tarea > .bt{grid-column:3;grid-row:1}
+  .t-prog{grid-column:1/-1;grid-row:2}
+  .col-der{flex-direction:row}
+  .col-der > *{flex:1;min-width:0}
+  .col-der .cont-nok{flex:1.3}
+  .nok-fila .bt{min-height:64px}
+  .r-t{font-size:clamp(34px,6.4vw,60px)}
+  .acciones{grid-template-columns:1fr 1fr 1.8fr}
+  .ot-card{grid-template-columns:120px minmax(0,1fr) 190px 26px;gap:14px}
+}
+/* Vertical angosto (600 de ancho) */
+@media (max-width:700px){
+  :root{--alto-cab:64px;--alto-pie:58px}
+  main{padding:14px 16px}
+  .largo,.t-prog > span{display:none}
+  .acciones .bt{padding:10px 12px}
+  .r-info{font-size:13px}
+  .ot-card{grid-template-columns:104px minmax(0,1fr) 22px;gap:6px 12px}
+  .ot-card .ot-id{grid-row:1/3}
+  .ot-prog{grid-column:2;grid-row:2;text-align:left}
+  .ot-flecha{grid-column:3;grid-row:1/3}
+}
+</style>
+</head>
+<body>
+<header class="cab">
+  <div class="marca">
+    <div class="logo" id="c-logo"></div>
+    <div class="maq"><div class="maq-cod" id="c-cod">MetalERP</div><div class="maq-nom" id="c-nom">Tablet de máquina</div></div>
+  </div>
+  <nav class="pasos" id="c-pasos"></nav>
+  <div class="cab-der">
+    <div class="quien" id="c-quien" style="display:none"></div>
+    <div class="hora"><b id="c-hora">--:--</b><small id="c-fecha"></small></div>
+  </div>
+</header>
+<div class="banda" id="banda"></div>
+
+<main id="main"></main>
+
+<footer class="pie">
+  <div class="red" id="p-red"><i></i><span>En línea</span></div>
+  <button class="chip pend" id="p-pend" onclick="verEnvios()" hidden></button>
+  <button class="chip err" id="p-err" onclick="verEnvios()" hidden></button>
+  <div class="esp"></div>
+  <button class="bt bt-sec bt-chico" id="p-envios" onclick="verEnvios()"></button>
+</footer>
+
+<div class="pausa-velo" id="pausa-velo">
+  <div class="pv-caja">
+    <div class="pv-ico" id="pv-ico"></div>
+    <h2>Máquina en pausa</h2>
+    <div class="pv-motivo" id="pv-motivo"></div>
+    <div class="pv-t" id="pv-t">00:00:00</div>
+    <p id="pv-desde"></p>
+    <button class="bt bt-amar bt-xl" id="pv-seguir" onclick="pausa()"></button>
+    <button class="bt bt-sec" onclick="abrirDeclarar()">Declarar producción</button>
+  </div>
+</div>
+<div class="velo" id="velo"><div class="ven" id="ven"></div></div>
+<div class="velo" id="velo-tec"><div class="ven ven-tec" id="ven-tec"></div></div>
+<div class="exito" id="exito"><div class="ex-caja"><div class="ex-ico" id="ex-ico"></div><h2 id="ex-tit"></h2><p id="ex-det"></p><p class="ex-nota" id="ex-nota"></p></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+// ── Estado guardado en la tablet (sobrevive a recargas y cortes de luz) ──
+const K = {token:'mt_tablet_token', trabajo:'mt_tablet_trabajo', salida:'mt_tablet_salida',
+           enviados:'mt_tablet_enviados', huella:'mt_tablet_huella'};
+function leer(k, def){ try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; }catch(e){ return def; } }
+function guardar(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+
+// El enlace de la tablet trae el token (?t=...): se guarda y se saca de la barra.
+(function(){
+  const q = new URLSearchParams(location.search);
+  if(q.get('t')){ try{ localStorage.setItem(K.token, q.get('t')); }catch(e){} history.replaceState(null, '', location.pathname); }
+})();
+function token(){ try{ return localStorage.getItem(K.token) || ''; }catch(e){ return ''; } }
+
+let datos = null;                    // última respuesta de /api/tablet/estado
+let firma = '';                      // para redibujar solo si cambió algo
+let enLinea = true, intentos = 0, tokenRechazado = false;
+let pantalla = 'cargando', pantallaPrevia = '';
+let operarioElegido = null;          // {id, nombre, huella_id} entre la huella y elegir operación
+let huellaDesde = leer(K.huella, 0); // última marca de huella ya tomada
+let lector = null;                   // {lector, visto}: si la tablet tiene lector asignado
+let adminActivo = null;              // {id, nombre}: administrador que entró sin huella (elige al operario)
+let letra = '';
+let trabajo = leer(K.trabajo, null); // {empleado, op, inicio, pausaDesde, pausaAcum, ok, nok}
+let salida = leer(K.salida, []);     // registros todavía no confirmados por el servidor
+let enviados = leer(K.enviados, []); // últimos confirmados (para mostrar su estado)
+
+const ICO = {
+  tuerca:'<path d="M12 2.6l8.1 4.7v9.4L12 21.4l-8.1-4.7V7.3z"/><circle cx="12" cy="12" r="3.4"/>',
+  check:'<path d="M5 12.5l4.6 4.6L19 7.6"/>',
+  huella:'<path d="M6.8 5.2A8.6 8.6 0 0 1 20.4 11.6v1"/><path d="M4.3 8.6A8.6 8.6 0 0 0 3.6 12v1.4"/><path d="M8.2 18.9A13 13 0 0 0 9 14.6V12a3 3 0 0 1 6 0v1.6"/><path d="M12 12.2v2.4c0 2.8-.8 5.4-2.2 7.4"/><path d="M15 16.6c-.3 1.9-.9 3.6-1.8 5"/><path d="M6.3 16.9c.3-1 .5-2 .5-3V12a5.2 5.2 0 0 1 9.6-2.8"/><path d="M17.2 12.4v1.4c0 2.4-.4 4.6-1.2 6.6"/><path d="M20.2 16a17 17 0 0 1-.7 3.4"/>',
+  flecha:'<path d="M9 5l7 7-7 7"/>',
+  pausa:'<rect x="6.5" y="5" width="3.8" height="14" rx="1.2"/><rect x="13.7" y="5" width="3.8" height="14" rx="1.2"/>',
+  play:'<path d="M8 5.2v13.6a.8.8 0 0 0 1.2.7l10.6-6.8a.8.8 0 0 0 0-1.4L9.2 4.5A.8.8 0 0 0 8 5.2z"/>',
+  salir:'<path d="M14 4h3.5A2.5 2.5 0 0 1 20 6.5v11a2.5 2.5 0 0 1-2.5 2.5H14"/><path d="M10 8l-4 4 4 4"/><path d="M6 12h10"/>',
+  cambiar:'<path d="M4 8h13"/><path d="M14 4.5L17.5 8 14 11.5"/><path d="M20 16H7"/><path d="M10 12.5L6.5 16l3.5 3.5"/>',
+  teclado:'<rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6.5 10h.01M10.5 10h.01M14.5 10h.01M17.5 10h.01M7.5 14h9"/>',
+  lista:'<path d="M9 6.5h11M9 12h11M9 17.5h11"/><path d="M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01"/>',
+  usuario:'<circle cx="12" cy="8" r="3.8"/><path d="M4.5 20c1.3-3.6 4.1-5.6 7.5-5.6s6.2 2 7.5 5.6"/>',
+  alerta:'<path d="M12 3.5L2.8 19.5h18.4z"/><path d="M12 10v4.2M12 17h.01"/>',
+  reloj:'<circle cx="12" cy="12" r="8.6"/><path d="M12 7.4V12l3 2"/>',
+  borrar:'<path d="M20.5 6H9L3.5 12 9 18h11.5z"/><path d="M12.5 9.5l5 5M17.5 9.5l-5 5"/>',
+  tablet:'<rect x="5" y="2.5" width="14" height="19" rx="2.5"/><path d="M10.5 18.5h3"/>',
+  candado:'<rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>',
+  sinred:'<path d="M3 3l18 18"/><path d="M8.5 16.5a5 5 0 0 1 7 0"/><path d="M5 12.5a10 10 0 0 1 5.5-2.8M14.5 9.9A10 10 0 0 1 19 12.5"/><path d="M12 20h.01"/>'
+};
+const LLENOS = {pausa:1, play:1};
+function ico(n){ return '<svg class="ico' + (LLENOS[n] ? ' f' : '') + '" viewBox="0 0 24 24" aria-hidden="true">' + ICO[n] + '</svg>'; }
+
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function $(id){ return document.getElementById(id); }
+function fN(n){ n = Number(n) || 0; return (Math.round(n * 100) / 100).toLocaleString('es-AR'); }
+function nombreEmp(e){ return ((e.apellido || '') + ' ' + (e.nombre || '')).trim(); }
+function pad(n){ return String(n).padStart(2, '0'); }
+function hhmm(d){ return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+function ahoraTxt(d){
+  d = d || new Date();
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + hhmm(d) + ':' + pad(d.getSeconds());
+}
+function horaCorta(t){
+  t = String(t || '');
+  return t.slice(0, 10) === ahoraTxt().slice(0, 10) ? t.slice(11, 16) : t.slice(8, 10) + '/' + t.slice(5, 7) + ' ' + t.slice(11, 16);
+}
+function pieza(o){ return [o.pieza_codigo, o.pieza_nombre].filter(Boolean).join(' · '); }
+function vib(p){ try{ if(navigator.vibrate) navigator.vibrate(p); }catch(e){} }
+// UUID v4 (crypto.randomUUID solo existe con HTTPS; getRandomValues anda siempre).
+function nuevoUuid(){
+  const b = new Uint8Array(16); crypto.getRandomValues(b);
+  b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+  const h = Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+  return h.slice(0,8) + '-' + h.slice(8,12) + '-' + h.slice(12,16) + '-' + h.slice(16,20) + '-' + h.slice(20);
+}
+
+const COLORES = ['#2f6fb0','#2b8a63','#7d55b8','#b0643a','#2f8aa0','#a14d72','#62792c','#4f5cb5'];
+function avatar(id, nombre, tam){
+  const p = String(nombre || '').trim().split(/\s+/);
+  const ini = (((p[0] || '')[0] || '') + ((p[1] || '')[0] || '')).toUpperCase() || '?';
+  return '<span class="av' + (tam ? ' ' + tam : '') + '" style="background:' + COLORES[Math.abs(id | 0) % COLORES.length] + '">' + esc(ini) + '</span>';
+}
+function toast(msg, tipo){
+  const t = $('toast'); t.textContent = msg; t.className = 'toast' + (tipo ? ' ' + tipo : ''); t.style.display = 'block';
+  clearTimeout(toast._t); toast._t = setTimeout(() => { t.style.display = 'none'; }, 4000);
+}
+
+async function api(url, opciones){
+  const o = Object.assign({headers:{}}, opciones || {});
+  o.headers['X-Tablet-Token'] = token();
+  o.headers['Content-Type'] = 'application/json';
+  const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 8000);
+  o.signal = ctl.signal;
+  try{
+    const r = await fetch(url, o);
+    let j = null; try{ j = await r.json(); }catch(e){}
+    return {status:r.status, json:j || {}};
+  }finally{ clearTimeout(to); }
+}
+
+// ── Sincronización ─────────────────────────────────────────────────────────
+async function refrescar(){
+  if(!token()){ tokenRechazado = false; irA('sin_token'); return; }
+  try{
+    const r = await api('/api/tablet/estado');
+    if(r.status === 401){ tokenRechazado = true; datos = null; marcarRed(true); irA('sin_token'); return; }
+    if(r.status !== 200) throw new Error('HTTP ' + r.status);
+    datos = r.json; intentos = 0; marcarRed(true);
+    // Se redibuja solo si cambió lo que se ve: redibujar a cada rato podía
+    // "comerse" un toque que caía justo en ese momento.
+    const nueva = JSON.stringify([datos.operaciones, datos.empleados, datos.por_maquina]);
+    const cambio = nueva !== firma; firma = nueva;
+    if(pantalla === 'cargando' || pantalla === 'sin_token') irA(trabajo ? 'produciendo' : 'operario');
+    else if(cambio && pantalla === 'produciendo') pintarProgreso();
+    else if(cambio) render();
+    pintarCabecera();
+  }catch(e){
+    intentos++;
+    marcarRed(false);
+    if(pantalla === 'cargando' && trabajo) irA('produciendo');
+    else if(pantalla === 'cargando') render();
+  }
+  pintarPie();
+}
+
+let enviando = false;
+async function enviarSalida(){
+  if(enviando || !salida.length || !token()) return;
+  enviando = true;
+  try{
+    while(salida.length){
+      const reg = salida[0];
+      let r;
+      try{ r = await api('/api/tablet/registros', {method:'POST', body:JSON.stringify(reg)}); }
+      catch(e){ marcarRed(false); break; }
+      marcarRed(true);
+      if(r.status === 200){
+        salida.shift();
+        enviados.unshift({uuid:reg.uuid, hora:reg.hora, resumen:reg.resumen});
+      }else if(r.status === 400){
+        // El servidor no lo acepta ni lo va a aceptar: queda a la vista como rechazado.
+        salida.shift();
+        enviados.unshift({uuid:reg.uuid, hora:reg.hora, resumen:reg.resumen, rechazo:(r.json.error || 'Rechazado')});
+      }else{ break; }       // 401/500: se reintenta en la próxima vuelta
+      enviados = enviados.slice(0, 30);
+      guardar(K.salida, salida); guardar(K.enviados, enviados);
+    }
+  }finally{ enviando = false; pintarPie(); }
+}
+
+function marcarRed(ok){
+  const cambio = enLinea !== ok;
+  enLinea = ok;
+  if(cambio && pantalla === 'operario') render();
+  $('p-red').className = 'red' + (ok ? '' : ' off');
+  $('p-red').querySelector('span').textContent = ok ? 'En línea' : 'Sin conexión';
+  pintarPie();
+}
+
+function estadoDe(uuid){ return (datos && (datos.registros || []).find(x => x.uuid === uuid)) || null; }
+function estadoEnvio(r){
+  if(r.local) return {txt:'En la tablet', cls:'pend', ico:'reloj', det:''};
+  if(r.rechazo) return {txt:'Rechazado', cls:'err', ico:'alerta', det:r.rechazo};
+  const s = estadoDe(r.uuid);
+  if(!s) return {txt:'Enviado', cls:'rec', ico:'check', det:''};
+  if(s.estado === 'Procesado') return {txt:'Cargado ' + (s.novedad_numero || (s.datos && s.datos.tnp_numero) || ''), cls:'okk', ico:'check', det:''};
+  if(s.estado === 'Error') return {txt:'Error', cls:'err', ico:'alerta', det:'No se pudo cargar. Avisale al supervisor. ' + (s.error || '')};
+  if(s.estado === 'Pendiente' && s.espera === 'lote') return {txt:'Esperando lote', cls:'pend', ico:'reloj',
+    det:'La OT todavía no tiene lote asignado. Se carga sola cuando producción le asigne el lote.'};
+  if(s.estado === 'Pendiente' && s.intentos > 0) return {txt:'Reintentando (intento ' + s.intentos + ')', cls:'pend', ico:'reloj',
+    det:'Se vuelve a intentar sola' + (s.reintentar_desde ? ' a las ' + horaCorta(s.reintentar_desde) : '') + '. ' + (s.error || '')};
+  if(s.estado === 'Descartado') return {txt:'Descartado', cls:'err', ico:'alerta', det:'Lo descartó el supervisor.'};
+  return {txt:'Recibido', cls:'rec', ico:'reloj', det:''};
+}
+
+function pintarPie(){
+  const p = $('p-pend');
+  p.hidden = !salida.length;
+  p.innerHTML = ico('reloj') + ' ' + salida.length + ' por enviar';
+  const errores = enviados.filter(x => estadoEnvio(x).cls === 'err').length;
+  const e = $('p-err');
+  e.hidden = !errores;
+  e.innerHTML = ico('alerta') + ' ' + errores + (errores === 1 ? ' con error' : ' con errores') + ' · avisá al supervisor';
+  $('p-envios').innerHTML = ico('lista') + ' Mis envíos' + (errores ? ' <span class="badge">' + errores + '</span>' : '');
+  $('p-envios').hidden = pantalla === 'sin_token' || pantalla === 'cargando';
+  const banda = $('banda');
+  banda.classList.toggle('on', !enLinea && pantalla !== 'sin_token');
+  banda.innerHTML = ico('sinred') + '<span>Sin conexión con el servidor. Podés seguir trabajando: lo que declares queda guardado en la tablet y se manda solo.</span>';
+}
+
+// ── Reloj de trabajo ───────────────────────────────────────────────────────
+function msTrabajados(){
+  if(!trabajo) return 0;
+  const fin = trabajo.pausaDesde || Date.now();
+  return Math.max(0, fin - trabajo.inicio - trabajo.pausaAcum);
+}
+function msPausa(){
+  if(!trabajo) return 0;
+  return trabajo.pausaAcum + (trabajo.pausaDesde ? Date.now() - trabajo.pausaDesde : 0);
+}
+function hms(ms){
+  const s = Math.floor(ms / 1000);
+  return pad(Math.floor(s / 3600)) + ':' + pad(Math.floor(s / 60) % 60) + ':' + pad(s % 60);
+}
+function mmss(seg){
+  seg = Math.round(seg);
+  return seg < 60 ? seg + ' s' : Math.floor(seg / 60) + ':' + pad(seg % 60) + ' min';
+}
+function opViva(){ return trabajo && datos ? datos.operaciones.find(x => x.id === trabajo.op.id) || null : null; }
+function infoRitmo(){
+  const partes = [];
+  const pausaMin = Math.round(msPausa() / 60000);
+  if(pausaMin > 0) partes.push('Pausas ' + pausaMin + ' min');
+  const v = opViva();
+  const ciclo = +(trabajo.op.ciclo || (v && v.tiempo_ciclo_seg) || 0);
+  if(trabajo.ok > 0 && msTrabajados() >= 60000) partes.push('Promedio ' + mmss(msTrabajados() / 1000 / trabajo.ok) + ' por pieza' + (ciclo ? ' · estándar ' + mmss(ciclo) : ''));
+  else if(ciclo) partes.push('Ciclo estándar ' + mmss(ciclo) + ' por pieza');
+  return partes.join(' · ') || 'Tiempo trabajado';
+}
+function tic(){
+  const d = new Date();
+  $('c-hora').textContent = hhmm(d);
+  $('c-fecha').textContent = d.toLocaleDateString('es-AR', {weekday:'short', day:'numeric', month:'short'});
+  if(pantalla === 'produciendo' && trabajo){
+    const t = $('r-t'); if(t) t.textContent = hms(msTrabajados());
+    const i = $('r-info'); if(i) i.textContent = infoRitmo();
+    if(trabajo.pausaDesde) $('pv-t').textContent = hms(Date.now() - trabajo.pausaDesde);
+  }
+}
+
+// ── Pantallas ──────────────────────────────────────────────────────────────
+function irA(p){ pantalla = p; render(); }
+// Le cuenta al servidor qué está pasando en la máquina, para el tablero de
+// planta. Va cada 5 s y además apenas cambia algo en pantalla.
+let vivoTimer = null;
+function programarVivo(){ clearTimeout(vivoTimer); vivoTimer = setTimeout(enviarVivo, 400); }
+function enviarVivo(){
+  if(!token() || tokenRechazado || !enLinea) return;
+  const emp = (trabajo && trabajo.empleado) || operarioElegido || null;
+  const enTrabajo = pantalla === 'produciendo' && trabajo;
+  api('/api/tablet/vivo', {method:'POST', body:JSON.stringify({
+    pantalla:pantalla, empleado_id:emp ? emp.id : null, empleado:emp ? emp.nombre : null,
+    orden_operacion_id:enTrabajo ? trabajo.op.id : null, pausado:!!(enTrabajo && trabajo.pausaDesde),
+    motivo:enTrabajo && trabajo.parada ? trabajo.parada.motivo : null,
+    pausa_seg:enTrabajo && trabajo.pausaDesde ? Math.round((Date.now() - trabajo.pausaDesde) / 1000) : 0,
+    trabajado_seg:enTrabajo ? Math.round(msTrabajados() / 1000) : 0,
+    ok:enTrabajo ? trabajo.ok : 0, nok:enTrabajo ? trabajo.nok : 0, en_cola:salida.length})}).catch(() => {});
+}
+
+function render(){
+  programarVivo();
+  const m = $('main');
+  if(pantalla !== pantallaPrevia){ m.scrollTop = 0; pantallaPrevia = pantalla; }
+  m.className = 'pant-' + pantalla;
+  if(pantalla === 'cargando') renderCargando(m);
+  else if(pantalla === 'sin_token') renderSinToken(m);
+  else if(pantalla === 'operario') renderOperario(m);
+  else if(pantalla === 'elegir') renderElegir(m);
+  else if(pantalla === 'trabajo') renderTrabajo(m);
+  else if(pantalla === 'produciendo') renderProduciendo(m);
+  pintarCabecera();
+  pintarPausa();
+  pintarPie();
+}
+
+function pintarCabecera(){
+  if(datos){
+    $('c-cod').textContent = datos.maquina.codigo || 'Máquina';
+    $('c-nom').textContent = [datos.maquina.nombre, datos.tablet.nombre].filter(Boolean).join(' · ');
+  }
+  const pasos = ['Operario', 'Trabajo', 'Producción'], i = ['operario', 'trabajo', 'produciendo'].indexOf(pantalla === 'elegir' ? 'operario' : pantalla);
+  $('c-pasos').style.visibility = i < 0 ? 'hidden' : '';
+  $('c-pasos').innerHTML = pasos.map((t, j) =>
+      '<span class="' + (j < i ? 'hecho' : (j === i ? 'actual' : '')) + '"><i>' + (j < i ? ico('check') : (j + 1)) + '</i><b>' + t + '</b></span>')
+    .join('<em class="sep">' + ico('flecha') + '</em>');
+  const q = operarioElegido || (trabajo && trabajo.empleado);
+  const quien = $('c-quien');
+  if(q && (pantalla === 'trabajo' || pantalla === 'produciendo')){
+    quien.innerHTML = avatar(q.id, q.nombre, 'chico') + '<b>' + esc(q.nombre) + '</b>';
+    quien.style.display = '';
+  }else quien.style.display = 'none';
+}
+
+function renderCargando(m){
+  m.innerHTML = '<div class="centro"><div class="giro"></div><h1>Conectando con MetalERP…</h1>'
+    + (intentos ? '<p>El servidor no responde. Revisá que la tablet esté conectada al Wi‑Fi de la planta. Se vuelve a intentar sola cada 5 segundos.</p>' : '<p>Un momento.</p>')
+    + '</div>';
+}
+
+function renderSinToken(m){
+  m.innerHTML = '<div class="centro"><div class="centro-ico">' + ico(tokenRechazado ? 'candado' : 'tablet') + '</div>'
+    + (tokenRechazado
+        ? '<h1>Esta tablet ya no está habilitada</h1><p>Su enlace se cambió o la desactivaron. Pedile al administrador el enlace nuevo de esta máquina (Sistema → Tablets de planta) y abrilo en la tablet.</p>'
+        : '<h1>Tablet sin habilitar</h1><p>Esta tablet todavía no está dada de alta para ninguna máquina. Pedile al administrador que la abra con el enlace de la máquina (Sistema → Tablets de planta).</p>')
+    + '</div>';
+}
+
+function renderOperario(m){
+  const sinLector = lector && !lector.lector;
+  let h = '<div class="huella-pant"><div class="huella-ico' + (sinLector || !enLinea ? ' apagado' : '') + '">' + ico('huella') + '</div>';
+  if(sinLector) h += '<h1>Falta el lector de huella</h1><p>Esta tablet todavía no tiene un lector de huella asignado. Pedile al administrador que lo configure en Sistema → Tablets de planta.</p>';
+  else if(!enLinea) h += '<h1>Apoyá el dedo en el lector</h1><p>Sin conexión con el servidor: la huella se lee cuando vuelva la red.</p>';
+  else h += '<h1>Apoyá el dedo en el lector</h1><p>La tablet entra sola con tu nombre.</p>';
+  m.innerHTML = h + '</div>';
+}
+
+// ── Administrador sin huella ──────────────────────────────────────────────
+function abrirAdmin(){
+  if(!enLinea){ toast('Sin conexión: el ingreso de administrador necesita el servidor'); return; }
+  abrirVentana('<h2>Ingresar como administrador</h2><p class="ven-txt">Para cargar sin huella. Usá tu usuario y contraseña de MetalERP; después elegís el operario.</p>'
+    + '<div style="margin-top:16px"><label for="ad-u">Usuario</label><input class="campo-tx" id="ad-u" autocomplete="off" autocapitalize="off">'
+    + '<label for="ad-p">Contraseña</label><input class="campo-tx" id="ad-p" type="password" autocomplete="off"></div>'
+    + '<div class="ven-pie"><button class="bt bt-sec" onclick="cerrarVentana()">Cancelar</button>'
+    + '<button class="bt bt-azul" id="ad-ok" onclick="entrarAdmin()">' + ico('check') + ' Entrar</button></div>');
+  $('ad-p').addEventListener('keydown', e => { if(e.key === 'Enter') entrarAdmin(); });
+  setTimeout(() => $('ad-u').focus(), 50);
+}
+async function entrarAdmin(){
+  const u = $('ad-u').value.trim(), p = $('ad-p').value;
+  if(!u || !p){ toast('Completá usuario y contraseña'); return; }
+  $('ad-ok').disabled = true;
+  try{
+    const r = await api('/api/tablet/admin', {method:'POST', body:JSON.stringify({username:u, password:p})});
+    if(r.status !== 200){ toast(r.json.error || 'No se pudo entrar'); $('ad-p').value = ''; return; }
+    adminActivo = r.json.admin; letra = ''; $('toast').style.display = 'none';
+    cerrarVentana(); vib(15); irA('elegir');
+  }catch(e){ toast('Sin conexión con el servidor'); }
+  finally{ const b = $('ad-ok'); if(b) b.disabled = false; }
+}
+function salirAdmin(){ adminActivo = null; irA('operario'); }
+function letraDe(e){
+  const s = (e.apellido || e.nombre || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-zÑñ]/g, '').toUpperCase();
+  return s ? s[0] : '#';
+}
+function filtrarLetra(l){ letra = l; vib(8); render(); }
+function renderElegir(m){
+  if(!adminActivo){ pantalla = 'operario'; renderOperario(m); return; }
+  const emps = datos ? datos.empleados : [];
+  const letras = Array.from(new Set(emps.map(letraDe))).sort();
+  if(letra && letras.indexOf(letra) < 0) letra = '';
+  const lista = emps.filter(e => !letra || letraDe(e) === letra);
+  let h = '<div class="admin-cab">' + ico('candado') + '<span>Ingresó <b>' + esc(adminActivo.nombre) + '</b> como administrador: la carga queda a su nombre como "sin huella".</span>'
+    + '<button class="bt bt-sec bt-chico" onclick="salirAdmin()">Cancelar</button></div>'
+    + '<div class="pant-cab"><div><h1>¿Quién trabaja en esta máquina?</h1><p>Elegí el operario.</p></div></div>';
+  if(emps.length > 10 && letras.length > 1){
+    h += '<div class="letras"><button class="' + (letra ? '' : 'on') + '" onclick="filtrarLetra(\'\')">Todos</button>'
+      + letras.map(l => '<button class="' + (letra === l ? 'on' : '') + '" onclick="filtrarLetra(\'' + esc(l) + '\')">' + esc(l) + '</button>').join('') + '</div>';
+  }
+  h += '<div class="grilla-op">' + (lista.length ? lista.map(e =>
+      '<button class="op-card" onclick="elegirOperario(' + e.id + ')">' + avatar(e.id, nombreEmp(e))
+      + '<div class="op-tx"><b>' + esc(e.apellido || e.nombre || '') + '</b>' + (e.apellido ? '<span class="nom">' + esc(e.nombre || '') + '</span>' : '')
+      + '<small>Leg. ' + esc(e.legajo || '—') + (e.turno ? '<i class="chip-t">' + esc(e.turno) + '</i>' : '') + '</small></div></button>').join('')
+    : '<div class="vacio">No hay operarios activos cargados en Recursos humanos.</div>') + '</div>';
+  m.innerHTML = h;
+}
+function elegirOperario(id){
+  const e = datos && datos.empleados.find(x => x.id === id); if(!e || !adminActivo) return;
+  operarioElegido = {id:e.id, nombre:nombreEmp(e), admin_id:adminActivo.id, admin_nombre:adminActivo.nombre};
+  adminActivo = null; letra = ''; vib(15);
+  irA('trabajo');
+}
+
+// ── Huella ─────────────────────────────────────────────────────────────────
+// El lector de la máquina reconoce el dedo y le avisa al servidor; acá se
+// pregunta cada segundo y medio si llegó una marca nueva para esta tablet.
+let consultandoHuella = false;
+async function consultarHuella(){
+  if(consultandoHuella || !token() || tokenRechazado || ['operario', 'elegir', 'trabajo', 'produciendo'].indexOf(pantalla) < 0) return;
+  consultandoHuella = true;
+  try{
+    const r = await api('/api/tablet/huella?desde=' + huellaDesde);
+    if(r.status !== 200) return;
+    const j = r.json;
+    const antes = lector && lector.lector;
+    lector = {lector:!!j.lector, visto:j.lector_visto};
+    if(pantalla === 'operario' && antes !== lector.lector) render();
+    if(j.huella){ huellaDesde = j.huella.id; guardar(K.huella, huellaDesde); tomarHuella(j.huella); }
+    else if(!huellaDesde && j.ultima_id){ huellaDesde = j.ultima_id; guardar(K.huella, huellaDesde); }
+  }catch(e){
+  }finally{ consultandoHuella = false; }
+}
+
+function tomarHuella(h){
+  if(!datos) return;
+  if(!h.empleado_id){
+    vib([80, 60, 80]);
+    toast('El lector reconoció la huella, pero el legajo ' + (h.legajo || '?') + ' no está cargado en MetalERP. Avisale al supervisor.');
+    return;
+  }
+  const e = datos.empleados.find(x => x.id === h.empleado_id);
+  const emp = {id:h.empleado_id, nombre:e ? nombreEmp(e) : (h.nombre || 'Legajo ' + h.legajo), huella_id:h.id};
+  const actual = (trabajo && trabajo.empleado) || operarioElegido;
+  if(actual && actual.id === emp.id) return;
+  if(pantalla === 'produciendo' && trabajo){
+    if(trabajo.ok || trabajo.nok){
+      vib([80, 60, 80]);
+      toast(trabajo.empleado.nombre + ' tiene piezas sin declarar. Declará o salí antes de cambiar de operario.');
+      return;
+    }
+    // Sin piezas cargadas: sigue la misma operación con el operario nuevo.
+    // Si estaba en pausa, la parada del anterior se cierra y sigue a nombre del nuevo.
+    const motivo = trabajo.parada && trabajo.parada.motivo;
+    cerrarParada();
+    if(motivo) trabajo.parada = {motivo:motivo, desde:Date.now()};
+    trabajo.empleado = emp; trabajo.inicio = Date.now(); trabajo.pausaAcum = 0;
+    if(trabajo.pausaDesde) trabajo.pausaDesde = Date.now();
+    guardar(K.trabajo, trabajo);
+    vib(15); toast('Hola, ' + emp.nombre, 'ok'); render();
+    return;
+  }
+  operarioElegido = emp; adminActivo = null;
+  vib(15); toast('Hola, ' + emp.nombre, 'ok');
+  irA('trabajo');
+}
+
+function chipEntrega(f){
+  if(!f) return '';
+  const d = new Date(String(f).slice(0, 10) + 'T00:00:00'); if(isNaN(d)) return '';
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  const dias = Math.round((d - hoy) / 86400000);
+  const fc = String(f).slice(8, 10) + '/' + String(f).slice(5, 7);
+  if(dias < 0) return '<span class="chip-e venc">Vencida · ' + fc + '</span>';
+  if(dias === 0) return '<span class="chip-e prox">Entrega hoy</span>';
+  if(dias === 1) return '<span class="chip-e prox">Entrega mañana</span>';
+  if(dias <= 3) return '<span class="chip-e prox">Entrega ' + fc + '</span>';
+  return '<span class="chip-e">Entrega ' + fc + '</span>';
+}
+
+function renderTrabajo(m){
+  const ops = datos ? datos.operaciones : [];
+  let h = '<div class="pant-cab"><div><h1>¿Qué vas a hacer?</h1><p>Elegí la OT y la operación. Las de entrega más próxima están arriba.</p></div>'
+    + '<button class="bt bt-sec bt-chico" onclick="volverOperario()">' + ico('usuario') + ' Cambiar operario</button></div>';
+  if(datos && !datos.por_maquina){
+    h += '<div class="aviso">' + ico('alerta') + '<span>Esta máquina todavía no tiene operaciones asignadas en MetalERP, así que se muestran todas las operaciones abiertas.</span></div>';
+  }
+  const tarjeta = o => {
+      const req = Number(o.qty_requerida) || 0, hecho = Number(o.qty_producida) || 0;
+      const pct = req > 0 ? Math.min(100, hecho / req * 100) : 0, falta = Math.max(0, req - hecho);
+      return '<button class="ot-card" onclick="elegirOperacion(' + o.id + ')">'
+        + '<div class="ot-id"><b>' + esc(o.ot_numero) + '</b><span>Paso ' + esc(o.paso) + '</span></div>'
+        + '<div class="ot-det"><b>' + esc(o.nombre) + '</b><span class="pz">' + esc(pieza(o)) + '</span>' + chipEntrega(o.fecha_entrega) + '</div>'
+        + '<div class="ot-prog"><div class="ot-num"><b>' + fN(hecho) + '</b> de ' + fN(req) + '</div>'
+        + '<div class="barra"><i style="width:' + pct + '%"></i></div><span>' + (falta > 0 ? 'Faltan ' + fN(falta) + ' piezas' : 'Cantidad completa') + '</span></div>'
+        + '<div class="ot-flecha">' + ico('flecha') + '</div></button>';
+    };
+  const propias = ops.filter(o => !o.sin_maquina), sinMaq = ops.filter(o => o.sin_maquina);
+  h += '<div class="lista-ops">' + (ops.length ? propias.map(tarjeta).join('')
+      + (sinMaq.length ? '<div class="ops-sep">Sin máquina asignada</div>' + sinMaq.map(tarjeta).join('') : '')
+    : '<div class="vacio">No hay operaciones abiertas. Avisale a producción.</div>') + '</div>';
+  m.innerHTML = h;
+}
+
+function volverOperario(){
+  const salir = () => { cerrarParada(); trabajo = null; guardar(K.trabajo, null); operarioElegido = null; irA('operario'); };
+  if(trabajo && (trabajo.ok || trabajo.nok)) pedirDeclararAntes(salir); else salir();
+}
+
+function elegirOperacion(id){
+  const o = datos.operaciones.find(x => x.id === id); if(!o) return;
+  const emp = operarioElegido || (trabajo && trabajo.empleado);
+  trabajo = {empleado:emp, op:{id:o.id, orden_id:o.orden_id, ot:o.ot_numero, paso:o.paso, nombre:o.nombre,
+             pieza:pieza(o), req:o.qty_requerida, ciclo:o.tiempo_ciclo_seg},
+             inicio:Date.now(), pausaDesde:null, pausaAcum:0, ok:0, nok:0};
+  operarioElegido = null;
+  guardar(K.trabajo, trabajo);
+  vib(15);
+  irA('produciendo');
+}
+
+function htmlProgreso(){
+  const v = opViva();
+  if(!v) return datos ? '<div class="t-aviso">' + ico('alerta') + ' Esta operación ya no está abierta</div>'
+                      : '<span>El avance de la OT se ve cuando vuelve la conexión</span>';
+  const req = Number(v.qty_requerida) || 0, hecho = Number(v.qty_producida) || 0;
+  const pctH = req > 0 ? Math.min(100, hecho / req * 100) : 0;
+  const pctN = req > 0 ? Math.min(100 - pctH, trabajo.ok / req * 100) : 0;
+  return '<div class="t-num"><b>' + fN(hecho) + '</b>' + (trabajo.ok ? ' <em>+' + trabajo.ok + '</em>' : '') + ' de ' + fN(req) + '</div>'
+    + '<div class="barra"><i style="width:' + pctH + '%"></i><i class="nueva" style="width:' + pctN + '%"></i></div>'
+    + '<span>Cargadas en la OT' + (trabajo.ok ? ' + las de ahora' : '') + '</span>';
+}
+function pintarProgreso(){ const tp = document.querySelector('.t-prog'); if(tp && trabajo) tp.innerHTML = htmlProgreso(); }
+
+function renderProduciendo(m){
+  if(!trabajo){ pantalla = 'operario'; renderOperario(m); return; }
+  const o = trabajo.op;
+  const pausado = !!trabajo.pausaDesde;
+  m.innerHTML = '<div class="prod">'
+    + '<div class="tarea"><div class="ot-id"><b>' + esc(o.ot) + '</b><span>Paso ' + esc(o.paso) + '</span></div>'
+      + '<div class="t-det"><b>' + esc(o.nombre) + '</b><span>' + esc(o.pieza) + '</span></div>'
+      + '<div class="t-prog">' + htmlProgreso() + '</div>'
+      + '<button class="bt bt-sec bt-chico" onclick="cambiarTrabajo()">' + ico('cambiar') + ' Cambiar</button></div>'
+    + '<div class="cont cont-ok"><div class="cont-cab"><h3>Piezas OK</h3>'
+      + '<button class="bt-tec" onclick="teclear(\'ok\')">' + ico('teclado') + ' Escribir</button></div>'
+      + '<div class="cont-n"><span id="n-ok">' + trabajo.ok + '</span></div>'
+      + '<div class="cont-bts"><button class="bt" onclick="sumar(\'ok\',-1)">−1</button>'
+      + '<button class="bt bt-ok bt-mas" onclick="sumar(\'ok\',1)">+1</button></div></div>'
+    + '<div class="col-der">'
+      + '<div class="reloj"><div class="r-est">' + (pausado ? ico('pausa') + ' En pausa' : '<i class="vivo"></i> Produciendo') + '</div>'
+        + '<div class="r-t" id="r-t">' + hms(msTrabajados()) + '</div><div class="r-info" id="r-info">' + esc(infoRitmo()) + '</div></div>'
+      + '<div class="cont cont-nok"><div class="cont-cab"><h3>Piezas NO OK</h3>'
+        + '<button class="bt-tec" onclick="teclear(\'nok\')">' + ico('teclado') + '</button></div>'
+        + '<div class="nok-fila"><button class="bt" onclick="sumar(\'nok\',-1)">−1</button>'
+        + '<div class="cont-n"><span id="n-nok">' + trabajo.nok + '</span></div>'
+        + '<button class="bt bt-nok" onclick="sumar(\'nok\',1)">+1</button></div></div>'
+    + '</div>'
+    + '<div class="acciones">'
+      + '<button class="bt bt-amar" onclick="pausa()">' + ico('pausa') + ' Pausa</button>'
+      + '<button class="bt bt-sec" onclick="volverOperario()">' + ico('salir') + ' Salir</button>'
+      + '<button class="bt bt-azul" onclick="abrirDeclarar()">' + ico('check') + ' <span>Declarar<span class="largo"> producción</span></span></button>'
+    + '</div></div>';
+}
+
+function sumar(c, n){
+  if(!trabajo) return;
+  const antes = trabajo[c] || 0;
+  trabajo[c] = Math.max(0, antes + n);
+  if(trabajo[c] === antes) return;
+  guardar(K.trabajo, trabajo);
+  vib(n > 0 ? 12 : 30);
+  const el = $('n-' + c);
+  if(el){ el.textContent = trabajo[c]; el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump'); }
+  if(c === 'ok') pintarProgreso();
+}
+function teclear(c){
+  abrirTeclado(c === 'ok' ? 'Piezas OK' : 'Piezas NO OK', trabajo[c], v => { trabajo[c] = v; guardar(K.trabajo, trabajo); render(); });
+}
+
+function pausa(){
+  if(!trabajo) return;
+  if(trabajo.pausaDesde){
+    cerrarParada();
+    trabajo.pausaAcum += Date.now() - trabajo.pausaDesde; trabajo.pausaDesde = null;
+    guardar(K.trabajo, trabajo); vib(25); render();
+    return;
+  }
+  elegirMotivo();
+}
+// Antes de pausar, el operario dice por qué. Cada pausa se manda como una
+// parada (queda como Trabajo no productivo) cuando sigue trabajando o sale.
+function elegirMotivo(){
+  const lista = (datos && datos.motivos_parada) || [];
+  if(!lista.length){ empezarPausa(''); return; }
+  abrirVentana('<h2>¿Por qué parás la máquina?</h2><p class="ven-txt">Elegí el motivo. El tiempo de la pausa queda registrado con este motivo.</p>'
+    + '<div class="motivos">' + lista.map((m, i) => '<button class="motivo" onclick="empezarPausa(' + i + ')"><i>' + (i + 1) + '</i><span>' + esc(m) + '</span></button>').join('') + '</div>'
+    + '<div class="ven-pie"><button class="bt bt-sec" onclick="cerrarVentana()">Volver</button></div>');
+}
+function empezarPausa(i){
+  cerrarVentana();
+  if(!trabajo || trabajo.pausaDesde) return;
+  const lista = (datos && datos.motivos_parada) || [];
+  const motivo = typeof i === 'number' ? lista[i] : '';
+  trabajo.pausaDesde = Date.now();
+  trabajo.parada = motivo ? {motivo:motivo, desde:trabajo.pausaDesde} : null;
+  guardar(K.trabajo, trabajo);
+  vib(25);
+  render();
+}
+function cerrarParada(){
+  const p = trabajo && trabajo.parada;
+  if(!p) return;
+  trabajo.parada = null;
+  guardar(K.trabajo, trabajo);
+  const min = Math.round((Date.now() - p.desde) / 6000) / 10;
+  if(min < 0.5) return;           // menos de medio minuto: no vale la pena registrarlo
+  salida.push({uuid:nuevoUuid(), tipo:'parada', hora:ahoraTxt(),
+    datos:{empleado_id:trabajo.empleado.id, huella_id:trabajo.empleado.huella_id || null, orden_operacion_id:trabajo.op.id,
+           motivo:p.motivo, desde:ahoraTxt(new Date(p.desde)), minutos:min},
+    resumen:'Parada · ' + p.motivo + ' · ' + fN(min) + ' min · ' + trabajo.empleado.nombre});
+  guardar(K.salida, salida);
+  enviarSalida();
+}
+function pintarPausa(){
+  const on = pantalla === 'produciendo' && trabajo && trabajo.pausaDesde;
+  $('pausa-velo').classList.toggle('on', !!on);
+  if(on){
+    $('pv-t').textContent = hms(Date.now() - trabajo.pausaDesde);
+    $('pv-motivo').textContent = trabajo.parada ? trabajo.parada.motivo : '';
+    $('pv-desde').textContent = 'Desde las ' + hhmm(new Date(trabajo.pausaDesde)) + '. El tiempo en pausa no se cuenta como trabajado.';
+  }
+}
+
+function cambiarTrabajo(){
+  const seguir = () => { cerrarParada(); operarioElegido = trabajo.empleado; trabajo = null; guardar(K.trabajo, null); irA('trabajo'); };
+  if(trabajo.ok || trabajo.nok) pedirDeclararAntes(seguir); else seguir();
+}
+
+// ── Ventanas ───────────────────────────────────────────────────────────────
+function abrirVentana(html){ $('ven').innerHTML = html; $('velo').classList.add('on'); }
+function cerrarVentana(){ $('velo').classList.remove('on'); }
+
+function pedirDeclararAntes(despues){
+  abrirVentana('<h2>Tenés piezas sin declarar</h2>'
+    + '<p class="ven-txt"><b style="color:var(--ok)">' + trabajo.ok + ' OK</b> y <b style="color:var(--nok)">' + trabajo.nok + ' NO OK</b> todavía no se mandaron a MetalERP. ¿Qué hacemos con ellas?</p>'
+    + '<div class="ven-pie"><button class="bt bt-sec" onclick="cerrarVentana()">Volver</button>'
+    + '<button class="bt bt-sec" id="b-desc">Descartarlas</button>'
+    + '<button class="bt bt-azul" id="b-decl">' + ico('check') + ' Declararlas</button></div>');
+  $('b-desc').onclick = () => { cerrarVentana(); despues(); };
+  $('b-decl').onclick = () => { cerrarVentana(); abrirDeclarar(despues); };
+}
+
+let decl = null;
+function abrirDeclarar(despues){
+  if(!trabajo) return;
+  decl = {ok:trabajo.ok, nok:trabajo.nok,
+          // Minutos con decimales (al segundo): redondear al minuto entero
+          // inflaba el rendimiento de las tandas cortas (20 piezas en 15 s = 1 min).
+          min:Math.max(0.01, Math.round(msTrabajados() / 600) / 100),
+          pausa:Math.round(msPausa() / 600) / 100, despues:(typeof despues === 'function') ? despues : null};
+  pintarDeclarar();
+}
+function pintarDeclarar(){
+  const fila = (k, tit, ayuda, paso, cls) => '<div class="campo ' + (cls || '') + '"><div class="c-tx"><b>' + tit + '</b>' + (ayuda ? '<small>' + ayuda + '</small>' : '') + '</div>'
+    + '<div class="stepper"><button class="bt" onclick="ajustar(\'' + k + '\',' + (-paso) + ')">−' + (paso > 1 ? paso : '') + '</button>'
+    + '<button class="valor" onclick="teclearDecl(\'' + k + '\')">' + decl[k] + '</button>'
+    + '<button class="bt" onclick="ajustar(\'' + k + '\',' + paso + ')">+' + (paso > 1 ? paso : '') + '</button></div></div>';
+  const fijo = (k, tit, ayuda) => '<div class="campo"><div class="c-tx"><b>' + tit + '</b><small>' + ayuda + '</small></div>'
+    + '<div class="valor fijo">' + mmss(decl[k] * 60) + '</div></div>';
+  const listo = (decl.ok + decl.nok) > 0 && decl.min > 0;
+  abrirVentana('<h2>Declarar producción</h2>'
+    + '<div class="ven-sub"><span>' + esc(trabajo.op.ot) + ' · Paso ' + esc(trabajo.op.paso) + '</span><span>' + esc(trabajo.op.nombre) + '</span><span>' + esc(trabajo.empleado.nombre) + '</span></div>'
+    + fila('ok', 'Piezas OK', '', 1, 'ok')
+    + fila('nok', 'Piezas NO OK', 'Rechazadas o para revisar', 1, 'nok')
+    + fijo('min', 'Minutos trabajados', 'Los calcula el reloj')
+    + fijo('pausa', 'Minutos de pausa', 'Tiempo en pausa, no se cuenta como trabajado')
+    + '<div class="ven-pie"><button class="bt bt-sec" onclick="cerrarVentana()">Volver</button>'
+    + '<button class="bt bt-azul" onclick="confirmarDeclarar()"' + (listo ? '' : ' disabled') + '>' + ico('check') + ' Confirmar y enviar</button></div>'
+    + '<div class="ven-nota">Tocá la cantidad de piezas para escribirla.</div>');
+}
+function ajustar(k, n){ if(k !== 'ok' && k !== 'nok') return; decl[k] = Math.max(0, decl[k] + n); vib(8); pintarDeclarar(); }
+function teclearDecl(k){
+  if(k !== 'ok' && k !== 'nok') return;
+  const tit = {ok:'Piezas OK', nok:'Piezas NO OK'}[k];
+  abrirTeclado(tit, decl[k], v => { decl[k] = v; pintarDeclarar(); });
+}
+
+function confirmarDeclarar(){
+  if(!(decl.ok + decl.nok > 0)){ toast('Cargá al menos una pieza'); return; }
+  if(!(decl.min > 0)){ toast('El tiempo trabajado tiene que ser mayor a 0'); return; }
+  const reg = {uuid:nuevoUuid(), tipo:'produccion', hora:ahoraTxt(),
+    datos:{empleado_id:trabajo.empleado.id, huella_id:trabajo.empleado.huella_id || null, admin_id:trabajo.empleado.admin_id || null, orden_operacion_id:trabajo.op.id,
+           cantidad_ok:decl.ok, cantidad_nok:decl.nok, tiempo_min:decl.min, tiempo_perdido_min:decl.pausa},
+    resumen:trabajo.op.ot + ' · ' + trabajo.op.paso + ' ' + trabajo.op.nombre + ' · ' + decl.ok + ' OK' + (decl.nok ? ' / ' + decl.nok + ' NO OK' : '') + ' · ' + trabajo.empleado.nombre};
+  salida.push(reg); guardar(K.salida, salida);
+  // Sigue trabajando lo mismo: contadores en cero y reloj de nuevo.
+  trabajo.ok = 0; trabajo.nok = 0; trabajo.inicio = Date.now(); trabajo.pausaAcum = 0;
+  if(trabajo.pausaDesde) trabajo.pausaDesde = Date.now();
+  guardar(K.trabajo, trabajo);
+  const despues = decl.despues;
+  const detalle = decl.ok + ' OK' + (decl.nok ? ' · ' + decl.nok + ' NO OK' : '') + ' · ' + mmss(decl.min * 60);
+  decl = null;
+  cerrarVentana();
+  render();
+  mostrarExito('Producción declarada', detalle, enLinea ? '' : 'Sin conexión: quedó guardada en la tablet y se manda sola.', despues);
+  enviarSalida().then(() => setTimeout(refrescar, 1500));
+}
+
+function mostrarExito(titulo, detalle, nota, luego){
+  $('ex-ico').innerHTML = ico('check');
+  $('ex-tit').textContent = titulo; $('ex-det').textContent = detalle;
+  $('ex-nota').textContent = nota || ''; $('ex-nota').hidden = !nota;
+  const ex = $('exito'); ex.classList.add('on'); vib([20, 60, 20]);
+  let pendiente = luego || null;
+  const cerrar = () => { clearTimeout(mostrarExito._t); ex.classList.remove('on'); ex.onclick = null; if(pendiente){ const f = pendiente; pendiente = null; f(); } };
+  ex.onclick = cerrar;
+  clearTimeout(mostrarExito._t); mostrarExito._t = setTimeout(cerrar, nota ? 2600 : 1700);
+}
+
+// Teclado numérico grande (el primer número que se toca reemplaza al actual).
+let tec = null;
+function abrirTeclado(titulo, actual, aplicar){
+  tec = {titulo:titulo, valor:String(actual || 0), nuevo:true, aplicar:aplicar};
+  pintarTeclado(); $('velo-tec').classList.add('on');
+}
+function pintarTeclado(){
+  const b = d => '<button class="bt" onclick="tecla(\'' + d + '\')">' + d + '</button>';
+  $('ven-tec').innerHTML = '<h2>' + esc(tec.titulo) + '</h2>'
+    + '<div class="tec-disp' + (tec.nuevo ? ' gris' : '') + '">' + esc(tec.valor || '0') + '</div>'
+    + '<div class="tec-grid">' + ['1','2','3','4','5','6','7','8','9'].map(b).join('')
+    + '<button class="bt bt-sec" onclick="tecla(\'C\')">C</button>' + b('0')
+    + '<button class="bt bt-sec" onclick="tecla(\'B\')">' + ico('borrar') + '</button></div>'
+    + '<div class="ven-pie"><button class="bt bt-sec" onclick="cerrarTeclado()">Cancelar</button>'
+    + '<button class="bt bt-azul" onclick="tecladoListo()">' + ico('check') + ' Listo</button></div>';
+}
+function tecla(d){
+  if(d === 'C'){ tec.valor = ''; }
+  else if(d === 'B'){ tec.valor = tec.nuevo ? '' : tec.valor.slice(0, -1); }
+  else{
+    if(tec.nuevo) tec.valor = '';
+    if(tec.valor.length < 6) tec.valor = (tec.valor === '0' ? '' : tec.valor) + d;
+  }
+  tec.nuevo = false;
+  vib(8); pintarTeclado();
+}
+function cerrarTeclado(){ $('velo-tec').classList.remove('on'); tec = null; }
+function tecladoListo(){ const v = parseInt(tec.valor || '0', 10) || 0; const f = tec.aplicar; cerrarTeclado(); f(v); }
+
+function verEnvios(){
+  const filas = salida.slice().reverse().map(r => ({uuid:r.uuid, hora:r.hora, resumen:r.resumen, local:true})).concat(enviados);
+  const html = filas.length ? filas.map(r => {
+    const e = estadoEnvio(r);
+    return '<div class="reg"><div class="reg-ico ' + e.cls + '">' + ico(e.ico) + '</div><div class="reg-tx"><b>' + esc(r.resumen) + '</b>'
+      + '<small>' + esc(horaCorta(r.hora)) + '</small>' + (e.det ? '<div class="msgerr">' + esc(e.det) + '</div>' : '') + '</div>'
+      + '<span class="est ' + e.cls + '">' + esc(e.txt) + '</span></div>';
+  }).join('') : '<div class="vacio">Todavía no se mandó nada desde esta tablet.</div>';
+  abrirVentana('<h2>Mis envíos</h2><p class="ven-txt" style="margin-bottom:6px">Lo último que se declaró desde esta tablet. Si algo no se puede cargar se reintenta solo; si dice Error, avisale al supervisor.</p>'
+    + html + '<div class="ven-pie"><button class="bt bt-sec" onclick="cerrarVentana()">Cerrar</button></div>');
+}
+
+// ── Arranque ───────────────────────────────────────────────────────────────
+$('c-logo').innerHTML = ico('tuerca');
+$('pv-ico').innerHTML = ico('pausa');
+$('pv-seguir').innerHTML = ico('play') + ' Seguir trabajando';
+document.addEventListener('contextmenu', e => e.preventDefault());
+render();
+tic();
+refrescar();
+enviarSalida();
+setInterval(tic, 1000);
+setInterval(refrescar, 5000);
+setInterval(enviarVivo, 5000);
+setInterval(enviarSalida, 3000);
+setInterval(consultarHuella, 1500);
+window.addEventListener('online', () => { enviarSalida(); refrescar(); });
+</script>
+</body>
+</html>

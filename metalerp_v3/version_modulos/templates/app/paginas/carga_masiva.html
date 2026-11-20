@@ -1,0 +1,24 @@
+    <div class="page" id="p-carga_masiva">
+      <div class="pt">Carga masiva</div>
+      <div class="ps">Importar datos desde Excel — cada hoja debe llamarse igual que la tabla. Descargá la plantilla de cada tabla con el botón ↓ Plantilla.</div>
+      <div style="display:grid;grid-template-columns:300px 1fr;gap:12px;align-items:start">
+        <div class="card">
+          <div style="font-size:12px;font-weight:600;margin-bottom:10px">1. Seleccionar archivo(s) Excel</div>
+          <input type="file" id="bulk-file" accept=".xlsx,.xls" multiple onchange="onBulkFile(this)"
+            style="font-size:12px;width:100%;margin-bottom:10px">
+          <div style="font-size:12px;font-weight:600;margin-bottom:6px">Modo de importación</div>
+          <select id="bulk-mode" class="sel-fil" style="width:100%;margin-bottom:10px">
+            <option value="insert">Insertar nuevos (INSERT OR IGNORE)</option>
+            <option value="upsert">Insertar o reemplazar (UPSERT)</option>
+          </select>
+          <div id="bulk-sheets" style="margin-bottom:10px"></div>
+          <button class="btn btn-p" style="width:100%" onclick="runBulkImport()" id="bulk-run-btn" disabled title="Primero elegí un archivo Excel con al menos una hoja válida">Importar</button>
+          <div id="bulk-log" style="margin-top:10px;font-size:11px;max-height:200px;overflow-y:auto"></div>
+        </div>
+        <div class="card">
+          <div style="font-size:12px;font-weight:600;margin-bottom:10px">Tablas disponibles</div>
+          <div id="bulk-schema-list"><div class="ld">Cargando esquema...</div></div>
+        </div>
+      </div>
+    </div>
+

@@ -1,0 +1,30 @@
+<!-- COPIAR PRODUCTO -->
+<div class="ov" id="mo-copy-prod"><div class="mo" style="width:420px">
+  <div class="mh">Copiar producto <span class="mx" onclick="closeMo('mo-copy-prod')">×</span></div>
+  <input type="hidden" id="cprod-pid">
+  <div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:14px">
+    Origen: <span id="cprod-orig" style="font-weight:600;color:var(--color-text-primary)"></span>
+  </div>
+  <div class="fg2">
+    <div class="fg s2">
+      <label>Nuevo código <span style="color:#D85A30">*</span></label>
+      <input type="text" id="cprod-cod" placeholder="Ej: PROD-042"
+        onkeydown="if(event.key==='Enter')$('cprod-nom').focus()">
+    </div>
+    <div class="fg s2">
+      <label>Nuevo nombre <span style="color:var(--color-text-secondary);font-weight:400">(opcional — si no se ingresa, se usa el original + " (copia)")</span></label>
+      <input type="text" id="cprod-nom" placeholder="Dejar vacío para usar nombre del original"
+        onkeydown="if(event.key==='Enter')saveCopyProd()">
+    </div>
+  </div>
+  <div style="font-size:11px;color:var(--color-text-secondary);margin:8px 0 14px">
+    Se copiarán todas las operaciones y sus materiales. Podés modificar el proceso después.
+  </div>
+  <div class="ma">
+    <button class="btn" onclick="closeMo('mo-copy-prod')">Cancelar</button>
+    <button class="btn btn-p" onclick="saveCopyProd()">Copiar producto</button>
+  </div>
+</div></div>
+
+
+

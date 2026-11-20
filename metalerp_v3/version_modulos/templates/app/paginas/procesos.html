@@ -1,0 +1,92 @@
+    <div class="page" id="p-procesos">
+      <div class="vhead">
+        <div class="vhead-card">
+          <div class="vhead-row vhead-top">
+            <div class="vhead-tit">
+              <div class="pt">Procesos y Productos terminados</div>
+              <span class="vh-badge" id="prod-sel-label" title="Artículo seleccionado">–</span>
+            </div>
+            <div class="vh-acciones">
+              <button class="btn btn-p" id="prod-b-ver" onclick="prodSelAccion('ver')" disabled title="Ver el proceso del artículo seleccionado"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M1.3 8S3.7 3.6 8 3.6 14.7 8 14.7 8 12.3 12.4 8 12.4 1.3 8 1.3 8z"/><circle cx="8" cy="8" r="1.9"/></svg>Ver proceso</button>
+              <button class="btn" id="prod-b-edit" onclick="prodSelAccion('edit')" disabled title="Editar el artículo seleccionado"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11.1 2.2a1.3 1.3 0 0 1 1.9 0l.8.8a1.3 1.3 0 0 1 0 1.9L5.4 13.2l-3.2.9.9-3.2z"/></svg>Editar</button>
+              <button class="btn" id="prod-b-copy" onclick="prodSelAccion('copy')" disabled title="Copiar el artículo seleccionado"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="5.6" y="5.6" width="8.2" height="8.2" rx="1.3"/><path d="M10.6 5.6V3.5a1.3 1.3 0 0 0-1.3-1.3H3.5a1.3 1.3 0 0 0-1.3 1.3v5.8c0 .7.6 1.3 1.3 1.3h2.1"/></svg>Copiar</button>
+              <button class="btn btn-p" id="b-prod" style="display:none" onclick="openProd()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M8 3.3v9.4M3.3 8h9.4"/></svg>Nuevo producto</button>
+            </div>
+          </div>
+          <div class="vhead-row vhead-fil">
+            <div class="vh-fil-cli">
+              <input type="text" id="prod-cli-fil-search" class="sel-fil" placeholder="🔍 Todos los clientes" autocomplete="off"
+                oninput="filtrarClienteBuscador('prod-cli-fil','— Todos los clientes —','loadProd')"
+                onfocus="filtrarClienteBuscador('prod-cli-fil','— Todos los clientes —','loadProd')"
+                onblur="setTimeout(function(){var c=$('prod-cli-fil-results');if(c)c.style.display='none';},150)">
+              <input type="hidden" id="prod-cli-fil">
+              <div id="prod-cli-fil-results" class="vh-pop"></div>
+            </div>
+            <input type="text" id="prod-search" class="sel-fil vh-fil-wide" placeholder="🔍 Buscar código o nombre" oninput="renderProd()" autocomplete="off">
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div id="prod-list" class="nowrap-tbl"><div class="ld">Cargando...</div></div>
+      </div>
+    </div>
+
+      <!-- VERSIÓN DEL PRODUCTO -->
+<!-- PROCESO DEL PRODUCTO (toast/ventana flotante) -->
+<div class="ov" id="mo-proc-view"><div class="mo" style="width:1000px;max-width:96vw">
+  <div class="mh"><span id="proc-view-title">Proceso</span> <span class="mx" onclick="clearProcDetail()">×</span></div>
+  <div id="proc-detail"></div>
+</div></div>
+
+<div class="ov" id="mo-version">
+  <div class="mo" style="max-width:1100px;width:95%;">
+    <div class="mh">Versión del producto <span class="mx" onclick="closeMo('mo-version')">×</span></div>
+    <div style="padding:16px;">
+      
+      <!-- Info del producto -->
+      <div style="margin-bottom:20px;">
+        <h6 style="color:var(--color-primary,#2C5F8A);margin-bottom:10px;font-weight:bold;">Producto</h6>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 16px;font-size:13px;">
+          <div><strong>Código:</strong> <span id="ver-prod-codigo"></span></div>
+          <div><strong>Nombre:</strong> <span id="ver-prod-nombre"></span></div>
+          <div><strong>Categoría:</strong> <span id="ver-prod-categoria"></span></div>
+          <div><strong>Cliente:</strong> <span id="ver-prod-cliente"></span></div>
+          <div><strong>Unidad:</strong> <span id="ver-prod-unidad"></span></div>
+          <div><strong>Peso:</strong> <span id="ver-prod-peso"></span></div>
+          <div><strong>Tiempo total:</strong> <span id="ver-prod-tiempo"></span></div>
+          <div><strong>Estado:</strong> <span id="ver-prod-estado"></span></div>
+          <div id="ver-prod-costo-wrap"><strong>Costo material:</strong> <span id="ver-prod-costo"></span></div>
+          <div id="ver-prod-costomo-wrap"><strong>Costo M.O.:</strong> <span id="ver-prod-costomo"></span></div>
+          <div id="ver-prod-precio-wrap"><strong>Precio venta:</strong> <span id="ver-prod-precio"></span></div>
+        </div>
+        <div style="margin-top:10px"><strong>Descripción:</strong> <div id="ver-prod-desc" style="font-size:13px;color:var(--color-text-secondary);margin-top:2px"></div></div>
+        <div style="margin-top:10px"><strong>Observaciones:</strong> <div id="ver-prod-obs" style="font-size:13px;color:var(--color-text-secondary);margin-top:2px"></div></div>
+      </div>
+
+      <!-- Operaciones (resumen + acceso al proceso completo) -->
+      <div>
+        <h6 style="color:var(--color-primary,#2C5F8A);margin-bottom:10px;font-weight:bold;">Proceso</h6>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--color-background-secondary,#f5f5f5);border-radius:8px;padding:12px 14px;">
+          <span id="ver-ops-resumen" style="font-size:13px"></span>
+          <button class="btn btn-s btn-p" onclick="verVersionProcesoCompleto()">Ver proceso completo</button>
+        </div>
+      </div>
+
+    </div>
+    <div class="ma">
+      <button class="btn" onclick="closeMo('mo-version')">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+      <!-- PROCESO COMPLETO DE LA VERSIÓN -->
+<div class="ov" id="mo-version-proc">
+  <div class="mo" style="max-width:900px;width:95%;">
+    <div class="mh">Proceso completo <span class="mx" onclick="closeMo('mo-version-proc')">×</span></div>
+    <div style="padding:16px;" id="ver-proc-detail"></div>
+    <div class="ma">
+      <button class="btn" onclick="closeMo('mo-version-proc')">Cerrar</button>
+    </div>
+  </div>
+</div>
+

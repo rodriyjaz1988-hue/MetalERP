@@ -1,0 +1,130 @@
+<!-- PRODUCTO -->
+<div class="ov" id="mo-prod"><div class="mo">
+  <div class="mh">Producto terminado <span class="mx" onclick="closeMo('mo-prod')">×</span></div>
+  <input type="hidden" id="prod-id">
+  <div class="fg2">
+    <div class="fg"><label>Código <span class="req">*</span></label><input id="prod-cod" placeholder="Ej: PROD-004"></div>
+    <div class="fg"><label>Categoría</label><select id="prod-cat"></select></div>
+    <div class="fg s2"><label>Nombre <span class="req">*</span></label><input id="prod-nom" placeholder="Ej: Brida plana DN150"></div>
+    <div class="fg s2"><label>Cliente <span style="font-size:10px;color:var(--color-text-secondary)">(dueño del producto)</span></label><select id="prod-cli-id"><option value="">— Sin cliente —</option></select></div>
+    <div class="fg s2"><label>Descripción</label><input id="prod-desc" placeholder="Descripción técnica"></div>
+    <div class="fg"><label>Unidad</label><select id="prod-uni"><option>unid</option><option>kg</option><option>m</option><option>m2</option><option>juego</option><option>servicio</option></select></div>
+    <div class="fg"><label>Tiempo total (hs) <span style="font-size:10px;color:var(--color-text-secondary)">calculado</span></label><input type="number" id="prod-ths" placeholder="0" step="0.1" readonly style="background:var(--color-background-secondary);cursor:default"></div>
+    <div class="fg" id="prod-cm-wrap"><label>Costo materiales ($) <span style="font-size:10px;color:var(--color-text-secondary)">calculado</span></label><input type="number" id="prod-cm" placeholder="0" readonly style="background:var(--color-background-secondary);cursor:default"></div>
+    <div class="fg" id="prod-cmo-wrap"><label>Costo MO ($) <span style="font-size:10px;color:var(--color-text-secondary)">calculado</span></label><input type="number" id="prod-cmo" placeholder="0" readonly style="background:var(--color-background-secondary);cursor:default"></div>
+    <div class="fg" id="prod-pv-wrap"><label>Precio de venta ($)</label><input type="number" id="prod-pv" placeholder="0"></div>
+    <div class="fg"><label>Peso (kg)</label><input type="number" id="prod-peso" placeholder="0" step="0.001" min="0"></div>
+    <div class="fg"><label title="Cuántas piezas entran en un cajón. Al cargar la primera operación de una OT las piezas se reparten en cajones de este tamaño.">Piezas por cajón <span class="req">*</span></label><input type="number" id="prod-cajon" placeholder="Ej: 100" step="1" min="1"></div>
+    <div class="fg s2"><label>Código de barras / QR / DataMatrix <span style="font-size:10px;color:var(--color-text-secondary)">(uso futuro)</span></label><input id="prod-bar" placeholder="Valor leído por el lector"></div>
+    <div class="fg s2"><label>Observaciones</label><textarea id="prod-obs" style="min-height:50px"></textarea></div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-prod')">Cancelar</button><button class="btn btn-p" onclick="saveProd()">Guardar producto</button></div>
+</div></div>
+
+<!-- OPERACION -->
+<div class="ov" id="mo-op"><div class="mo">
+  <div class="mh">Nueva operación <span class="mx" onclick="closeMo('mo-op')">×</span></div>
+  <input type="hidden" id="op-pid">
+  <div class="fg2">
+    <div class="fg"><label>N° de orden</label><input type="text" id="op-ord" value="1" inputmode="numeric"></div>
+    <div class="fg"><label>Nombre <span class="req">*</span></label><input id="op-nom" placeholder="Ej: Torneado exterior"></div>
+    <div class="fg s2"><label>Descripción</label><input id="op-desc" placeholder="Detalle de la operación"></div>
+    <div class="fg"><label>Categoría de máquina</label><select id="op-catm"></select></div>
+    <div class="fg"><label>Máquina específica</label><select id="op-maq"></select></div>
+    <div class="fg"><label>Tiempo setup (min)</label><input type="number" id="op-set" value="0" min="0" step="0.5"></div>
+    <div class="fg"><label>Tiempo ciclo (seg)</label><input type="number" id="op-cic" value="0" min="0" step="0.1" placeholder="seg"></div>
+    <div class="fg s2"><label>Observaciones</label><textarea id="op-obs" style="min-height:45px"></textarea></div>
+    <div class="fg s2" style="display:flex;align-items:center;gap:8px;padding-top:14px">
+      <input type="checkbox" id="op-terc" onchange="toggleTercOp('op')" style="width:15px;height:15px">
+      <span style="font-size:13px">Operación tercerizada</span>
+    </div>
+  </div>
+  <div id="op-campos-terc" style="display:none;margin-top:8px;padding:8px;border:1px solid var(--color-border-tertiary);border-radius:6px">
+    <div class="fg2">
+      <div class="fg s2" style="font-size:11px;color:#A32D2D;background:#FCEBEB;padding:6px 8px;border-radius:6px"><b>Obligatorio:</b> una operación tercerizada requiere cargar al menos un <b>material como insumo</b> en la lista de materiales de esta operación. Es el mismo material que se generará al ingresar el remito del proveedor.</div>
+    
+      <div class="fg" style="position:relative"><label>Proveedor</label>
+        <input type="text" id="op-prv-search" placeholder="🔍 Buscar proveedor..." autocomplete="off"
+          oninput="filtrarProvOp('op')" onfocus="filtrarProvOp('op')"
+          onblur="setTimeout(function(){var c=$('op-prv-results');if(c)c.style.display='none';},150)">
+        <input type="hidden" id="op-prv">
+        <div id="op-prv-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:7px;margin-top:3px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.14);z-index:20"></div>
+      </div>
+      <div class="fg"><label>Precio acordado ($) <span style="font-size:10px;color:var(--color-text-secondary)">por unidad</span></label><input type="number" id="op-prec" min="0" step="0.01" placeholder="0.00"></div>
+      <div class="fg"><label>Plazo de entrega (días)</label><input type="number" id="op-tdays" value="1" min="1"></div>
+    </div>
+  </div>
+  <div id="op-mats-section" style="margin-top:12px;padding-top:11px;border-top:1px solid #f0f0ec">
+    <div style="font-size:12px;font-weight:600;color:#555;margin-bottom:8px">Material/Producto como insumo</div>
+    <div id="op-mats"></div>
+    <button class="btn btn-s" onclick="abrirBuscadorMaterial('op')" style="margin-top:6px">+ Buscar material</button>
+    <div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--color-border-tertiary)">
+      <div style="font-size:12px;font-weight:600;color:var(--color-text-secondary);margin-bottom:6px">Productos como insumo</div>
+      <div id="op-prods-insumo"></div>
+      <button class="btn btn-s" onclick="abrirBuscadorProducto('op')" style="margin-top:6px">+ Buscar producto</button>
+    </div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-op')">Cancelar</button><button class="btn btn-p" onclick="saveOp()">Guardar operación</button></div>
+</div></div>
+
+<!-- OPERACION EDITAR -->
+<div class="ov" id="mo-op-edit"><div class="mo">
+  <div class="mh">Editar operación <span class="mx" onclick="closeMo('mo-op-edit')">×</span></div>
+  <input type="hidden" id="ope-id">
+  <input type="hidden" id="ope-pid">
+  <div class="fg2">
+    <div class="fg"><label>N° de orden</label><input type="text" id="ope-ord" inputmode="numeric"></div>
+    <div class="fg"><label>Nombre <span class="req">*</span></label><input id="ope-nom"></div>
+    <div class="fg s2"><label>Descripción</label><input id="ope-desc"></div>
+    <div class="fg s2">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="ope-terc" onchange="toggleTercOp('ope')" style="width:15px;height:15px">
+        <span style="font-size:13px">Operación tercerizada</span>
+      </label>
+    </div>
+  </div>
+  <div id="ope-campos-propios" class="fg2">
+    <div class="fg"><label>Categoría de máquina</label><select id="ope-catm"></select></div>
+    <div class="fg"><label>Máquina específica</label><select id="ope-maq"></select></div>
+    <div class="fg"><label>Tiempo setup (min)</label><input type="number" id="ope-set" min="0" step="0.5" placeholder="min"></div>
+    <div class="fg"><label>Tiempo ciclo (seg)</label><input type="number" id="ope-cic" min="0" step="0.1" placeholder="seg"></div>
+  </div>
+  <div id="ope-campos-terc" class="fg2" style="display:none">
+    <div class="fg s2" style="font-size:11px;color:#A32D2D;background:#FCEBEB;padding:6px 8px;border-radius:6px"><b>Obligatorio:</b> una operación tercerizada requiere cargar al menos un <b>material como insumo</b> en la lista de materiales de esta operación. Es el mismo material que se generará al ingresar el remito del proveedor.</div>
+    
+    <div class="fg" style="position:relative"><label>Proveedor <span class="req">*</span></label>
+      <input type="text" id="ope-prv-search" placeholder="🔍 Buscar proveedor..." autocomplete="off"
+        oninput="filtrarProvOp('ope')" onfocus="filtrarProvOp('ope')"
+        onblur="setTimeout(function(){var c=$('ope-prv-results');if(c)c.style.display='none';},150)">
+      <input type="hidden" id="ope-prv">
+      <div id="ope-prv-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:7px;margin-top:3px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.14);z-index:20"></div>
+    </div>
+    <div class="fg"><label>Precio unitario (Estandar)</label><input type="number" id="ope-precio" value="0" min="0" step="0.01"></div>
+    <div class="fg"><label>Tiempo mínimo (días)</label><input type="number" id="ope-tdays" value="1" min="1"></div>
+  </div>
+  <div class="fg2" style="margin-top:4px">
+    <div class="fg s2"><label>Observaciones</label><textarea id="ope-obs" style="min-height:40px"></textarea></div>
+  </div>
+  <div id="ope-vol-agrup-wrap" style="margin-top:8px;padding-top:11px;border-top:1px solid var(--color-border-tertiary)">
+    <button type="button" class="btn btn-s" id="ope-vol-agrup-btn" onclick="toggleVolAgrupOp('ope')">Volumen Agrupado</button>
+    <div id="ope-vol-agrup-campo" class="fg" style="display:none;margin-top:8px;max-width:260px">
+      <label>Valor Recalculado</label>
+      <input type="number" id="ope-vol-agrup-valor" min="0" step="0.01" placeholder="Ej: 33">
+      <div style="font-size:11px;color:var(--color-text-secondary);margin-top:4px">
+        Cantidad que agrupa esta operación. La cantidad requerida se calculará como Total a realizar de la OT ÷ este valor (redondeado hacia arriba).
+      </div>
+    </div>
+  </div>
+  <div id="ope-mats-section" style="margin-top:12px;padding-top:11px;border-top:1px solid var(--color-border-tertiary)">
+    <div style="font-size:12px;font-weight:600;color:var(--color-text-secondary);margin-bottom:6px">Material/Producto como insumo</div>
+    <div id="ope-mats"></div>
+    <button class="btn btn-s" onclick="abrirBuscadorMaterial('ope')" style="margin-top:6px">+ Buscar material</button>
+    <div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--color-border-tertiary)">
+      <div style="font-size:12px;font-weight:600;color:var(--color-text-secondary);margin-bottom:6px">Productos como insumo</div>
+      <div id="ope-prods-insumo"></div>
+      <button class="btn btn-s" onclick="abrirBuscadorProducto('ope')" style="margin-top:6px">+ Buscar producto</button>
+    </div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-op-edit')">Cancelar</button><button class="btn btn-p" onclick="saveOpEdit()">Guardar cambios</button></div>
+</div></div>
+
