@@ -42,6 +42,9 @@ CONFIG_DEFECTO = {
     "variable_parada": 500,
     "base_parada": 9500,
     "codigos_parada": [],         # vacío: los de Trabajo no productivo de CNC de MetalERP
+    # Alarmas del control (Fanuc): cada alarma activa queda como parada.
+    "leer_alarmas": True,
+    "alarma_min_seg": 10,         # una alarma más corta se anota pero no va a MetalERP
 }
 # Códigos de parada de CNC de Trabajo no productivo (CODIGOS_PARADA_MAQUINA['CNC']
 # de MetalERP): el código es la posición, empezando en 1. El texto va igual a
@@ -52,6 +55,7 @@ CODIGOS_PARADA_CNC = ["MANTENIMIENTO", "PUESTA EN MARCHA", "ALMUERZO - CENA", "L
     "CORTE Y DESPUNTE DE BARRAS", "BAÑO", "ROTURA DE HTAS", "CAMBIO DE INSERTO EN OTRA MAQUINA",
     "EXPLICACION / REUNION", "FALTA DE PREPARACION", "MOVER PIEZAS", "FALTA DE MATERIAL",
     "ESPERAR AL ENCARGADO / PEDIR INSERTO", "REPASAR PIEZAS", "DESCARGAR MATERIAL"]
+ALARMA_SIN_CONEXION_SEG = 120     # sin poder leer el control este tiempo, las alarmas abiertas se cierran
 LECTOR_SEG = 5                    # cada cuánto se lee el contador de cada máquina
 TIPOS_LECTOR = {"fanuc": 8193, "haas": 5051}
 REINTENTO_MIN = 5
@@ -183,6 +187,11 @@ def _cerrar(e=None):
 def init_db():
     db = conectar()
     db.executescript(ESQUEMA)
+    cols = {r[1] for r in db.execute("PRAGMA table_info(paradas)")}
+    if "tipo" not in cols:      # operario (variable de macro) / alarma (alarma del control)
+        db.execute("ALTER TABLE paradas ADD COLUMN tipo TEXT DEFAULT 'operario'")
+    if "alarma" not in cols:    # código de la alarma, por ejemplo SP9001
+        db.execute("ALTER TABLE paradas ADD COLUMN alarma TEXT")
     db.commit()
     db.close()
 
@@ -472,6 +481,11 @@ def leer_lector(lec, timeout=5):
                         r["parada_valor"] = f.leer_macro(var)
                     except fanuc_focas.ErrorFanuc as e:
                         r["parada_error"] = f"No se pudo leer #{var}: {e}"
+                if cfg().get("leer_alarmas", True):
+                    try:
+                        r["alarmas"] = f.leer_alarmas()
+                    except fanuc_focas.ErrorFanuc as e:
+                        r["alarma_error"] = f"No se pudieron leer las alarmas: {e}"
                 return r
         except fanuc_focas.ErrorFanuc as e:
             raise RuntimeError(str(e))
@@ -490,6 +504,7 @@ def _leer_y_registrar(lec):
         r = leer_lector(lec)
     except Exception as e:
         est.update(error=str(e), intento=ahora())
+        _alarmas_sin_conexion(maq, est)
         return
     hora = ahora()
     est.update(contador=r["contador"], origen=r.get("origen"), leido=hora, error=None, intento=hora,
@@ -508,9 +523,17 @@ def _leer_y_registrar(lec):
             est["parada_error"] = r.get("parada_error")
             if "parada_valor" in r:
                 procesar_parada(db, maq, r["parada_valor"], n or 0, hora)
-            ab = db.execute("SELECT codigo, motivo, inicio FROM paradas WHERE maquina=? AND fin IS NULL", (maq,)).fetchone()
+            ab = db.execute("""SELECT codigo, motivo, inicio FROM paradas WHERE maquina=? AND fin IS NULL
+                AND COALESCE(tipo,'operario')='operario'""", (maq,)).fetchone()
             est["parada"] = dict(ab) if ab else None
             est["parada_valor"] = r.get("parada_valor")
+        est["alarma_error"] = r.get("alarma_error")
+        if "alarmas" in r:
+            procesar_alarmas(db, maq, r["alarmas"], hora)
+            est["alarmas"] = r["alarmas"]
+            est["alarma_ok"] = hora
+        elif not r.get("alarma_error"):
+            est["alarmas"] = None
     finally:
         db.close()
 
@@ -556,7 +579,8 @@ def procesar_parada(db, maq, valor, piezas_nuevas, hora):
         return
     r = db.execute("SELECT valor FROM parada_variable WHERE maquina=?", (maq,)).fetchone()
     anterior = r["valor"] if r else 0
-    abierta = db.execute("SELECT * FROM paradas WHERE maquina=? AND fin IS NULL ORDER BY id DESC", (maq,)).fetchone()
+    abierta = db.execute("""SELECT * FROM paradas WHERE maquina=? AND fin IS NULL
+        AND COALESCE(tipo,'operario')='operario' ORDER BY id DESC""", (maq,)).fetchone()
     codigo, motivo = codigo_de_valor(v)
     if v != anterior:
         if abierta:
@@ -568,6 +592,59 @@ def procesar_parada(db, maq, valor, piezas_nuevas, hora):
     elif abierta and piezas_nuevas > 0:
         _cerrar_parada(db, abierta, hora, "piezas")
     db.commit()
+
+
+# ── Alarmas del control (sobrecalentamiento, servo, husillo, etc.) ──────────
+def _motivo_alarma(a):
+    return ("ALARMA " + a["codigo"] + (" " + a["texto"] if a.get("texto") else ""))[:120]
+
+
+def _cerrar_alarma(db, fila, hora, por):
+    ini = datetime.strptime(fila["inicio"], "%Y-%m-%d %H:%M:%S")
+    fin = datetime.strptime(hora, "%Y-%m-%d %H:%M:%S")
+    dur = max(0.0, (fin - ini).total_seconds())
+    corta = dur < float(cfg().get("alarma_min_seg") or 0)
+    db.execute("""UPDATE paradas SET fin=?, duracion_seg=?, cerrada_por=?, estado=? WHERE id=?""",
+               (hora, dur, por, "Corta" if corta else "Por enviar", fila["id"]))
+
+
+def procesar_alarmas(db, maq, alarmas, hora):
+    """Cada alarma activa del control es una parada abierta; se cierra cuando
+    la alarma desaparece de la pantalla ALARM del torno."""
+    activas = {}
+    for a in alarmas or []:
+        activas.setdefault(a["codigo"], a)
+    abiertas = db.execute("""SELECT * FROM paradas WHERE maquina=? AND fin IS NULL AND tipo='alarma'""",
+                          (maq,)).fetchall()
+    ya = set()
+    for f in abiertas:
+        if f["alarma"] in activas and f["alarma"] not in ya:
+            ya.add(f["alarma"])
+        else:
+            _cerrar_alarma(db, f, hora, "alarma")
+    for cod, a in activas.items():
+        if cod not in ya:
+            db.execute("""INSERT INTO paradas (uuid, maquina, codigo, motivo, valor, inicio, tipo, alarma)
+                VALUES (?,?,NULL,?,NULL,?,'alarma',?)""", (str(uuid.uuid4()), maq, _motivo_alarma(a), hora, cod))
+    db.commit()
+
+
+def _alarmas_sin_conexion(maq, est):
+    """Torno apagado o desconectado: las alarmas abiertas se cierran a la hora
+    de la última lectura buena, para que no sigan corriendo toda la noche."""
+    ult = est.get("alarma_ok")
+    if not ult or (datetime.now() - datetime.strptime(ult, "%Y-%m-%d %H:%M:%S")).total_seconds() < ALARMA_SIN_CONEXION_SEG:
+        return
+    db = conectar()
+    try:
+        filas = db.execute("SELECT * FROM paradas WHERE maquina=? AND fin IS NULL AND tipo='alarma'", (maq,)).fetchall()
+        for f in filas:
+            _cerrar_alarma(db, f, max(ult, f["inicio"]), "sin_conexion")
+        db.commit()
+        est["alarmas"] = None
+        est["alarma_ok"] = None
+    finally:
+        db.close()
 
 
 def hilo_lectores():
@@ -771,7 +848,7 @@ def _lista_backups(maq):
         return res
     for nombre in nombres[:30]:
         ruta = os.path.join(base, nombre)
-        if not os.path.isdir(ruta):
+        if not os.path.isdir(ruta) or nombre == "sueltos":
             continue
         archivos = [a for a in os.listdir(ruta) if a.upper().endswith(".NC") and a.upper() != "TODOS.NC"]
         tam = sum(os.path.getsize(os.path.join(ruta, a)) for a in os.listdir(ruta))
@@ -811,6 +888,178 @@ def api_backup():
     return jsonify({"ok": True})
 
 
+def _lector_fanuc(maq):
+    maq = str(maq or "").strip().upper()
+    return next((l for l in cfg().get("lectores") or [] if l.get("tipo") == "fanuc" and l.get("ip")
+                 and str(l["maquina"]).upper() == maq), None)
+
+
+@app.route("/api/backup/programas")
+def api_backup_programas():
+    """Lista de programas que tiene el torno ahora (solo lectura)."""
+    import fanuc_focas
+    lec = _lector_fanuc(request.args.get("maquina"))
+    if not lec:
+        return jsonify({"error": "Esa máquina no tiene lector Fanuc cargado"}), 400
+    try:
+        with fanuc_focas.Fanuc(lec["ip"], lec.get("puerto") or 8193, timeout=10) as f:
+            lista = f.listar_programas()
+    except Exception as e:
+        return jsonify({"error": f"No se pudo leer la lista del torno: {e}"}), 400
+    nom = lambda n: ("O%04d" % n) if n < 10000 else ("O%08d" % n)
+    return jsonify({"maquina": str(lec["maquina"]).upper(), "hora": ahora(), "programas": [
+        {"numero": n, "nombre": nom(n), "tam": (lista[n] or {}).get("tam"),
+         "comentario": (lista[n] or {}).get("comentario", "")} for n in sorted(lista)]})
+
+
+@app.route("/api/backup/programa")
+def api_backup_programa():
+    """Baja UN programa del torno (solo lectura): queda en backups\\<MAQ>\\sueltos y se descarga."""
+    import fanuc_focas
+    lec = _lector_fanuc(request.args.get("maquina"))
+    if not lec:
+        return jsonify({"error": "Esa máquina no tiene lector Fanuc cargado"}), 400
+    try:
+        n = int(request.args.get("numero"))
+        if not 1 <= n <= 99999999:
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({"error": "Número de programa inválido"}), 400
+    nom = ("O%04d" % n) if n < 10000 else ("O%08d" % n)
+    try:
+        with fanuc_focas.Fanuc(lec["ip"], lec.get("puerto") or 8193, timeout=10) as f:
+            txt = f.bajar(n)
+    except Exception as e:
+        return jsonify({"error": f"No se pudo bajar {nom}: {e}"}), 400
+    txt = txt.replace("\r", "").strip("%\n ")
+    if not txt:
+        return jsonify({"error": f"El torno no mandó el contenido de {nom} (¿existe?)"}), 400
+    if request.args.get("ver"):
+        return jsonify({"nombre": nom, "texto": txt + "\n"})
+    datos = ("%\n" + txt + "\n%\n").replace("\n", "\r\n").encode("latin-1", "replace")
+    maq = _nombre_seguro(str(lec["maquina"]).upper())
+    carpeta = os.path.join(BACKUP_DIR, maq, "sueltos")
+    os.makedirs(carpeta, exist_ok=True)
+    archivo = f"{nom}_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.NC"
+    with open(os.path.join(carpeta, archivo), "wb") as fh:
+        fh.write(datos)
+    resp = send_file(io.BytesIO(datos), mimetype="application/octet-stream", as_attachment=True,
+                     download_name=f"{maq}_{nom}.NC")
+    resp.headers["X-Archivo"] = f"{maq}/sueltos/{archivo}"
+    resp.headers["Access-Control-Expose-Headers"] = "X-Archivo"
+    return resp
+
+
+_comparando = set()
+
+
+def _ultimo_backup(maq):
+    bks = _lista_backups(maq)
+    if not bks:
+        return None, None
+    return bks[0], os.path.join(BACKUP_DIR, *bks[0]["carpeta"].split("/"))
+
+
+def _archivo_en_backup(carpeta, n):
+    nom = ("O%04d" % n) if n < 10000 else ("O%08d" % n)
+    ruta = os.path.join(carpeta, nom + ".NC")
+    if not os.path.isfile(ruta):
+        return None
+    with open(ruta, encoding="latin-1") as f:
+        return f.read()
+
+
+@app.route("/api/backup/comparar", methods=["POST"])
+def api_backup_comparar():
+    """Baja cada programa del torno (solo lectura) y lo compara con el último backup."""
+    import fanuc_focas, programa_nc
+    lec = _lector_fanuc((request.get_json(silent=True) or {}).get("maquina"))
+    if not lec:
+        return jsonify({"error": "Esa máquina no tiene lector Fanuc cargado"}), 400
+    maq = str(lec["maquina"]).upper()
+    bk, carpeta = _ultimo_backup(maq)
+    if not bk:
+        return jsonify({"error": f"{maq} no tiene ningún backup para comparar: hacé uno primero"}), 400
+    with _lock_backup:
+        if maq in _comparando or (_backup_estado.get(maq) or {}).get("en_curso"):
+            return jsonify({"error": f"Ya se está leyendo {maq} (backup o comparación en curso)"}), 409
+        _comparando.add(maq)
+    nom = lambda n: ("O%04d" % n) if n < 10000 else ("O%08d" % n)
+    res = []
+    try:
+        with fanuc_focas.Fanuc(lec["ip"], lec.get("puerto") or 8193, timeout=10) as f:
+            lista = f.listar_programas()
+            for n in sorted(lista):
+                fila = {"numero": n, "nombre": nom(n), "comentario": (lista[n] or {}).get("comentario", "")}
+                viejo = _archivo_en_backup(carpeta, n)
+                try:
+                    txt = f.bajar(n)
+                    if not txt.strip("%\r\n "):
+                        raise fanuc_focas.ErrorFanuc("el control no mandó el contenido")
+                    if viejo is None:
+                        fila["estado"] = "nuevo"
+                    else:
+                        fila["estado"] = "igual" if programa_nc.normalizar(txt) == programa_nc.normalizar(viejo) else "cambio"
+                except Exception as e:
+                    fila.update(estado="error", detalle=str(e))
+                res.append(fila)
+        en_torno = set(lista)
+        for a in sorted(os.listdir(carpeta)):
+            mm = re.fullmatch(r"O(\d{1,8})\.NC", a, re.I)
+            if mm and int(mm.group(1)) not in en_torno:
+                n = int(mm.group(1))
+                viejo = _archivo_en_backup(carpeta, n) or ""
+                res.append({"numero": n, "nombre": nom(n), "comentario": programa_nc.comentario(viejo), "estado": "borrado"})
+    except Exception as e:
+        return jsonify({"error": f"No se pudo leer el torno: {e}"}), 400
+    finally:
+        with _lock_backup:
+            _comparando.discard(maq)
+    res.sort(key=lambda x: x["numero"])
+    cuenta = {k: sum(1 for x in res if x["estado"] == k) for k in ("igual", "cambio", "nuevo", "borrado", "error")}
+    return jsonify({"maquina": maq, "hora": ahora(), "backup": bk["fecha"], "programas": res, "cuenta": cuenta})
+
+
+@app.route("/api/backup/diferencias")
+def api_backup_diferencias():
+    """Programa del torno ahora contra el del último backup, línea por línea."""
+    import difflib, fanuc_focas
+    lec = _lector_fanuc(request.args.get("maquina"))
+    if not lec:
+        return jsonify({"error": "Esa máquina no tiene lector Fanuc cargado"}), 400
+    try:
+        n = int(request.args.get("numero"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Número de programa inválido"}), 400
+    maq = str(lec["maquina"]).upper()
+    bk, carpeta = _ultimo_backup(maq)
+    viejo = _archivo_en_backup(carpeta, n) if bk else None
+    if viejo is None:
+        return jsonify({"error": "Ese programa no está en el último backup"}), 400
+    try:
+        with fanuc_focas.Fanuc(lec["ip"], lec.get("puerto") or 8193, timeout=10) as f:
+            nuevo = f.bajar(n)
+    except Exception as e:
+        return jsonify({"error": f"No se pudo bajar el programa: {e}"}), 400
+    limpiar = lambda t: [l.rstrip() for l in t.replace("\r", "").strip("%\n ").split("\n")]
+    a, b = limpiar(viejo), limpiar(nuevo)
+    lineas = []
+    for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+        if op == "equal":
+            bloque = a[i1:i2]
+            if len(bloque) > 6:
+                lineas += [{"t": "=", "l": x, "a": i1 + k + 1, "b": j1 + k + 1} for k, x in enumerate(bloque[:3])]
+                lineas.append({"t": "...", "l": f"({len(bloque) - 6} líneas iguales)"})
+                lineas += [{"t": "=", "l": x, "a": i2 - 3 + k + 1, "b": j2 - 3 + k + 1} for k, x in enumerate(bloque[-3:])]
+            else:
+                lineas += [{"t": "=", "l": x, "a": i1 + k + 1, "b": j1 + k + 1} for k, x in enumerate(bloque)]
+        else:
+            lineas += [{"t": "-", "l": x, "a": i1 + k + 1} for k, x in enumerate(a[i1:i2])]
+            lineas += [{"t": "+", "l": x, "b": j1 + k + 1} for k, x in enumerate(b[j1:j2])]
+    nom = ("O%04d" % n) if n < 10000 else ("O%08d" % n)
+    return jsonify({"nombre": nom, "backup": bk["fecha"], "lineas": lineas})
+
+
 @app.route("/api/backup/zip")
 def api_backup_zip():
     ruta = _ruta_backup(request.args.get("carpeta"))
@@ -830,8 +1079,29 @@ def api_backup_abrir():
     """Abre la carpeta del backup en el Explorador (solo en la PC de la app)."""
     if not es_local():
         return jsonify({"error": "La carpeta se abre solo en la PC donde corre la app"}), 403
-    rel = (request.get_json(silent=True) or {}).get("carpeta")
+    datos = request.get_json(silent=True) or {}
+    arch = str(datos.get("archivo") or "")
+    if arch:
+        # "T1/sueltos/O0100_fecha.NC": abre la carpeta con el archivo marcado
+        partes = arch.split("/")
+        if len(partes) != 3 or partes[1] != "sueltos":
+            return jsonify({"error": "Archivo inválido"}), 400
+        carpeta = os.path.join(BACKUP_DIR, _nombre_seguro(partes[0]), "sueltos")
+        ruta_arch = os.path.join(carpeta, os.path.basename(partes[2]))
+        try:
+            if os.path.isfile(ruta_arch):
+                import subprocess
+                subprocess.Popen(["explorer", "/select,", ruta_arch])
+            else:
+                os.makedirs(carpeta, exist_ok=True)
+                os.startfile(carpeta)
+        except (AttributeError, OSError) as e:
+            return jsonify({"error": f"No se pudo abrir la carpeta: {e}", "ruta": carpeta}), 500
+        return jsonify({"ok": True, "ruta": ruta_arch})
+    rel = datos.get("carpeta")
     ruta = _ruta_backup(rel) if rel else BACKUP_DIR
+    if rel and not ruta and str(rel).endswith("/sueltos"):
+        ruta = os.path.join(BACKUP_DIR, _nombre_seguro(str(rel)[:-8]), "sueltos")
     if not ruta:
         return jsonify({"error": "No existe ese backup"}), 404
     os.makedirs(ruta, exist_ok=True)
@@ -1056,6 +1326,56 @@ def api_envio_verificar():
     return jsonify({"ok": True, "igual": igual, "resultado": res})
 
 
+_lock_carga = threading.Lock()
+
+
+@app.route("/api/envio/directo", methods=["POST"])
+def api_envio_directo():
+    """Carga el programa de la carpeta directo en la memoria del control (FOCAS),
+    sin que el operario haga nada en el torno. No reemplaza programas que ya están.
+    Cada intento deja el detalle de las tramas en diagnostico\\carga_<MAQ>_<hora>.txt."""
+    import fanuc_focas, programa_nc
+    if not es_local():
+        return jsonify({"error": "Los programas se mandan solo desde la PC donde corre la app"}), 403
+    lec, ruta, err = _archivo_de(request.get_json(silent=True) or {})
+    if err:
+        return jsonify({"error": err}), 400
+    maq = str(lec["maquina"]).upper()
+    with open(ruta, encoding="latin-1") as f:
+        txt = f.read()
+    numero = programa_nc.numero_en_texto(txt)
+    if not numero:
+        return jsonify({"error": "El archivo no tiene número de programa (O)"}), 400
+    nom = programa_nc.nombre_o(numero)
+    if not _lock_carga.acquire(blocking=False):
+        return jsonify({"error": "Ya se está mandando otro programa; esperá que termine"}), 409
+    try:
+        try:
+            res = fanuc_focas.cargar_programa(lec["ip"], lec.get("puerto") or 8193, txt, numero,
+                                              preferida=cfg().get("focas_inicio_carga"))
+        except Exception as e:
+            res = {"ok": False, "resultado": f"No se pudo mandar {nom}: {e}", "log": getattr(e, "log", [])}
+    finally:
+        _lock_carga.release()
+    diag = os.path.join(AQUI, "diagnostico")
+    try:
+        os.makedirs(diag, exist_ok=True)
+        arch = os.path.join(diag, f"carga_{_nombre_seguro(maq)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
+        with open(arch, "w", encoding="utf-8") as f:
+            f.write(f"{ahora()}  {maq} {lec['ip']}  {nom}  ({os.path.basename(ruta)})\n")
+            f.write("Resultado: " + res["resultado"] + "\n\n" + "\n".join(res.get("log") or []) + "\n")
+    except OSError:
+        arch = None
+    if res.get("ok") and res.get("variante"):
+        guardar_cfg({"focas_inicio_carga": res["variante"]})
+    print(f"  [carga {maq}] {res['resultado']}")
+    _registrar_envio(maq, nom, "Mandado directo al torno: bien" if res.get("ok") else
+                     ("Mandado directo: ya estaba en la máquina" if res.get("existe") else "Mandado directo: falló"),
+                     archivo=os.path.basename(ruta), nbytes=len(txt), detalle=res["resultado"], desde=request.remote_addr)
+    return jsonify({"ok": bool(res.get("ok")), "existe": bool(res.get("existe")), "resultado": res["resultado"],
+                    "diagnostico": arch})
+
+
 @app.route("/api/envio/ftp", methods=["PUT"])
 def api_envio_ftp():
     if not es_local():
@@ -1125,7 +1445,8 @@ def api_paradas():
     filas = get_db().execute("SELECT * FROM paradas ORDER BY id DESC LIMIT 300").fetchall()
     c = cfg()
     return jsonify({"paradas": [dict(r) for r in filas], "variable": c.get("variable_parada"),
-                    "base": c.get("base_parada"), "codigos": codigos_parada()})
+                    "base": c.get("base_parada"), "codigos": codigos_parada(),
+                    "leer_alarmas": c.get("leer_alarmas", True), "alarma_min_seg": c.get("alarma_min_seg")})
 
 
 @app.route("/api/paquetes")
@@ -1152,6 +1473,60 @@ def api_piezas():
     return jsonify([dict(r) for r in filas])
 
 
+def _filtro_piezas(a):
+    w, p = ["1=1"], []
+    if a.get("maquina"):
+        w.append("p.maquina=?"); p.append(a["maquina"].strip().upper())
+    if a.get("desde"):
+        w.append("p.hora>=?"); p.append(a["desde"][:10])
+    if a.get("hasta"):
+        w.append("p.hora<=?"); p.append(a["hasta"][:10] + " 23:59:59")
+    return " AND ".join(w), p
+
+
+@app.route("/api/piezas/historial")
+def api_piezas_historial():
+    """Todas las piezas guardadas, con filtros y de a páginas."""
+    db = get_db()
+    w, p = _filtro_piezas(request.args)
+    try:
+        por = max(50, min(2000, int(request.args.get("por") or 500)))
+        pag = max(1, int(request.args.get("pagina") or 1))
+    except ValueError:
+        por, pag = 500, 1
+    total = db.execute(f"SELECT COUNT(*) FROM piezas p WHERE {w}", p).fetchone()[0]
+    filas = db.execute(f"""SELECT p.*, k.estado paquete_estado FROM piezas p
+        LEFT JOIN paquetes k ON k.uuid=p.paquete WHERE {w} ORDER BY p.hora DESC, p.id DESC LIMIT ? OFFSET ?""",
+                       p + [por, (pag - 1) * por]).fetchall()
+    resumen = db.execute(f"""SELECT p.maquina, COUNT(*) piezas, MIN(p.hora) primera, MAX(p.hora) ultima,
+        AVG(p.ciclo_seg) ciclo_prom FROM piezas p WHERE {w} GROUP BY p.maquina ORDER BY p.maquina""", p).fetchall()
+    maquinas = [r[0] for r in db.execute("SELECT DISTINCT maquina FROM piezas ORDER BY maquina")]
+    rango = db.execute("SELECT MIN(hora), MAX(hora) FROM piezas").fetchone()
+    return jsonify({"total": total, "pagina": pag, "por": por, "paginas": max(1, -(-total // por)),
+                    "piezas": [dict(r) for r in filas], "resumen": [dict(r) for r in resumen],
+                    "maquinas": maquinas, "primera": rango[0], "ultima": rango[1]})
+
+
+@app.route("/api/piezas/csv")
+def api_piezas_csv():
+    """Las piezas filtradas en un CSV para Excel (separador ;)."""
+    db = get_db()
+    w, p = _filtro_piezas(request.args)
+    filas = db.execute(f"""SELECT p.hora, p.maquina, p.ciclo_seg, p.contador, p.origen,
+        COALESCE(k.estado, CASE WHEN p.paquete IS NULL THEN 'Próximo' END) paquete
+        FROM piezas p LEFT JOIN paquetes k ON k.uuid=p.paquete WHERE {w} ORDER BY p.hora, p.id""", p).fetchall()
+    num = lambda v: "" if v is None else str(round(v, 1)).replace(".", ",")
+    lineas = ["Fecha;Hora;Máquina;Ciclo (s);Contador;Origen;Paquete"]
+    for r in filas:
+        lineas.append(";".join([r["hora"][:10], r["hora"][11:19], r["maquina"] or "", num(r["ciclo_seg"]),
+                                "" if r["contador"] is None else str(r["contador"]), r["origen"] or "", r["paquete"] or ""]))
+    a = request.args
+    nombre = "piezas" + ("_" + a["maquina"].upper() if a.get("maquina") else "") + \
+             ("_desde_" + a["desde"][:10] if a.get("desde") else "") + ("_hasta_" + a["hasta"][:10] if a.get("hasta") else "") + ".csv"
+    datos = ("\ufeff" + "\r\n".join(lineas) + "\r\n").encode("utf-8")
+    return send_file(io.BytesIO(datos), mimetype="text/csv", as_attachment=True, download_name=nombre)
+
+
 @app.route("/api/enviar_ahora", methods=["POST"])
 def api_enviar_ahora():
     _aviso_envio.set()
@@ -1175,7 +1550,9 @@ def api_config():
         nuevo["metalerp_url"] = u
     if d.get("api_key"):
         nuevo["api_key"] = str(d["api_key"]).strip()
-    for k, lo, hi in (("intervalo_min", 1, 1440), ("parada_seg", 30, 7200)):
+    if "leer_alarmas" in d:
+        nuevo["leer_alarmas"] = bool(d["leer_alarmas"])
+    for k, lo, hi in (("intervalo_min", 1, 1440), ("parada_seg", 30, 7200), ("alarma_min_seg", 0, 3600)):
         if k in d:
             try:
                 nuevo[k] = max(lo, min(hi, int(d[k])))

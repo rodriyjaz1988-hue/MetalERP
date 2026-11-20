@@ -4,11 +4,12 @@ Python puro: no necesita la librería de Fanuc (Fwlib32.dll). El protocolo sale
 de pyfanuc (github.com/diohpix/pyfanuc, dominio público), reducido a lo que usa
 el Monitor: abrir la conexión, leer datos del sistema, leer una variable de
 macro (#3901 = piezas hechas) o un parámetro (6711 = piezas hechas), listar y
-bajar los programas de la memoria del control (backup) y cerrar.
+bajar los programas de la memoria del control (backup), leer las alarmas
+activas y cerrar.
 
 Prueba rápida desde la PC:   python fanuc_focas.py 192.168.1.200
 """
-import re, socket, sys
+import re, socket, sys, time
 from struct import pack, unpack
 
 CABECERA = b"\xa0\xa0\xa0\xa0"
@@ -18,6 +19,25 @@ CERRAR, CERRAR_OK = 0x0201, 0x0202
 # Subida de programas (control -> PC), como cnc_upstart/cnc_upload de Fwlib
 SUBIR, SUBIR_FIN, SUBIR_FIN_OK = 0x1501, 0x1701, 0x1702
 SUBIR_DATOS = 0x16   # byte alto de las tramas con texto: 0x1604 en unos controles, 0x1602 en el 0i-D
+# Carga de programas (PC -> control), como cnc_dwnstart3/cnc_download3/cnc_dwnend3.
+# El protocolo no está publicado: se arma igual que la subida (inicio 0x15 / datos
+# 0x16 / fin 0x17 -> inicio 0x11 / datos 0x12 / fin 0x13) y cada intento deja
+# anotadas todas las tramas, para ajustarlo si un control responde distinto.
+CARGAR, CARGAR_DATOS, CARGAR_FIN = 0x1101, 0x1204, 0x1301
+CARGAR_TROZO = 1400  # Fanuc: hasta 1460 bytes por envío en Ethernet (recomienda 1024-1400)
+# Errores de Fwlib (EW_*) que el control puede devolver al cargar
+ERRORES_CARGA = {-1: "el control está ocupado (verificación o edición en segundo plano)",
+                 -2: "se apretó RESET en el torno", 2: "largo inválido", 4: "tipo de dato inválido",
+                 5: "error en los datos del programa", 7: "la memoria de programas está protegida (O8000/O9000 o llave)",
+                 8: "no hay memoria libre en el control", 9: "falta habilitar escritura de parámetros",
+                 10: "el control está ocupado, reintentar", 12: "el torno está en modo MDI: pasalo a EDIT o MEM",
+                 13: "el control rechazó la carga en este estado", 15: "el torno tiene una alarma: hacé RESET",
+                 17: "el programa está protegido con clave"}
+
+
+# Grupos de alarma de Fanuc (cnc_rdalmmsg2): el prefijo que muestra la pantalla ALARM
+TIPOS_ALARMA = {0: "SW", 1: "PW", 2: "IO", 3: "PS", 4: "OT", 5: "OH", 6: "SV", 7: "SR", 8: "MC",
+                9: "SP", 10: "DS", 11: "IE", 12: "BG", 13: "SN", 15: "EX", 19: "PC"}
 
 
 class ErrorFanuc(Exception):
@@ -208,6 +228,90 @@ class Fanuc:
                 pass
             s.close()
 
+    def cargar(self, texto, numero, anotar=None, timeout=30, inicio=None):
+        """Carga un programa en la memoria del control (no reemplaza: si ya existe
+        el control lo rechaza). texto = programa con su línea O. Devuelve la lista
+        de tramas para diagnóstico. anotar(str) recibe cada paso.
+        inicio = carga útil de la trama de inicio (para probar variantes)."""
+        log = []
+
+        def nota(t):
+            log.append(t)
+            if anotar:
+                anotar(t)
+
+        lineas = [l.rstrip() for l in texto.replace("\r", "").split("\n")]
+        lineas = [l for l in lineas if l.strip() != "%"]
+        while lineas and not lineas[0].strip():
+            lineas.pop(0)
+        while lineas and not lineas[-1].strip():
+            lineas.pop()
+        datos = ("\n" + "\n".join(lineas) + "\n%").encode("ascii")
+        if inicio is None:
+            inicio = INICIOS_CARGA[0][1]
+        s = socket.create_connection((self.ip, self.puerto), timeout=self.timeout)
+        buf = b""
+
+        def mandar(tipo, d):
+            s.sendall(CABECERA + pack(">HHH", 1, tipo, len(d)) + d)
+            nota(f">> {tipo:04X} ({len(d)} bytes) {d[:40].hex(' ')}")
+
+        def recibir(espera):
+            nonlocal buf
+            s.settimeout(espera)
+            try:
+                tipo, d, buf = self._trama(s, buf)
+            except socket.timeout:
+                return None, b""
+            nota(f"<< {tipo:04X} ({len(d)} bytes) {d[:60].hex(' ')}")
+            return tipo, d
+
+        def error_en(d):
+            # Solo para orientar el mensaje: el resultado real sale de leer el programa después
+            for pos in (0, 2, 4, 6):
+                if len(d) >= pos + 2:
+                    e, = unpack(">h", d[pos:pos + 2])
+                    if e in ERRORES_CARGA and e != 0:
+                        return e
+            return None
+
+        try:
+            mandar(ABRIR, b"\x00\x01")
+            tipo, _ = recibir(self.timeout)
+            if tipo != ABRIR_OK:
+                raise ErrorFanuc("El control no aceptó la conexión para cargar programas")
+            mandar(CARGAR, inicio)
+            tipo, d = recibir(8)
+            if tipo is None:
+                raise ErrorFanuc("El control no respondió al pedido de carga")
+            if tipo != CARGAR + 1:
+                raise ErrorFanuc(f"El control respondió {tipo:04X} al pedido de carga (se esperaba {CARGAR + 1:04X})")
+            self.ultima_respuesta_inicio = d
+            for i in range(0, len(datos), CARGAR_TROZO):
+                mandar(CARGAR_DATOS, datos[i:i + CARGAR_TROZO])
+                tipo, d = recibir(0.05)          # el control normalmente no contesta cada trozo
+                if tipo is not None:
+                    e = error_en(d)
+                    raise ErrorFanuc(f"El control cortó la carga (respondió {tipo:04X}"
+                                     + (f"; posible causa: {ERRORES_CARGA[e]}" if e is not None else "") + ")")
+            mandar(CARGAR_FIN, b"")
+            tipo, d = recibir(timeout)
+            if tipo is None:
+                raise ErrorFanuc("El control no confirmó el fin de la carga")
+            self.ultima_respuesta_fin = (tipo, d)
+            return log
+        except socket.timeout:
+            raise ErrorFanuc("El control dejó de responder durante la carga")
+        except OSError as ex:
+            raise ErrorFanuc(f"Se cortó la conexión durante la carga ({ex})")
+        finally:
+            self.ultimo_log = log
+            try:
+                s.sendall(CABECERA + pack(">HHH", 1, CERRAR, 0))
+            except OSError:
+                pass
+            s.close()
+
     @staticmethod
     def _trama(s, buf):
         """Lee una trama entera de un socket: (tipo, datos, lo que sobró)."""
@@ -222,6 +326,41 @@ class Fanuc:
             if not parte:
                 raise ErrorFanuc("El control cerró la conexión al bajar programas")
             buf += parte
+
+    # ── alarmas ──
+    def leer_alarmas(self, maximo=10):
+        """Alarmas activas del control: [{"tipo": "SP", "numero": 9001, "codigo": "SP9001",
+        "texto": "MOTOR OVERHEAT", "eje": 0}]. Lista vacía si no hay ninguna.
+        Primero pide todas juntas (tipo -1); si el control no lo acepta, lee qué
+        grupos tienen alarma (mapa de bits) y pide cada grupo."""
+        try:
+            return self._alarmas_tipo(-1, maximo)
+        except ErrorFanuc:
+            mapa = self._pedido(1, 1, 0x1A)
+            if len(mapa) < 4:
+                raise ErrorFanuc("El control no devolvió las alarmas")
+            bits, = unpack(">L", mapa[:4])
+            res = []
+            for t in range(32):
+                if bits & (1 << t):
+                    try:
+                        res += self._alarmas_tipo(t, maximo)
+                    except ErrorFanuc:
+                        res.append({"tipo": TIPOS_ALARMA.get(t, "AL"), "numero": None,
+                                    "codigo": TIPOS_ALARMA.get(t, "AL"), "texto": "", "eje": 0})
+            return res
+
+    def _alarmas_tipo(self, tipo, maximo, largo_texto=32):
+        d = self._pedido(1, 1, 0x23, tipo, maximo, 1, largo_texto)
+        res, paso = [], 16 + largo_texto
+        for pos in range(0, len(d) - 15, paso):
+            num, t, eje, n = unpack(">iiii", d[pos:pos + 16])
+            txt = d[pos + 16:pos + 16 + max(0, min(n, largo_texto))]
+            txt = txt.split(b"\0", 1)[0].decode("latin-1", "replace").strip()
+            pref = TIPOS_ALARMA.get(t, "AL")
+            res.append({"tipo": pref, "numero": num, "codigo": f"{pref}{num:04d}" if num >= 0 else pref,
+                        "texto": txt, "eje": eje})
+        return res
 
     def piezas(self):
         """Contador de piezas: #3901 y, si no se puede, el parámetro 6711."""
@@ -241,6 +380,69 @@ def leer_piezas(ip, puerto=8193, timeout=5):
     with Fanuc(ip, puerto, timeout) as f:
         n, origen = f.piezas()
         return {"contador": n, "origen": origen, "sysinfo": f.sysinfo}
+
+
+# Cargas útiles posibles para la trama de inicio de carga (se prueban en orden
+# hasta que el control la acepte; la que anda queda anotada en el diagnóstico).
+# Siempre con el 1 inicial, igual que la subida de programas que ya anda en el
+# 0i-TD (otros números podrían ser correctores o parámetros: no se prueban).
+INICIOS_CARGA = [("largo", b"\x00\x00\x00\x01" + b"\x00" * 0x200),
+                 ("corto", b"\x00\x00\x00\x01")]
+
+
+def cargar_programa(ip, puerto, texto, numero, anotar=None, preferida=None):
+    """Carga O<numero> en el control y lo vuelve a leer para confirmar.
+    No reemplaza: si el programa ya está en la máquina, avisa y no hace nada.
+    Devuelve {"ok", "resultado", "variante", "log"}."""
+    import programa_nc
+    log = []
+
+    def nota(t):
+        log.append(t)
+        if anotar:
+            anotar(t)
+
+    nom = programa_nc.nombre_o(numero)
+    try:
+        return _cargar_y_verificar(ip, puerto, texto, numero, nom, nota, log, preferida)
+    except ErrorFanuc as e:
+        e.log = log
+        raise
+
+
+def _cargar_y_verificar(ip, puerto, texto, numero, nom, nota, log, preferida):
+    import programa_nc
+    with Fanuc(ip, puerto, timeout=10) as f:
+        nota(f"Control: {f.sysinfo}")
+        lista = f.listar_programas()
+        if numero in lista:
+            return {"ok": False, "existe": True, "log": log,
+                    "resultado": f"{nom} ya está en la máquina. Borralo en el torno (EDIT → {nom} → DELETE) y volvé a mandarlo."}
+        variantes = sorted(INICIOS_CARGA, key=lambda v: v[0] != preferida)
+        ultimo_error = None
+        for nombre, inicio in variantes:
+            nota(f"--- intento con inicio '{nombre}'")
+            try:
+                f.cargar(texto, numero, anotar=nota, inicio=inicio)
+            except ErrorFanuc as e:
+                nota(f"!! {e}")
+                ultimo_error = e
+                if "pedido de carga" in str(e):
+                    continue          # no aceptó este inicio: probar el siguiente
+                break                 # aceptó el inicio y falló después: no insistir
+            ultimo_error = None
+            break
+        time.sleep(1)
+        lista = f.listar_programas()
+        if numero not in lista:
+            return {"ok": False, "log": log, "variante": nombre,
+                    "resultado": f"{nom} no quedó en la máquina" + (f": {ultimo_error}" if ultimo_error else ".")}
+        quedo = f.bajar(numero)
+        igual = programa_nc.normalizar(quedo) == programa_nc.normalizar(texto)
+        nota(f"Leído de vuelta: {len(quedo)} bytes, igual={igual}")
+        return {"ok": igual, "log": log, "variante": nombre,
+                "resultado": (f"{nom} cargado en la máquina y verificado (igual al archivo)" if igual
+                              else f"{nom} quedó en la máquina pero NO es igual al archivo: revisalo en el torno")}
 
 
 def separar_programas(texto):
@@ -314,6 +516,11 @@ if __name__ == "__main__":
                 print("Parámetro 6711 (piezas hechas):", f.leer_parametro(6711))
             except ErrorFanuc as e:
                 print("Parámetro 6711:", e)
+            try:
+                al = f.leer_alarmas()
+                print("Alarmas activas:", ", ".join(f"{a['codigo']} {a['texto']}" for a in al) or "ninguna")
+            except ErrorFanuc as e:
+                print("Alarmas:", e)
             try:
                 progs = f.listar_programas()
                 print(f"Programas en memoria: {len(progs)}", ", ".join("O%04d" % n for n in sorted(progs)[:30]))
