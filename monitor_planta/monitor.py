@@ -1440,6 +1440,127 @@ def api_envio_probar():
     return jsonify({"ok": ok, "resultado": res})
 
 
+# ── Editor y simulación de programas CNC ─────────────────────────────────────
+# Las versiones editadas quedan en programas\editados\<MAQ>\O####_<fecha>.NC.
+# Nunca se escribe en el torno desde acá: para cargarlas se usa Enviar programa.
+EDITADOS_DIR = os.path.join(AQUI, "programas", "editados")
+
+
+@app.route("/cnc_sim.js")
+@app.route("/cnc_ui.js")
+def cnc_js():
+    resp = send_from_directory(PLANTILLAS, request.path.strip("/"), mimetype="application/javascript")
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
+def _versiones_cnc(maq):
+    import programa_nc
+    carpeta = os.path.join(EDITADOS_DIR, _nombre_seguro(maq))
+    res = []
+    try:
+        nombres = sorted(os.listdir(carpeta), reverse=True)
+    except OSError:
+        return res
+    for a in nombres:
+        mm = re.fullmatch(r"O(\d{1,8})_(\d{4}-\d\d-\d\d)_(\d\d)(\d\d)(\d\d)?\.NC", a, re.I)
+        if not mm:
+            continue
+        ruta = os.path.join(carpeta, a)
+        nota = ""
+        try:
+            with open(ruta + ".txt", encoding="utf-8") as f:
+                nota = f.read().strip()[:120]
+        except OSError:
+            pass
+        n = int(mm.group(1))
+        res.append({"archivo": a, "numero": n, "nombre": programa_nc.nombre_o(n), "nota": nota,
+                    "fecha": f"{mm.group(2)} {mm.group(3)}:{mm.group(4)}"})
+    return res[:200]
+
+
+@app.route("/api/cnc/programas")
+def api_cnc_programas():
+    import programa_nc
+    maq = str(request.args.get("maquina") or "").strip().upper()
+    if not maq:
+        return jsonify({"error": "Falta la máquina"}), 400
+    bk, carpeta = _ultimo_backup(maq)
+    progs = []
+    if bk:
+        for a in sorted(os.listdir(carpeta)):
+            mm = re.fullmatch(r"O(\d{1,8})\.NC", a, re.I)
+            if not mm:
+                continue
+            ruta = os.path.join(carpeta, a)
+            try:
+                with open(ruta, encoding="latin-1") as f:
+                    com = programa_nc.comentario(f.read(2048))
+            except OSError:
+                com = ""
+            n = int(mm.group(1))
+            progs.append({"numero": n, "nombre": programa_nc.nombre_o(n), "comentario": com, "tam": os.path.getsize(ruta)})
+    return jsonify({"maquina": maq, "backup": bk["fecha"] if bk else None, "programas": progs,
+                    "versiones": _versiones_cnc(maq)})
+
+
+@app.route("/api/cnc/abrir")
+def api_cnc_abrir():
+    import programa_nc
+    maq = str(request.args.get("maquina") or "").strip().upper()
+    ver = os.path.basename(str(request.args.get("version") or ""))
+    if ver:
+        ruta = os.path.join(EDITADOS_DIR, _nombre_seguro(maq), ver)
+        if not re.fullmatch(r"O\d{1,8}_[\d_-]+\.NC", ver, re.I) or not os.path.isfile(ruta):
+            return jsonify({"error": "No existe esa versión"}), 404
+        with open(ruta, encoding="latin-1") as f:
+            txt = f.read()
+        v = next((x for x in _versiones_cnc(maq) if x["archivo"] == ver), {})
+        return jsonify({"texto": txt.replace("\r", ""), "nombre": v.get("nombre", ver), "numero": v.get("numero"),
+                        "fecha": v.get("fecha", "")})
+    try:
+        n = int(request.args.get("numero"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Número de programa inválido"}), 400
+    bk, carpeta = _ultimo_backup(maq)
+    if not bk:
+        return jsonify({"error": f"{maq} no tiene backup: hacelo en la pestaña Backup o leé el programa del torno"}), 400
+    txt = _archivo_en_backup(carpeta, n)
+    if txt is None:
+        return jsonify({"error": f"{programa_nc.nombre_o(n)} no está en el último backup de {maq}"}), 404
+    return jsonify({"texto": txt.replace("\r", ""), "nombre": programa_nc.nombre_o(n), "numero": n, "fecha": bk["fecha"]})
+
+
+@app.route("/api/cnc/guardar", methods=["POST"])
+def api_cnc_guardar():
+    import programa_nc
+    if not es_local():
+        return jsonify({"error": "Las versiones se guardan solo desde la PC donde corre la app"}), 403
+    d = request.get_json(silent=True) or {}
+    maq = _nombre_seguro(str(d.get("maquina") or "").strip().upper())
+    try:
+        n = int(d.get("numero"))
+        if not 1 <= n <= 99999999:
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({"error": "Número de programa inválido"}), 400
+    try:
+        datos = programa_nc.preparar(str(d.get("texto") or ""), n)
+    except programa_nc.ErrorPrograma as e:
+        return jsonify({"error": str(e)}), 400
+    carpeta = os.path.join(EDITADOS_DIR, maq)
+    os.makedirs(carpeta, exist_ok=True)
+    ahora_ = datetime.now()
+    archivo = f"{programa_nc.nombre_o(n)}_{ahora_.strftime('%Y-%m-%d_%H%M%S')}.NC"
+    with open(os.path.join(carpeta, archivo), "w", encoding="ascii", newline="") as f:
+        f.write(datos)
+    nota = str(d.get("nota") or "").strip()[:200]
+    if nota:
+        with open(os.path.join(carpeta, archivo + ".txt"), "w", encoding="utf-8") as f:
+            f.write(nota)
+    return jsonify({"ok": True, "archivo": archivo, "nombre": programa_nc.nombre_o(n),
+                    "fecha": ahora_.strftime("%Y-%m-%d %H:%M")})
+
 @app.route("/api/paradas")
 def api_paradas():
     filas = get_db().execute("SELECT * FROM paradas ORDER BY id DESC LIMIT 300").fetchall()

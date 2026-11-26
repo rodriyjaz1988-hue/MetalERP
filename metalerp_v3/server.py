@@ -436,6 +436,11 @@ _LOGO_ITUZAINGO_B64 = (
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH  = os.path.join(BASE_DIR, "database", "metalerp.db")
+# Modo prueba (sandbox): base aparte, copia de la real, para practicar. Se
+# entra desde el login; la sesión marcada "sandbox" lee y escribe solo acá.
+# Los procesos de fondo (backups, dólar, reportes, alertas, Nexus) siguen
+# siempre sobre la base real.
+SANDBOX_DB_PATH = os.path.join(BASE_DIR, "database", "metalerp_sandbox.db")
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = secrets.token_hex(32)
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
@@ -818,11 +823,100 @@ class _AuditConnection(sqlite3.Connection):
         return cur
 
 
+def en_sandbox():
+    """True si la sesión actual está en el modo prueba."""
+    return has_request_context() and bool(session.get("sandbox"))
+
+
+def db_path_actual():
+    """Base de la sesión actual: la del modo prueba o la real."""
+    return SANDBOX_DB_PATH if en_sandbox() else DB_PATH
+
+
+_sandbox_lock = threading.Lock()
+_sandbox_listo = False
+
+
+def _sandbox_copiar_real():
+    """Copia la base real entera sobre la del modo prueba (API de backup de
+    SQLite: copia consistente aunque la real se esté usando)."""
+    src = sqlite3.connect(DB_PATH, timeout=30)
+    dst = sqlite3.connect(SANDBOX_DB_PATH, timeout=30)
+    try:
+        src.backup(dst)
+        dst.execute("""INSERT OR REPLACE INTO configuracion (clave,valor,descripcion)
+            VALUES ('sandbox_creado', datetime('now','localtime'), 'Cuándo se copió la base real al modo prueba')""")
+        dst.commit()
+    finally:
+        dst.close()
+        src.close()
+
+
+def _sandbox_preparar(reiniciar=False):
+    """Deja lista la base del modo prueba: la crea copiando la real si no
+    existe (o si se pide reiniciar) y le aplica las migraciones pendientes."""
+    global _sandbox_listo
+    with _sandbox_lock:
+        if reiniciar or not os.path.exists(SANDBOX_DB_PATH):
+            _sandbox_copiar_real()
+            _sandbox_listo = False
+        if not _sandbox_listo:
+            init_db(SANDBOX_DB_PATH)
+            _sandbox_listo = True
+
+
+def _sandbox_sync_usuario(username, password):
+    """Modo prueba: entra cualquier usuario de la base REAL, aunque se haya
+    creado (o cambiado su contraseña o rol) después de la copia. Si el usuario
+    y la contraseña son válidos en la real, se copia/actualiza en la de prueba
+    (con su rol). Devuelve True si lo encontró y validó en la real."""
+    real = sqlite3.connect(DB_PATH, timeout=30)
+    real.row_factory = sqlite3.Row
+    sbx = sqlite3.connect(SANDBOX_DB_PATH, timeout=30)
+    sbx.row_factory = sqlite3.Row
+    try:
+        u = real.execute("SELECT * FROM usuarios WHERE username=? AND activo=1", (username,)).fetchone()
+        if not u or u["password"] != hash_pw(password):
+            return False
+        rol = real.execute("SELECT * FROM roles WHERE nombre=?", (u["rol"],)).fetchone()
+        if rol and not sbx.execute("SELECT 1 FROM roles WHERE nombre=?", (u["rol"],)).fetchone():
+            cols_r = [c for c in rol.keys() if c != "id" and c in
+                      {r[1] for r in sbx.execute("PRAGMA table_info(roles)")}]
+            sbx.execute(f"INSERT INTO roles ({','.join(cols_r)}) VALUES ({','.join('?' * len(cols_r))})",
+                        [rol[c] for c in cols_r])
+        cols_s = {r[1] for r in sbx.execute("PRAGMA table_info(usuarios)")}
+        cols = [c for c in u.keys() if c in cols_s and c not in ("id", "username", "creado")]
+        ya = sbx.execute("SELECT id FROM usuarios WHERE username=?", (username,)).fetchone()
+        if ya:
+            sbx.execute(f"UPDATE usuarios SET {', '.join(c + '=?' for c in cols)} WHERE id=?",
+                        [u[c] for c in cols] + [ya["id"]])
+        else:
+            ins = ["username"] + cols
+            vals = [username] + [u[c] for c in cols]
+            if not sbx.execute("SELECT 1 FROM usuarios WHERE id=?", (u["id"],)).fetchone():
+                ins, vals = ["id"] + ins, [u["id"]] + vals
+            sbx.execute(f"INSERT INTO usuarios ({','.join(ins)}) VALUES ({','.join('?' * len(ins))})", vals)
+        sbx.commit()
+        return True
+    finally:
+        sbx.close()
+        real.close()
+
+
+def _cerrar_db_request():
+    db = g.pop("db", None)
+    if db is not None:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+
 def get_db():
     if "db" not in g:
         # timeout=30 -> si la DB esta bloqueada por otra conexion (varios
         # operarios en simultaneo), espera hasta 30s en vez de fallar al toque
-        g.db = sqlite3.connect(DB_PATH, timeout=30, factory=_AuditConnection)
+        g.db = sqlite3.connect(db_path_actual(), timeout=30, factory=_AuditConnection)
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA foreign_keys = ON")
         # WAL permite que lecturas y escrituras convivan sin bloquearse entre si,
@@ -1331,6 +1425,15 @@ def hash_pw(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 
 ROLES_BASE = ("admin", "operario", "vendedor", "almacen", "logistica")
+# Roles creados desde Configuración (paco, 2026-11-25): ya no se basan en otro
+# rol. Quedan con base "personalizado": ven los módulos que tengan tildados y
+# en ellos pueden hacer todo lo que puede cualquier rol que no sea admin. Lo
+# exclusivo de administrador (usuarios, roles, configuración...) no.
+ROL_PERSONALIZADO = "personalizado"
+
+
+def _rol_personalizado_pasa(roles):
+    return any(r != "admin" for r in roles)
 
 def _rol_row(nombre):
     try:
@@ -1369,6 +1472,9 @@ def _permisos_sesion():
     # hereda lo de Compras (ídem _permMod en app.html).
     if "mod_indicadores_compras" not in perms and "mod_solicitudes" in perms:
         perms["mod_indicadores_compras"] = perms["mod_solicitudes"]
+    # "Horas por cliente" (2026-11) hereda lo de Rendimiento operarios.
+    if "mod_horas_cliente" not in perms and "mod_rendimiento" in perms:
+        perms["mod_horas_cliente"] = perms["mod_rendimiento"]
     return perms
 
 
@@ -1403,7 +1509,8 @@ def login_required(roles=None):
                 if request.path.startswith("/api/"):
                     return jsonify({"error": "Sesión expirada, volvé a iniciar sesión."}), 401
                 return redirect("/login")
-            if roles and session.get("rol") not in roles:
+            if roles and session.get("rol") not in roles and not (
+                    session.get("rol") == ROL_PERSONALIZADO and _rol_personalizado_pasa(roles)):
                 return jsonify({"error": "Sin permiso"}), 403
             return f(*a, **kw)
         return wrapped
@@ -1437,8 +1544,12 @@ CAMPOS_MONETARIOS = frozenset({
     # Facturación
     "facturacion", "facturacion_mes", "facturacion_historico",
     "facturado", "total_facturado",
+    # Activos
+    "valor_maquina",
     # Configuración con contenido monetario
     "valor_hora_mo",
+    # Proyectos (2026-11-25)
+    "presupuesto_monto", "monto_comprometido", "monto_recibido", "monto_cotizado",
 })
 
 # Columnas/claves que el patrón de nombres marca como sospechosas pero NO son
@@ -1600,6 +1711,7 @@ CREATE TABLE IF NOT EXISTS maquinas (
     ubicacion TEXT,
     estado TEXT DEFAULT 'Operativa',
     horas_uso REAL DEFAULT 0,
+    valor_maquina REAL DEFAULT 0,
     obs TEXT,
     creado TEXT DEFAULT (datetime('now','localtime'))
 );
@@ -1694,6 +1806,13 @@ CREATE TABLE IF NOT EXISTS categorias_producto (
     creado TEXT DEFAULT (datetime('now','localtime'))
 );
 
+CREATE TABLE IF NOT EXISTS categorias_proveedor (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT UNIQUE NOT NULL,
+    descripcion TEXT,
+    creado TEXT DEFAULT (datetime('now','localtime'))
+);
+
 CREATE TABLE IF NOT EXISTS proveedores (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     razon TEXT NOT NULL,
@@ -1707,7 +1826,8 @@ CREATE TABLE IF NOT EXISTS proveedores (
     estado TEXT DEFAULT 'Activo',
     obs TEXT,
     creado TEXT DEFAULT (datetime('now','localtime')),
-    categoria_compra TEXT
+    categoria_compra TEXT,
+    categoria_proveedor_id INTEGER REFERENCES categorias_proveedor(id)
 );
 
 CREATE TABLE IF NOT EXISTS materiales (
@@ -1739,6 +1859,7 @@ CREATE TABLE IF NOT EXISTS materiales (
     peso_kg REAL DEFAULT 0,
     capacidad_cajon INTEGER,
     piezas_bulto INTEGER,
+    imagen TEXT,
     creado TEXT DEFAULT (datetime('now','localtime'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_materiales_producto_categoria_sinop ON materiales(producto_id, categoria) WHERE producto_id IS NOT NULL AND operacion_id IS NULL;
@@ -1764,6 +1885,7 @@ SELECT id,
        piezas_bulto,
        CASE WHEN categoria='Producto terminado' THEN 'PT' END AS tipo,
        codigo_barras,
+       imagen,
        categoria              AS tipo_articulo
 FROM materiales;
 CREATE TRIGGER IF NOT EXISTS trg_materiales_pt_alta
@@ -1813,6 +1935,35 @@ CREATE TABLE IF NOT EXISTS clientes (
     trabajos TEXT,
     obs TEXT,
     creado TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS categorias_cliente (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT UNIQUE NOT NULL,
+    creado TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS campanas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT,
+    motivo TEXT,
+    asunto TEXT NOT NULL,
+    cuerpo TEXT NOT NULL,
+    enviados INTEGER DEFAULT 0,
+    errores INTEGER DEFAULT 0,
+    creado_por INTEGER REFERENCES usuarios(id),
+    creado TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS campana_envios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campana_id INTEGER NOT NULL REFERENCES campanas(id) ON DELETE CASCADE,
+    cliente_id INTEGER REFERENCES clientes(id),
+    email TEXT,
+    motivo TEXT,
+    estado TEXT DEFAULT 'Enviado',
+    error TEXT,
+    fecha TEXT DEFAULT (datetime('now','localtime'))
 );
 
 CREATE TABLE IF NOT EXISTS proceso_operaciones (
@@ -1977,9 +2128,23 @@ CREATE TABLE IF NOT EXISTS bultos (
     nro INTEGER NOT NULL,
     cantidad REAL NOT NULL,
     remito_item_id INTEGER REFERENCES remito_items(id),
+    aprobado_por INTEGER REFERENCES usuarios(id),
+    aprobado_fecha TEXT,
     creado TEXT DEFAULT (datetime('now','localtime'))
 );
 CREATE INDEX IF NOT EXISTS idx_bultos_orden ON bultos(orden_id);
+
+-- Cajones de un bulto aceptado en Lotes → Bultos (2026-11-20): al aceptar se
+-- fijan los cajones (y cuántas piezas de cada uno) que arman el bulto; esas
+-- piezas quedan apartadas para ese bulto hasta que se remita.
+CREATE TABLE IF NOT EXISTS bulto_cajon_asig (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bulto_id INTEGER NOT NULL REFERENCES bultos(id) ON DELETE CASCADE,
+    cajon_id INTEGER NOT NULL REFERENCES cajones(id),
+    cantidad REAL NOT NULL CHECK(cantidad > 0)
+);
+CREATE INDEX IF NOT EXISTS idx_bulto_cajon_asig_bulto ON bulto_cajon_asig(bulto_id);
+CREATE INDEX IF NOT EXISTS idx_bulto_cajon_asig_cajon ON bulto_cajon_asig(cajon_id);
 
 CREATE TABLE IF NOT EXISTS presupuestos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2265,7 +2430,54 @@ CREATE TABLE IF NOT EXISTS solicitudes_compra (
     obs TEXT,
     creado TEXT DEFAULT (datetime('now','localtime')),
     ott_id INTEGER REFERENCES ordenes_tercerizado(id),
-    ott_remito TEXT
+    ott_remito TEXT,
+    proyecto_id INTEGER REFERENCES proyectos(id),
+    descripcion_compra TEXT
+);
+
+CREATE TABLE IF NOT EXISTS proyectos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    numero TEXT UNIQUE NOT NULL,
+    nombre TEXT NOT NULL,
+    cliente_id INTEGER REFERENCES clientes(id),
+    responsable TEXT,
+    fecha_inicio TEXT,
+    fecha_fin TEXT,
+    presupuesto_monto REAL DEFAULT 0,
+    estado TEXT DEFAULT 'Activo',
+    descripcion TEXT,
+    creado_por INTEGER REFERENCES usuarios(id),
+    creado TEXT DEFAULT (datetime('now','localtime')),
+    tipo TEXT DEFAULT 'Producción',
+    solicitante TEXT,
+    area TEXT,
+    destinatario TEXT,
+    referencia TEXT,
+    notas TEXT,
+    cierre_solicitante TEXT,
+    cierre_solicitante_valido INTEGER DEFAULT 0,
+    cierre_solicitante_fecha TEXT,
+    cierre_calidad TEXT,
+    cierre_calidad_valido INTEGER DEFAULT 0,
+    cierre_calidad_fecha TEXT
+);
+
+CREATE TABLE IF NOT EXISTS proyecto_acciones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    proyecto_id INTEGER NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
+    orden INTEGER DEFAULT 0,
+    fecha_compromiso TEXT,
+    accion TEXT NOT NULL,
+    responsable TEXT,
+    fecha_verificacion TEXT
+);
+
+CREATE TABLE IF NOT EXISTS proyecto_productos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    proyecto_id INTEGER NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
+    producto_id INTEGER NOT NULL REFERENCES materiales(id),
+    cantidad REAL DEFAULT 0,
+    obs TEXT
 );
 
 CREATE TABLE IF NOT EXISTS cotizaciones_compra (
@@ -2841,7 +3053,7 @@ def _backfill_remitos_ott_cantidad(db):
 #      mismo cambio sobre una base existente (por ejemplo un ALTER TABLE).
 #   3. Subir ESQUEMA_VERSION a ese número.
 # Cada migración corre una sola vez por base.
-ESQUEMA_VERSION = 23
+ESQUEMA_VERSION = 33
 
 
 def _agregar_columna(db, tabla, columna, tipo):
@@ -3272,6 +3484,17 @@ def _deshacer_bultos_v22_filas(db):
         db.execute("UPDATE cajones SET estado=?, numero=? WHERE id=?", (estado, numero, c["id"]))
 
 
+def _migracion_33(db):
+    """Proyectos = Plan de Mejora Continua (form. F-8.5.1-00, paco 26/11/2026)."""
+    for col, tipo in (("solicitante", "TEXT"), ("area", "TEXT"), ("destinatario", "TEXT"),
+                      ("referencia", "TEXT"), ("notas", "TEXT"),
+                      ("cierre_solicitante", "TEXT"), ("cierre_solicitante_valido", "INTEGER DEFAULT 0"),
+                      ("cierre_solicitante_fecha", "TEXT"), ("cierre_calidad", "TEXT"),
+                      ("cierre_calidad_valido", "INTEGER DEFAULT 0"), ("cierre_calidad_fecha", "TEXT")):
+        _agregar_columna(db, "proyectos", col, tipo)
+    _crear_tabla_de_schema(db, "proyecto_acciones")
+
+
 MIGRACIONES = {
     2: _migracion_2,
     3: lambda db: _crear_tabla_de_schema(db, "pedidos_cotizacion"),
@@ -3297,7 +3520,56 @@ MIGRACIONES = {
     21: _migracion_21,
     22: lambda db: None,   # cajones físicos + bultos (17/11/2026), deshecho por la 23
     23: _migracion_23,
+    24: lambda db: (_agregar_columna(db, "bultos", "aprobado_por", "INTEGER"),
+                    _agregar_columna(db, "bultos", "aprobado_fecha", "TEXT"),
+                    _crear_tabla_de_schema(db, "bulto_cajon_asig")),
+    25: lambda db: _mig_recalcular_cumple_fecha(db),
+    26: lambda db: _mig_imagen_producto(db),
+    27: lambda db: _agregar_columna(db, "maquinas", "valor_maquina", "REAL DEFAULT 0"),
+    28: lambda db: (_crear_tabla_de_schema(db, "proyectos"),
+                    _agregar_columna(db, "solicitudes_compra", "proyecto_id", "INTEGER REFERENCES proyectos(id)")),
+    29: lambda db: (_agregar_columna(db, "proyectos", "tipo", "TEXT DEFAULT 'Producción'"),
+                    _crear_tabla_de_schema(db, "proyecto_productos")),
+    30: lambda db: _agregar_columna(db, "solicitudes_compra", "descripcion_compra", "TEXT"),
+    31: lambda db: (_crear_tabla_de_schema(db, "categorias_cliente"),
+                    _crear_tabla_de_schema(db, "campanas"),
+                    _crear_tabla_de_schema(db, "campana_envios")),
+    32: lambda db: (_crear_tabla_de_schema(db, "categorias_proveedor"),
+                    _agregar_columna(db, "proveedores", "categoria_proveedor_id",
+                                     "INTEGER REFERENCES categorias_proveedor(id)")),
+    33: _migracion_33,
 }
+
+
+def _mig_recalcular_cumple_fecha(db):
+    """v25 (paco, 2026-11-20): los requerimientos viejos traídos del Excel
+    tenían "a tiempo" con otro criterio (hasta 9 días tarde figuraban a
+    tiempo, y algunos figuraban tarde sin fecha estimada). Se recalcula
+    cumple_fecha de TODOS los entregados con el mismo criterio del sistema:
+    a tiempo = f_entrega <= f_estimada; sin f_estimada = sin dato (NULL).
+    Los valores anteriores quedan en rp_cumple_fecha_previo para poder
+    volver atrás."""
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='requerimientos_productivos'").fetchone():
+        return
+    db.execute("""CREATE TABLE IF NOT EXISTS rp_cumple_fecha_previo (
+        rp_id INTEGER PRIMARY KEY, cumple_fecha_anterior INTEGER,
+        fecha TEXT DEFAULT (datetime('now','localtime')))""")
+    nuevo = """CASE WHEN f_estimada IS NULL OR trim(f_estimada)='' THEN NULL
+                    WHEN substr(f_entrega,1,10) <= substr(f_estimada,1,10) THEN 1 ELSE 0 END"""
+    db.execute(f"""INSERT OR IGNORE INTO rp_cumple_fecha_previo (rp_id, cumple_fecha_anterior)
+        SELECT id, cumple_fecha FROM requerimientos_productivos
+        WHERE f_entrega IS NOT NULL AND trim(f_entrega)!='' AND cumple_fecha IS NOT ({nuevo})""")
+    db.execute(f"""UPDATE requerimientos_productivos SET cumple_fecha = {nuevo}
+        WHERE f_entrega IS NOT NULL AND trim(f_entrega)!='' AND cumple_fecha IS NOT ({nuevo})""")
+
+
+def _mig_imagen_producto(db):
+    """v26: imagen del producto. La columna guarda el nombre del archivo dentro
+    de imagenes_productos/. La vista `productos` lista sus columnas a mano, así
+    que se la borra para que _actualizar_esquema la recree desde el SCHEMA con
+    la columna nueva."""
+    _agregar_columna(db, "materiales", "imagen", "TEXT")
+    db.execute("DROP VIEW IF EXISTS productos")
 
 
 def _completar_columnas(db):
@@ -3424,9 +3696,10 @@ def _deshacer_situacion_pedidos(db):
     print("[base] Se sacó la situación de pedidos (versión 18 -> 17); el texto quedó en observaciones.")
 
 
-def init_db():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    db = sqlite3.connect(DB_PATH)
+def init_db(path=None):
+    path = path or DB_PATH
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    db = sqlite3.connect(path)
     db.row_factory = sqlite3.Row
 
     nueva = not db.execute(
@@ -3827,14 +4100,45 @@ def guardar_version_producto(prod_id, motivo=None, creado_por=None):
 def login():
     if request.method == "POST":
         d = request.get_json(silent=True) or request.form
+        # Modo prueba: botón aparte en el login. Se elige la base ANTES de
+        # buscar el usuario (los usuarios son los de la copia).
+        sandbox = str(d.get("sandbox", "")).lower() in ("1", "true", "on", "si")
+        session.clear()
+        _cerrar_db_request()
+        if sandbox:
+            try:
+                _sandbox_preparar()
+                _sandbox_sync_usuario(d.get("username", ""), d.get("password", ""))
+            except Exception as e:
+                msg = f"No se pudo preparar el modo prueba: {e}"
+                if request.is_json: return jsonify({"ok": False, "error": msg}), 500
+                return render_template("login.html")
+            session["sandbox"] = True
         user = query("SELECT * FROM usuarios WHERE username=? AND activo=1", (d.get("username",""),), one=True)
         if user and user["password"] == hash_pw(d.get("password","")):
             session.update({"user_id":user["id"],"username":user["username"],"nombre":user["nombre"],
                             "rol":_rol_base(user["rol"]),"rol_nombre":user["rol"]})
-            if request.is_json: return jsonify({"ok":True,"rol":_rol_base(user["rol"]),"rol_nombre":user["rol"],"nombre":user["nombre"]})
+            if request.is_json: return jsonify({"ok":True,"rol":_rol_base(user["rol"]),"rol_nombre":user["rol"],"nombre":user["nombre"],"sandbox":sandbox})
             return redirect("/")
+        session.pop("sandbox", None)
         if request.is_json: return jsonify({"ok":False,"error":"Usuario o contraseña incorrectos"}), 401
     return render_template("login.html")
+
+
+@app.route("/api/sandbox/reiniciar", methods=["POST"])
+@login_required(roles=["admin"])
+def sandbox_reiniciar():
+    """Modo prueba: vuelve a copiar la base real encima de la de prueba (se
+    pierde todo lo hecho en el modo prueba). Después hay que volver a entrar."""
+    if not en_sandbox():
+        return jsonify({"error": "Solo desde el modo prueba"}), 400
+    _cerrar_db_request()
+    try:
+        _sandbox_preparar(reiniciar=True)
+    except Exception as e:
+        return jsonify({"error": f"No se pudo reiniciar el modo prueba: {e}"}), 500
+    session.clear()
+    return jsonify({"ok": True})
 
 @app.route("/logout")
 def logout(): session.clear(); return redirect("/login")
@@ -3854,7 +4158,9 @@ def index():
                           perms=perms,
                           ver_monetario=ver_mon,
                           ia=puede_usar_ia(),
-                          moneda=moneda_sistema())
+                          moneda=moneda_sistema(),
+                          sandbox=en_sandbox(),
+                          sandbox_creado=(get_config_valor("sandbox_creado", "") if en_sandbox() else ""))
 
 
 
@@ -3984,6 +4290,159 @@ def dashboard_graficos():
         "atrasadas": [dict(r) for r in atr],
     })
 
+# ── Indicadores: horas trabajadas por cliente ─────────────────────────────────
+# Horas = tiempo_real_min de las novedades de producción. El cliente de cada
+# OT sale de la OT; si no lo tiene, del pedido de cliente o del pronóstico de
+# venta al que está ligada. Sin nada de eso cuenta como "Sin cliente (stock)".
+_HC_CLIENTE = """COALESCE(NULLIF(o.cliente_id,0),
+    (SELECT oc.cliente_id FROM ordenes_cliente_items i JOIN ordenes_cliente oc ON oc.id=i.orden_cliente_id
+      WHERE i.ot_id=o.id AND oc.cliente_id IS NOT NULL LIMIT 1),
+    (SELECT oc.cliente_id FROM orden_cliente_item_ots x JOIN ordenes_cliente_items i ON i.id=x.item_id
+      JOIN ordenes_cliente oc ON oc.id=i.orden_cliente_id WHERE x.ot_id=o.id AND oc.cliente_id IS NOT NULL LIMIT 1),
+    (SELECT pv.cliente_id FROM pronostico_item_ots x JOIN pronostico_venta_items i ON i.id=x.item_id
+      JOIN pronosticos_venta pv ON pv.id=i.pronostico_id WHERE x.ot_id=o.id AND pv.cliente_id IS NOT NULL LIMIT 1))"""
+# Ciclo estándar (segundos por pieza), mismo criterio que el rendimiento.
+_HC_CICLO = "COALESCE(NULLIF(oo.tiempo_ciclo_seg,0), NULLIF(po.tiempo_ciclo_seg,0), 60)"
+
+
+def _hc_fecha(txt, defecto):
+    try:
+        return date.fromisoformat((txt or "")[:10])
+    except ValueError:
+        return defecto
+
+
+@app.route("/api/indicadores/horas_cliente")
+@login_required()
+@modulo_requerido("horas_cliente")
+def indicadores_horas_cliente():
+    hoy = date.today()
+    desde = _hc_fecha(request.args.get("desde"), hoy.replace(day=1))
+    hasta = _hc_fecha(request.args.get("hasta"), hoy)
+    if hasta < desde:
+        desde, hasta = hasta, desde
+    dias = (hasta - desde).days + 1
+    ant_h = desde - timedelta(days=1)
+    ant_d = ant_h - timedelta(days=dias - 1)
+    cli_arg = (request.args.get("cliente") or "").strip()
+
+    base = f"""SELECT n.id, n.orden_id, n.empleado_id, n.cantidad_producida qty,
+                COALESCE(n.tiempo_real_min,0) tmin, substr(n.fecha,1,10) f,
+                COALESCE(n.maquina_id, oo.maquina_id) maq_id, oo.nombre op_nombre,
+                {_HC_CICLO} ciclo, {_HC_CLIENTE} cli
+            FROM novedades_produccion n
+            JOIN ordenes o ON o.id=n.orden_id
+            LEFT JOIN orden_operaciones oo ON oo.id=n.orden_operacion_id
+            LEFT JOIN proceso_operaciones po ON po.id=oo.proceso_op_id"""
+    pend_sql = f"""SELECT o.id orden_id, {_HC_CLIENTE} cli,
+                SUM(MAX(COALESCE(oo.qty_requerida,o.cantidad,0)-COALESCE(oo.qty_producida,0),0)*{_HC_CICLO}/60.0
+                    + CASE WHEN COALESCE(oo.qty_producida,0)=0 THEN COALESCE(oo.tiempo_setup_min,0) ELSE 0 END) pmin
+            FROM ordenes o JOIN orden_operaciones oo ON oo.orden_id=o.id
+            LEFT JOIN proceso_operaciones po ON po.id=oo.proceso_op_id
+            WHERE o.estado NOT IN ('Completada','Cancelada') AND COALESCE(oo.es_tercerizada,0)=0
+              AND COALESCE(oo.estado,'') NOT IN ('Completada','Terminada')
+            GROUP BY o.id"""
+    nombres = {r["id"]: r for r in query("SELECT id, razon, categoria FROM clientes")}
+
+    def _clave(cli):
+        return cli if cli in nombres else None
+
+    if cli_arg:
+        # ── Detalle de un cliente ("sin" = sin cliente) ──
+        if cli_arg != "sin" and not cli_arg.isdigit():
+            return jsonify({"error": "Cliente inválido"}), 400
+        objetivo = None if cli_arg == "sin" else int(cli_arg)
+        novs = [r for r in query(f"SELECT * FROM ({base}) WHERE f BETWEEN ? AND ?",
+                                 (desde.isoformat(), hasta.isoformat()))
+                if _clave(r["cli"]) == objetivo]
+        pend = {r["orden_id"]: float(r["pmin"] or 0) for r in query(pend_sql) if _clave(r["cli"]) == objetivo}
+        ots_ids = set(r["orden_id"] for r in novs) | set(pend)
+        info = {}
+        if ots_ids:
+            marcas = ",".join("?" * len(ots_ids))
+            info = {r["id"]: r for r in query(f"""SELECT o.id, o.numero, o.estado, o.cantidad, o.fecha_entrega,
+                    COALESCE(p.codigo,'') pcod, COALESCE(p.nombre, o.descripcion, '') pnom
+                FROM ordenes o LEFT JOIN productos p ON p.id=o.producto_id WHERE o.id IN ({marcas})""", tuple(ots_ids))}
+        maqs = {r["id"]: (r["codigo"] or r["nombre"] or "") for r in query("SELECT id, codigo, nombre FROM maquinas")}
+        emps = {r["id"]: ((r["nombre"] or "") + " " + (r["apellido"] or "")).strip()
+                for r in query("SELECT id, nombre, apellido FROM empleados")}
+        por_ot, por_maq, por_emp, por_op = {}, {}, {}, {}
+        for r in novs:
+            t = float(r["tmin"]); std = float(r["qty"] or 0) * float(r["ciclo"] or 60) / 60.0
+            d = por_ot.setdefault(r["orden_id"], {"minutos": 0.0, "std": 0.0, "piezas": 0.0, "novedades": 0})
+            d["minutos"] += t; d["std"] += std; d["novedades"] += 1
+            k = maqs.get(r["maq_id"]) or "Sin máquina"
+            por_maq[k] = por_maq.get(k, 0.0) + t
+            k = emps.get(r["empleado_id"]) or "Sin operario"
+            por_emp[k] = por_emp.get(k, 0.0) + t
+            k = (r["op_nombre"] or "Sin operación").strip()
+            por_op[k] = por_op.get(k, 0.0) + t
+        ots = []
+        for oid in ots_ids:
+            d = por_ot.get(oid, {"minutos": 0.0, "std": 0.0, "novedades": 0})
+            o = info.get(oid)
+            ots.append({"id": oid, "numero": o["numero"] if o else "", "estado": o["estado"] if o else "",
+                        "cantidad": o["cantidad"] if o else 0, "entrega": o["fecha_entrega"] if o else "",
+                        "producto": ((o["pcod"] + " " if o and o["pcod"] else "") + (o["pnom"] if o else "")).strip(),
+                        "minutos": round(d["minutos"], 1), "std": round(d["std"], 1), "novedades": d["novedades"],
+                        "pend_min": round(pend.get(oid, 0.0), 1)})
+        ots.sort(key=lambda x: (-x["minutos"], -x["pend_min"]))
+
+        def _lista(dic):
+            return [{"nombre": k, "minutos": round(v, 1)} for k, v in sorted(dic.items(), key=lambda kv: -kv[1])]
+        return jsonify({"ots": ots, "maquinas": _lista(por_maq), "operarios": _lista(por_emp),
+                        "operaciones": _lista(por_op)})
+
+    # ── Resumen por cliente ──
+    # Tendencia: los 6 meses que terminan en el mes de "hasta".
+    meses = []
+    m1 = hasta.replace(day=1)
+    for _ in range(6):
+        meses.insert(0, m1.strftime("%Y-%m"))
+        m1 = (m1 - timedelta(days=1)).replace(day=1)
+    lim_d = min(desde, ant_d, date.fromisoformat(meses[0] + "-01")).isoformat()
+    filas = query(f"SELECT * FROM ({base}) WHERE f BETWEEN ? AND ?", (lim_d, hasta.isoformat()))
+    d_iso, h_iso, ad_iso, ah_iso = desde.isoformat(), hasta.isoformat(), ant_d.isoformat(), ant_h.isoformat()
+    res = {}
+
+    def _fila(k):
+        if k not in res:
+            c = nombres.get(k)
+            res[k] = {"cliente_id": k, "cliente": (c["razon"] if c else "") or ("Sin cliente (stock)" if k is None else "Cliente #%s" % k),
+                      "categoria": (c["categoria"] if c else "") or "", "minutos": 0.0, "std": 0.0, "piezas": 0.0,
+                      "novedades": 0, "ots": set(), "operarios": set(), "ultima": "", "ant_min": 0.0,
+                      "por_mes": [0.0] * len(meses), "pend_min": 0.0, "pend_ots": 0}
+        return res[k]
+    for r in filas:
+        k = _clave(r["cli"]); f = r["f"] or ""; t = float(r["tmin"])
+        if d_iso <= f <= h_iso:
+            d = _fila(k)
+            d["minutos"] += t
+            d["std"] += float(r["qty"] or 0) * float(r["ciclo"] or 60) / 60.0
+            d["piezas"] += float(r["qty"] or 0)
+            d["novedades"] += 1
+            d["ots"].add(r["orden_id"])
+            if r["empleado_id"]: d["operarios"].add(r["empleado_id"])
+            if f > d["ultima"]: d["ultima"] = f
+        if ad_iso <= f <= ah_iso:
+            _fila(k)["ant_min"] += t
+        if f[:7] in meses:
+            _fila(k)["por_mes"][meses.index(f[:7])] += t
+    for r in query(pend_sql):
+        pm = float(r["pmin"] or 0)
+        if pm > 0:
+            d = _fila(_clave(r["cli"])); d["pend_min"] += pm; d["pend_ots"] += 1
+    out = []
+    for d in res.values():
+        d["ots"] = len(d["ots"]); d["operarios"] = len(d["operarios"])
+        for c in ("minutos", "std", "ant_min", "pend_min"):
+            d[c] = round(d[c], 1)
+        d["por_mes"] = [round(x, 1) for x in d["por_mes"]]
+        out.append(d)
+    out.sort(key=lambda x: (-x["minutos"], -x["pend_min"], x["cliente"]))
+    return jsonify({"desde": d_iso, "hasta": h_iso, "ant_desde": ad_iso, "ant_hasta": ah_iso,
+                    "meses": meses, "clientes": out})
+
 # ── Dashboard operativo (producción, calidad, inventario) ─────────────────────
 @app.route("/api/dashboard/operativo")
 @login_required()
@@ -4074,11 +4533,14 @@ def _clasificar_material_proceso_texto(valor):
 
 def _clasificar_requerimiento(material_proceso, categoria_compra_proveedor):
     """Categoría amplia de un requerimiento para los gráficos del dashboard.
-    Prioridad: categoria_compra del proveedor (fuente confiable, como en el
-    Excel original) > heurístico por texto de material_proceso (respaldo)."""
+    Sale SOLO de la categoria_compra actual del proveedor (pedido de paco,
+    2026-11-20): si se la cambian, el renglón pasa a la otra categoría; si se
+    la sacan, queda en SIN CATEGORÍA. Ya no se adivina por el texto de
+    material_proceso (eso lo dejaba en la categoría vieja, p. ej. "ZINCADO"
+    seguía en Tratamiento superficial aunque el proveedor no la tuviera)."""
     if categoria_compra_proveedor:
         return categoria_compra_proveedor
-    return _clasificar_material_proceso_texto(material_proceso)
+    return "SIN CATEGORÍA"
 
 
 # ── Calidad de un requerimiento productivo, en base al LOTE real de stock ────
@@ -4113,19 +4575,26 @@ def _calidad_requerimientos_bulk(rows):
     origen_ids = sorted({r["origen_item_id"] for r in rows if r["origen_item_id"]})
     numeros = sorted({r["numero"] for r in rows if r["numero"]})
 
+    # Lo rechazado que ya se DEVOLVIÓ al proveedor sale del lote
+    # (lotes.cantidad_rechazada baja), pero sigue siendo un incidente de
+    # calidad del proveedor: se suma aparte (2026-11-20).
     lote_by_origen = {}
+    dev_by_origen = {}
     if origen_ids:
         ph = ",".join("?" * len(origen_ids))
-        for oci in query(f"SELECT id, lote_id FROM ordenes_compra_items WHERE id IN ({ph})", tuple(origen_ids)):
+        for oci in query(f"SELECT id, lote_id, cantidad_rechazada_devuelta FROM ordenes_compra_items WHERE id IN ({ph})", tuple(origen_ids)):
             if oci["lote_id"]:
                 lote_by_origen[oci["id"]] = oci["lote_id"]
+            dev_by_origen[oci["id"]] = float(oci["cantidad_rechazada_devuelta"] or 0)
 
     lote_by_numero = {}
+    dev_by_numero = {}
     if numeros:
         ph = ",".join("?" * len(numeros))
-        for ott in query(f"SELECT numero, lote_retorno_id FROM ordenes_tercerizado WHERE numero IN ({ph})", tuple(numeros)):
+        for ott in query(f"SELECT numero, lote_retorno_id, cantidad_rechazada_devuelta FROM ordenes_tercerizado WHERE numero IN ({ph})", tuple(numeros)):
             if ott["lote_retorno_id"]:
                 lote_by_numero[ott["numero"]] = ott["lote_retorno_id"]
+            dev_by_numero[ott["numero"]] = float(ott["cantidad_rechazada_devuelta"] or 0)
 
     lote_ids = sorted(set(lote_by_origen.values()) | set(lote_by_numero.values()))
     lotes_info = {}
@@ -4139,15 +4608,19 @@ def _calidad_requerimientos_bulk(rows):
     for r in rows:
         lote_id = lote_by_origen.get(r["origen_item_id"]) or lote_by_numero.get(r["numero"])
         lote = lotes_info.get(lote_id) if lote_id else None
+        devuelto = (dev_by_origen.get(r["origen_item_id"]) if lote_by_origen.get(r["origen_item_id"])
+                    else dev_by_numero.get(r["numero"])) or 0.0
         if lote:
-            if lote["estado"] in ("Aprobado", "Rechazado", "Agotado"):
+            if lote["estado"] in ("Aprobado", "Rechazado", "Agotado") or devuelto > 0.0001:
+                # Con algo devuelto ya hubo decisión de Calidad (se rechazó),
+                # aunque el lote haya vuelto a 'Ingresado' esperando reposición.
                 orig = float(lote["cantidad_original"] or 0)
                 # Se mide por lo RECHAZADO, no por lo que queda en stock:
                 # cantidad_activa tambien baja al consumir el lote (remitos,
                 # novedades), asi que usarla hacia que un lote impecable ya
                 # usado contara como incidente de calidad. cantidad_rechazada
                 # solo la mueve Calidad.
-                rech = float(lote["cantidad_rechazada"] or 0)
+                rech = float(lote["cantidad_rechazada"] or 0) + devuelto
                 pct = max(0.0, 1.0 - (rech / orig)) if orig > 0 else 0.0
                 out[r["id"]] = {"evaluable": True, "aprobado": 1 if pct >= 0.95 else 0,
                                  "origen": "lote", "lote_estado": lote["estado"], "lote_pct": round(pct, 4)}
@@ -4371,7 +4844,8 @@ def dashboard_indicadores_compras():
     rows = query("""SELECT rp.*, p.razon proveedor_nombre, p.categoria_compra
         FROM requerimientos_productivos rp
         JOIN proveedores p ON p.id=rp.proveedor_id
-        WHERE rp.f_entrega IS NOT NULL AND substr(rp.f_entrega,1,4)=?""", (anio,))
+        WHERE rp.f_entrega IS NOT NULL AND substr(rp.f_entrega,1,4)=?
+          AND COALESCE(rp.estado,'')!='ANULADO'""", (anio,))
     rows = [dict(r) for r in rows]
     for d in rows:
         d["_categoria"] = _clasificar_requerimiento(d.get("material_proceso"), d.get("categoria_compra"))
@@ -4387,12 +4861,15 @@ def dashboard_indicadores_compras():
 
     def calc_indicadores(items):
         meses = []
-        tot_entregados = tot_a_tiempo = tot_aprobados = tot_evaluados = tot_pendientes = 0
+        tot_entregados = tot_a_tiempo = tot_aprobados = tot_evaluados = tot_pendientes = tot_con_fecha = 0
         for m in range(1, 13):
             ym = f"{anio}-{m:02d}"
             grupo = [d for d in items if str(d["f_entrega"])[:7] == ym]
             entregados = len(grupo)
             a_tiempo = sum(1 for d in grupo if d.get("cumple_fecha") == 1)
+            # Sin fecha estimada no se puede saber si llegó a tiempo: no
+            # entra al CE (antes contaba como tarde).
+            con_fecha = sum(1 for d in grupo if d.get("cumple_fecha") is not None)
             # "Aprobados"/"Incidentes" sólo salen de los evaluables (lote con decisión
             # de Calidad, o sin lote vinculado con fallback manual). Los que tienen
             # lote todavía 'Ingresado' quedan afuera y se cuentan como "pendientes".
@@ -4401,22 +4878,22 @@ def dashboard_indicadores_compras():
             n_eval = len(evaluados)
             incidentes = n_eval - aprobados
             pendientes = entregados - n_eval
-            ce = round(a_tiempo / entregados, 4) if entregados else None
+            ce = round(a_tiempo / con_fecha, 4) if con_fecha else None
             ic = round((aprobados / n_eval) - (incidentes / n_eval * 0.1), 4) if n_eval else None
             ipp = round((ce + ic) / 2, 4) if (ce is not None and ic is not None) else None
             tot_entregados += entregados; tot_a_tiempo += a_tiempo; tot_aprobados += aprobados
-            tot_evaluados += n_eval; tot_pendientes += pendientes
+            tot_evaluados += n_eval; tot_pendientes += pendientes; tot_con_fecha += con_fecha
             meses.append({
-                "mes": MESES_LBL[m - 1], "entregados": entregados, "a_tiempo": a_tiempo,
+                "mes": MESES_LBL[m - 1], "entregados": entregados, "a_tiempo": a_tiempo, "con_fecha": con_fecha,
                 "aprobados": aprobados, "incidentes": incidentes, "pendientes": pendientes,
                 "ce": ce, "ic": ic, "ipp": ipp,
             })
         tot_incidentes = tot_evaluados - tot_aprobados
-        ce_t = round(tot_a_tiempo / tot_entregados, 4) if tot_entregados else None
+        ce_t = round(tot_a_tiempo / tot_con_fecha, 4) if tot_con_fecha else None
         ic_t = round((tot_aprobados / tot_evaluados) - (tot_incidentes / tot_evaluados * 0.1), 4) if tot_evaluados else None
         ipp_t = round((ce_t + ic_t) / 2, 4) if (ce_t is not None and ic_t is not None) else None
         return meses, {
-            "entregados": tot_entregados, "a_tiempo": tot_a_tiempo, "aprobados": tot_aprobados,
+            "entregados": tot_entregados, "a_tiempo": tot_a_tiempo, "con_fecha": tot_con_fecha, "aprobados": tot_aprobados,
             "incidentes": tot_incidentes, "pendientes": tot_pendientes, "ce": ce_t, "ic": ic_t, "ipp": ipp_t,
         }
 
@@ -4515,6 +4992,63 @@ def delete_cat_prod(cid):
     execute("DELETE FROM categorias_producto WHERE id=?", (cid,))
     return jsonify({"ok": True})
 
+# ── Categorías de proveedor + resumen de uso (módulo Categorías, 2026-11-25) ──
+# Aparte de categoria_compra (fija: la usan los Indicadores de compras).
+@app.route("/api/categorias_proveedor", methods=["GET"])
+@login_required()
+def get_cat_prv():
+    return jsonify([dict(r) for r in query("SELECT * FROM categorias_proveedor ORDER BY nombre")])
+
+
+@app.route("/api/categorias_proveedor", methods=["POST"])
+@login_required(roles=["admin"])
+def create_cat_prv():
+    d = request.json or {}
+    nombre = (d.get("nombre") or "").strip()
+    if not nombre:
+        return jsonify({"error": "Nombre requerido"}), 400
+    if query("SELECT 1 FROM categorias_proveedor WHERE lower(nombre)=lower(?)", (nombre,), one=True):
+        return jsonify({"error": "Esa categoría ya existe"}), 409
+    lid = execute("INSERT INTO categorias_proveedor (nombre,descripcion) VALUES (?,?)", (nombre, d.get("descripcion")))
+    return jsonify({"ok": True, "id": lid}), 201
+
+
+@app.route("/api/categorias_proveedor/<int:cid>", methods=["PUT"])
+@login_required(roles=["admin"])
+def update_cat_prv(cid):
+    d = request.json or {}
+    nombre = (d.get("nombre") or "").strip()
+    if not nombre:
+        return jsonify({"error": "Nombre requerido"}), 400
+    if query("SELECT 1 FROM categorias_proveedor WHERE lower(nombre)=lower(?) AND id<>?", (nombre, cid), one=True):
+        return jsonify({"error": "Esa categoría ya existe"}), 409
+    execute("UPDATE categorias_proveedor SET nombre=?,descripcion=? WHERE id=?", (nombre, d.get("descripcion"), cid))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/categorias_proveedor/<int:cid>", methods=["DELETE"])
+@login_required(roles=["admin"])
+def delete_cat_prv(cid):
+    used = query("SELECT COUNT(*) c FROM proveedores WHERE categoria_proveedor_id=?", (cid,), one=True)["c"]
+    if used:
+        return jsonify({"error": f"En uso por {used} proveedor(es)"}), 400
+    execute("DELETE FROM categorias_proveedor WHERE id=?", (cid,))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/categorias/uso", methods=["GET"])
+@login_required()
+def get_categorias_uso():
+    """Cuántos registros usan cada categoría (para el módulo Categorías)."""
+    def mapa(sql):
+        return {r["k"]: r["n"] for r in query(sql)}
+    return jsonify({
+        "maquina": mapa("SELECT categoria_id k, COUNT(*) n FROM maquinas WHERE categoria_id IS NOT NULL GROUP BY categoria_id"),
+        "maquina_ops": mapa("SELECT categoria_maquina_id k, COUNT(*) n FROM proceso_operaciones WHERE categoria_maquina_id IS NOT NULL GROUP BY categoria_maquina_id"),
+        "producto": mapa("SELECT categoria_producto_id k, COUNT(*) n FROM materiales WHERE categoria_producto_id IS NOT NULL GROUP BY categoria_producto_id"),
+        "proveedor": mapa("SELECT categoria_proveedor_id k, COUNT(*) n FROM proveedores WHERE categoria_proveedor_id IS NOT NULL GROUP BY categoria_proveedor_id"),
+    })
+
 @app.route("/api/categorias_maquina/<int:cid>", methods=["PUT"])
 @login_required(roles=["admin"])
 def update_cat_maq(cid):
@@ -4571,8 +5105,8 @@ def create_maquina():
     d = request.json
     if not d.get("codigo") or not d.get("nombre"): return jsonify({"error":"Código y nombre requeridos"}), 400
     if query("SELECT id FROM maquinas WHERE codigo=?", (d["codigo"],), one=True): return jsonify({"error":"Código ya existe"}), 409
-    lid = execute("INSERT INTO maquinas (codigo,nombre,categoria_id,marca,modelo,numero_serie,anio,ubicacion,estado,horas_uso,obs) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-        (d["codigo"],d["nombre"],d.get("categoria_id"),d.get("marca"),d.get("modelo"),d.get("numero_serie"),d.get("anio"),d.get("ubicacion"),d.get("estado","Operativa"),d.get("horas_uso",0),d.get("obs")))
+    lid = execute("INSERT INTO maquinas (codigo,nombre,categoria_id,marca,modelo,numero_serie,anio,ubicacion,estado,horas_uso,valor_maquina,obs) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (d["codigo"],d["nombre"],d.get("categoria_id"),d.get("marca"),d.get("modelo"),d.get("numero_serie"),d.get("anio"),d.get("ubicacion"),d.get("estado","Operativa"),d.get("horas_uso",0),d.get("valor_maquina") or 0,d.get("obs")))
     for rid in (d.get("reemplazos") or []):
         try: execute("INSERT OR IGNORE INTO maquina_reemplazos (maquina_id,reemplazo_id) VALUES (?,?)", (lid, int(rid)))
         except: pass
@@ -4582,8 +5116,8 @@ def create_maquina():
 @login_required(roles=["admin","operario"])
 def update_maquina(mid):
     d = request.json
-    execute("UPDATE maquinas SET nombre=?,categoria_id=?,marca=?,modelo=?,numero_serie=?,anio=?,ubicacion=?,estado=?,horas_uso=?,obs=? WHERE id=?",
-        (d["nombre"],d.get("categoria_id"),d.get("marca"),d.get("modelo"),d.get("numero_serie"),d.get("anio"),d.get("ubicacion"),d.get("estado","Operativa"),d.get("horas_uso",0),d.get("obs"),mid))
+    execute("UPDATE maquinas SET nombre=?,categoria_id=?,marca=?,modelo=?,numero_serie=?,anio=?,ubicacion=?,estado=?,horas_uso=?,valor_maquina=?,obs=? WHERE id=?",
+        (d["nombre"],d.get("categoria_id"),d.get("marca"),d.get("modelo"),d.get("numero_serie"),d.get("anio"),d.get("ubicacion"),d.get("estado","Operativa"),d.get("horas_uso",0),_mon_o_actual(d,"valor_maquina","maquinas",mid),d.get("obs"),mid))
     execute("DELETE FROM maquina_reemplazos WHERE maquina_id=?", (mid,))
     for rid in (d.get("reemplazos") or []):
         try: execute("INSERT OR IGNORE INTO maquina_reemplazos (maquina_id,reemplazo_id) VALUES (?,?)", (mid, int(rid)))
@@ -4917,7 +5451,7 @@ def create_material():
         (d["codigo"],d["descripcion"],d.get("categoria","Material"),d.get("categoria_producto_id"),d.get("unidad","kg"),stock_inicial,d.get("stock_min",0),d.get("stock_max",0),d.get("precio_unit",0),d.get("proveedor_id"),d.get("obs")))
     if stock_inicial > 0 and d.get("categoria","Material") == "Material":
         # Auto-create lote for initial stock
-        lote_num = _gen_lote_numero()
+        lote_num = _gen_lote_numero("INI")
         lote_id = execute("""INSERT INTO lotes
             (numero,material_id,cantidad_original,cantidad_disponible,
              proveedor_id,referencia_proveedor,estado,obs,creado_por,stock_computado)
@@ -5059,7 +5593,8 @@ def get_movimientos():
 @app.route("/api/proveedores", methods=["GET"])
 @login_required()
 def get_proveedores():
-    rows = query("SELECT * FROM proveedores ORDER BY razon")
+    rows = query("""SELECT p.*, k.nombre categoria_proveedor_nombre FROM proveedores p
+                    LEFT JOIN categorias_proveedor k ON k.id=p.categoria_proveedor_id ORDER BY p.razon""")
     result = []
     for r in rows:
         d = dict(r)
@@ -5074,8 +5609,8 @@ def get_proveedores():
 def create_proveedor():
     d = request.json
     if not d.get("razon"): return jsonify({"error":"Razón social requerida"}), 400
-    lid = execute("INSERT INTO proveedores (razon,cuit,contacto,telefono,email,materiales,plazo_dias,calificacion,estado,obs,categoria_compra) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-        (d["razon"],d.get("cuit"),d.get("contacto"),d.get("telefono"),d.get("email"),d.get("materiales"),d.get("plazo_dias",3),d.get("calificacion",5),d.get("estado","Activo"),d.get("obs"),d.get("categoria_compra") or None))
+    lid = execute("INSERT INTO proveedores (razon,cuit,contacto,telefono,email,materiales,plazo_dias,calificacion,estado,obs,categoria_compra,categoria_proveedor_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (d["razon"],d.get("cuit"),d.get("contacto"),d.get("telefono"),d.get("email"),d.get("materiales"),d.get("plazo_dias",3),d.get("calificacion",5),d.get("estado","Activo"),d.get("obs"),d.get("categoria_compra") or None,d.get("categoria_proveedor_id") or None))
     return jsonify({"ok":True,"id":lid}), 201
 
 @app.route("/api/proveedores/<int:pid>", methods=["PUT"])
@@ -5083,6 +5618,8 @@ def create_proveedor():
 def update_proveedor(pid):
     d = request.json
     if not d.get("razon"): return jsonify({"error":"Razón social requerida"}), 400
+    if "categoria_proveedor_id" in d:
+        execute("UPDATE proveedores SET categoria_proveedor_id=? WHERE id=?", (d.get("categoria_proveedor_id") or None, pid))
     execute("UPDATE proveedores SET razon=?,cuit=?,contacto=?,telefono=?,email=?,materiales=?,plazo_dias=?,calificacion=?,estado=?,obs=?,categoria_compra=? WHERE id=?",
         (d["razon"],d.get("cuit"),d.get("contacto"),d.get("telefono"),d.get("email"),d.get("materiales"),d.get("plazo_dias",3),d.get("calificacion",5),d.get("estado","Activo"),d.get("obs"),d.get("categoria_compra") or None,pid))
     return jsonify({"ok":True})
@@ -5604,6 +6141,580 @@ def update_cliente(cid):
         (d["razon"],d["cuit"],d.get("iva"),d.get("rubro"),d.get("localidad"),d.get("direccion"),d["contacto"],d.get("cargo"),d.get("telefono"),d.get("email"),d.get("categoria","Regular"),d.get("plazo_pago"),d.get("trabajos"),d.get("obs"),cid))
     return jsonify({"ok":True})
 
+# ── Categorías de cliente (paco, 2026-11-25) ──────────────────────────────────
+# Antes eran fijas en el HTML (Regular/Premium/Institucional/Nuevo). Ahora se
+# pueden agregar. clientes.categoria sigue siendo texto: la tabla es la lista
+# de opciones. Se completa sola la primera vez con las de siempre + las usadas.
+CLI_CATEGORIAS_BASE = ("Regular", "Premium", "Institucional", "Nuevo")
+
+
+def _cli_categorias_asegurar():
+    if query("SELECT 1 FROM categorias_cliente LIMIT 1", one=True):
+        return
+    usadas = [r["categoria"] for r in query(
+        "SELECT DISTINCT categoria FROM clientes WHERE COALESCE(categoria,'')<>''")]
+    for n in list(CLI_CATEGORIAS_BASE) + usadas:
+        execute("INSERT OR IGNORE INTO categorias_cliente (nombre) VALUES (?)", (n,))
+
+
+@app.route("/api/clientes/categorias", methods=["GET"])
+@login_required()
+def get_cli_categorias():
+    _cli_categorias_asegurar()
+    # Una categoría usada por algún cliente pero que no está en la tabla
+    # (p. ej. cargada por la carga masiva) se agrega a la lista.
+    for r in query("""SELECT DISTINCT categoria FROM clientes WHERE COALESCE(categoria,'')<>''
+                      AND categoria NOT IN (SELECT nombre FROM categorias_cliente)"""):
+        execute("INSERT OR IGNORE INTO categorias_cliente (nombre) VALUES (?)", (r["categoria"],))
+    rows = query("""SELECT k.id, k.nombre,
+        (SELECT COUNT(*) FROM clientes c WHERE c.categoria=k.nombre) n_clientes
+        FROM categorias_cliente k ORDER BY k.id""")
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/clientes/categorias", methods=["POST"])
+@login_required(roles=["admin", "vendedor"])
+def create_cli_categoria():
+    _cli_categorias_asegurar()
+    nombre = ((request.json or {}).get("nombre") or "").strip()
+    if not nombre:
+        return jsonify({"error": "Escribí el nombre de la categoría"}), 400
+    if len(nombre) > 40:
+        return jsonify({"error": "Nombre demasiado largo (máx. 40)"}), 400
+    if query("SELECT 1 FROM categorias_cliente WHERE lower(nombre)=lower(?)", (nombre,), one=True):
+        return jsonify({"error": "Esa categoría ya existe"}), 409
+    cid = execute("INSERT INTO categorias_cliente (nombre) VALUES (?)", (nombre,))
+    return jsonify({"ok": True, "id": cid, "nombre": nombre}), 201
+
+
+@app.route("/api/clientes/categorias/<int:kid>", methods=["DELETE"])
+@login_required(roles=["admin", "vendedor"])
+def delete_cli_categoria(kid):
+    k = query("SELECT * FROM categorias_cliente WHERE id=?", (kid,), one=True)
+    if not k:
+        return jsonify({"error": "No encontrada"}), 404
+    n = query("SELECT COUNT(*) c FROM clientes WHERE categoria=?", (k["nombre"],), one=True)["c"]
+    if n:
+        return jsonify({"error": f"La usan {n} cliente(s): cambiales la categoría antes de borrarla"}), 400
+    execute("DELETE FROM categorias_cliente WHERE id=?", (kid,))
+    return jsonify({"ok": True})
+
+
+# ── Campaña: a qué clientes mandarles un correo (paco, 2026-11-25) ────────────
+# Recomendaciones calculadas en el momento con los pedidos de clientes y los
+# presupuestos. El envío usa el SMTP cargado en el módulo; la configuración
+# (con la contraseña) queda en correo_config.json junto a server.py, nunca en
+# la base ni en GitHub.
+import smtplib as _smtplib
+import ssl as _ssl
+from email.message import EmailMessage as _EmailMessage
+from email.utils import formataddr as _formataddr, make_msgid as _make_msgid
+
+CORREO_ARCHIVO = os.path.join(BASE_DIR, "correo_config.json")
+# modo "outlook" (2026-11-25, paco): manda con el Outlook de escritorio de la
+# PC donde corre el servidor, con la cuenta que ya tiene abierta (sin
+# contraseña). modo "smtp": servidor de correo (Gmail, dominio propio).
+CORREO_DEFAULT = {"modo": "smtp", "host": "", "puerto": 587, "seguridad": "starttls", "usuario": "",
+                  "clave": "", "remitente": "", "nombre": ""}
+CAMPANA_PARAM_DEFAULT = {"dias_inactivo": 90, "dias_presupuesto": 7, "dias_entre_correos": 30}
+_ROLES_CAMPANA = ["admin", "vendedor"]
+_EMAIL_RE = re.compile(r"^[^@\s;,]+@[^@\s;,]+\.[^@\s;,]+$")
+
+
+def _correo_cfg():
+    c = dict(CORREO_DEFAULT)
+    c.update(CAMPANA_PARAM_DEFAULT)
+    try:
+        with open(CORREO_ARCHIVO, encoding="utf-8") as f:
+            d = _json.load(f)
+        if isinstance(d, dict):
+            c.update(d)
+    except Exception:
+        pass
+    return c
+
+
+def _correo_cfg_guardar(c):
+    with open(CORREO_ARCHIVO, "w", encoding="utf-8") as f:
+        _json.dump(c, f, ensure_ascii=False, indent=1)
+
+
+def _correo_listo(c):
+    if c.get("modo", "outlook") == "outlook":
+        return os.name == "nt"
+    return bool(c.get("host") and c.get("remitente"))
+
+
+class _OutlookHilo:
+    """Todo lo de Outlook corre en UN hilo propio con COM inicializado, y cada
+    pedido espera como máximo `timeout` segundos: si Outlook se traba (aviso
+    abierto, perfil, etc.) MetalERP corta y avisa en vez de colgarse.
+    (2026-11-26: un Dispatch con Outlook cerrado abría un Outlook invisible
+    '-Embedding' que quedaba trabado y además no dejaba abrir el de verdad.)"""
+    def __init__(self):
+        import queue
+        self.q = queue.Queue()
+        self.ol = None
+        self.vivo = True
+        self.th = threading.Thread(target=self._run, daemon=True, name="outlook-com")
+        self.th.start()
+
+    def _run(self):
+        import pythoncom
+        pythoncom.CoInitialize()
+        while True:
+            fn, res = self.q.get()
+            try:
+                res["v"] = fn(self)
+            except BaseException as e:
+                res["e"] = e
+            res["ev"].set()
+
+    def hacer(self, fn, timeout):
+        res = {"ev": threading.Event()}
+        self.q.put((fn, res))
+        if not res["ev"].wait(timeout):
+            self.vivo = False
+            raise RuntimeError("Outlook no respondió. Fijate si tiene una ventana o un aviso abierto esperando "
+                               "respuesta (puede estar detrás de otras ventanas), contestalo y probá de nuevo.")
+        if "e" in res:
+            raise res["e"]
+        return res.get("v")
+
+
+_outlook_hilo = None
+_outlook_lock = threading.Lock()
+
+
+def _outlook_corriendo():
+    try:
+        import subprocess
+        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq OUTLOOK.EXE", "/NH"], capture_output=True,
+                             text=True, timeout=10, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+        return "outlook.exe" in out.lower()
+    except Exception:
+        return True   # si no se puede saber, se intenta igual
+
+
+def _outlook_abrir_visible():
+    """Abre Outlook normal (con ventana), como si lo abriera el usuario."""
+    import subprocess
+    try:
+        subprocess.Popen(["cmd", "/c", "start", "", "outlook.exe"],
+                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except Exception as e:
+        raise RuntimeError(f"No se pudo abrir Outlook: {e}")
+
+
+def _outlook_conectar(h):
+    """Se engancha al Outlook abierto (nunca crea uno invisible)."""
+    import win32com.client
+    import pythoncom
+    try:
+        h.ol = win32com.client.GetActiveObject("Outlook.Application")
+        return True
+    except pythoncom.com_error:
+        h.ol = None
+        return False
+
+
+class _EnviadorOutlook:
+    """Manda con Outlook de escritorio (clásico) por COM. Cada correo queda en
+    Elementos enviados de Outlook, como si lo hubiera mandado el usuario."""
+    def __init__(self):
+        global _outlook_hilo
+        try:
+            import pythoncom  # noqa: F401
+            import win32com.client  # noqa: F401
+        except ImportError:
+            raise RuntimeError("Falta el componente para usar Outlook (pywin32). Cerrá el servidor y abrilo de nuevo "
+                               "con INICIAR_SERVIDOR.bat: lo instala solo. Si sigue, ejecutá: pip install pywin32")
+        with _outlook_lock:
+            if _outlook_hilo is None or not _outlook_hilo.vivo:
+                _outlook_hilo = _OutlookHilo()
+            self.h = _outlook_hilo
+        if self.h.hacer(_outlook_conectar, 15):
+            return
+        if not _outlook_corriendo():
+            _outlook_abrir_visible()
+        import time as _t
+        for _ in range(30):            # hasta ~60 s a que Outlook termine de abrir
+            _t.sleep(2)
+            if self.h.hacer(_outlook_conectar, 15):
+                return
+        raise RuntimeError("No se pudo usar Outlook en la PC del servidor. Abrí Outlook (el clásico de Office), "
+                           "esperá a que cargue y probá de nuevo. Si Outlook y el servidor corren uno como "
+                           "administrador y el otro no, tampoco se pueden comunicar.")
+
+    def enviar(self, para, asunto, cuerpo):
+        def _env(h):
+            m = h.ol.CreateItem(0)
+            m.To = para
+            m.Subject = asunto
+            m.Body = cuerpo
+            m.Send()
+        self.h.hacer(_env, 45)
+
+    def cerrar(self):
+        pass
+
+
+def _outlook_error(e):
+    try:
+        args = getattr(e, "args", ())
+        if len(args) > 2 and args[2] and len(args[2]) > 2 and args[2][2]:
+            return str(args[2][2])
+        if len(args) > 1 and args[1]:
+            return str(args[1])
+    except Exception:
+        pass
+    return str(e) or e.__class__.__name__
+
+
+class _EnviadorSMTP:
+    def __init__(self, c):
+        self.c = c
+        self.s = _smtp_conectar(c)
+
+    def enviar(self, para, asunto, cuerpo):
+        msg = _correo_armar(self.c, para, asunto, cuerpo)
+        try:
+            self.s.send_message(msg)
+        except _smtplib.SMTPServerDisconnected:
+            self.s = _smtp_conectar(self.c)
+            self.s.send_message(msg)
+
+    def cerrar(self):
+        try:
+            self.s.quit()
+        except Exception:
+            pass
+
+
+def _enviador(c):
+    if c.get("modo", "outlook") == "outlook":
+        return _EnviadorOutlook()
+    return _EnviadorSMTP(c)
+
+
+def _envio_error_texto(c, e):
+    if isinstance(e, RuntimeError):
+        return str(e)
+    if c.get("modo", "outlook") == "outlook":
+        return "Outlook no pudo mandar el correo: " + _outlook_error(e)
+    return _smtp_error_texto(e)
+
+
+def _campana_param(c, k):
+    try:
+        return max(1, int(c.get(k) or CAMPANA_PARAM_DEFAULT[k]))
+    except (TypeError, ValueError):
+        return CAMPANA_PARAM_DEFAULT[k]
+
+
+def _dias_desde(f, hoy):
+    if not f:
+        return None
+    try:
+        return (hoy - datetime.strptime(str(f)[:10], "%Y-%m-%d").date()).days
+    except ValueError:
+        return None
+
+
+def _campana_recomendaciones():
+    c = _correo_cfg()
+    d_inact = _campana_param(c, "dias_inactivo")
+    d_pres = _campana_param(c, "dias_presupuesto")
+    d_corr = _campana_param(c, "dias_entre_correos")
+    hoy = date.today()
+    fechas = {}
+    for r in query("""SELECT cliente_id, substr(fecha,1,10) f FROM ordenes_cliente
+                      WHERE COALESCE(estado,'')<>'Cancelada' AND fecha IS NOT NULL ORDER BY fecha"""):
+        fechas.setdefault(r["cliente_id"], []).append(r["f"])
+    pres = {}
+    for r in query("""SELECT cliente_id, numero, substr(creado,1,10) f, descripcion FROM presupuestos
+                      WHERE estado='Enviado' AND cliente_id IS NOT NULL ORDER BY creado"""):
+        pres.setdefault(r["cliente_id"], []).append(dict(r))
+    prods = {}
+    for r in query("""SELECT oc.cliente_id, m.descripcion nombre, SUM(i.cantidad) q
+                      FROM ordenes_cliente_items i JOIN ordenes_cliente oc ON oc.id=i.orden_cliente_id
+                      JOIN materiales m ON m.id=i.producto_id
+                      GROUP BY oc.cliente_id, i.producto_id ORDER BY q DESC"""):
+        lst = prods.setdefault(r["cliente_id"], [])
+        if len(lst) < 3:
+            lst.append(r["nombre"])
+    ult_correo = {r["cliente_id"]: r["f"] for r in query(
+        """SELECT cliente_id, MAX(fecha) f FROM campana_envios WHERE estado='Enviado' GROUP BY cliente_id""")}
+    out = []
+    for cl in query("SELECT * FROM clientes ORDER BY razon"):
+        cid = cl["id"]
+        fs = sorted(set(fechas.get(cid, [])))
+        ultimo = fs[-1] if fs else None
+        dias = _dias_desde(ultimo, hoy)
+        intervalo = None
+        if len(fs) >= 3:
+            ds = [_dias_desde(fs[i], datetime.strptime(fs[i + 1], "%Y-%m-%d").date()) for i in range(len(fs) - 1)]
+            ds = [x for x in ds if x is not None and x > 0]
+            if ds:
+                intervalo = round(sum(ds) / len(ds))
+        motivos = []
+        pv = [p for p in pres.get(cid, []) if (_dias_desde(p["f"], hoy) or 0) >= d_pres]
+        if pv:
+            p = pv[-1]
+            motivos.append({"k": "presupuesto", "puntaje": 90,
+                            "texto": f"Presupuesto {p['numero']} enviado hace {_dias_desde(p['f'], hoy)} días sin respuesta"
+                                     + (f" (y {len(pv) - 1} más)" if len(pv) > 1 else "")})
+        if intervalo and dias is not None and dias >= intervalo and dias < d_inact:
+            motivos.append({"k": "reposicion", "puntaje": 80,
+                            "texto": f"Suele pedir cada {intervalo} días y el último pedido fue hace {dias} días"})
+        if dias is not None and dias >= d_inact:
+            motivos.append({"k": "inactivo", "puntaje": 70 + min(20, (dias - d_inact) // 30),
+                            "texto": f"Sin pedidos hace {dias} días"})
+        if not fs:
+            motivos.append({"k": "sin_compras", "puntaje": 40, "texto": "Nunca hizo un pedido"})
+        dc = _dias_desde(ult_correo.get(cid), hoy)
+        email = (cl["email"] or "").strip()
+        puntaje = max([m["puntaje"] for m in motivos] or [0])
+        if cl["categoria"] == "Premium" and puntaje:
+            puntaje += 5
+        out.append({
+            "cliente_id": cid, "razon": cl["razon"], "contacto": cl["contacto"], "email": email,
+            "email_ok": bool(_EMAIL_RE.match(email)), "categoria": cl["categoria"] or "",
+            "n_pedidos": len(fs), "ultimo_pedido": ultimo, "dias_sin_pedido": dias,
+            "intervalo_dias": intervalo, "productos": prods.get(cid, []),
+            "motivos": motivos, "puntaje": puntaje,
+            "ultimo_correo": ult_correo.get(cid), "dias_desde_correo": dc,
+            "contactado_reciente": dc is not None and dc < d_corr,
+        })
+    out.sort(key=lambda r: (-(r["puntaje"] if not r["contactado_reciente"] else r["puntaje"] / 10), r["razon"]))
+    return out
+
+
+@app.route("/api/campana/recomendaciones", methods=["GET"])
+@login_required()
+@modulo_requerido("campana")
+def get_campana_recomendaciones():
+    c = _correo_cfg()
+    return jsonify({"clientes": _campana_recomendaciones(),
+                    "correo_listo": _correo_listo(c),
+                    "param": {k: _campana_param(c, k) for k in CAMPANA_PARAM_DEFAULT},
+                    "empresa": _campana_firma(c)})
+
+
+@app.route("/api/campana/config", methods=["GET"])
+@login_required(roles=["admin"])
+@modulo_requerido("campana")
+def get_campana_config():
+    c = _correo_cfg()
+    c["tiene_clave"] = bool(c.get("clave"))
+    c["clave"] = ""
+    return jsonify(c)
+
+
+@app.route("/api/campana/config", methods=["POST"])
+@login_required(roles=["admin"])
+@modulo_requerido("campana")
+def save_campana_config():
+    d = request.json or {}
+    c = _correo_cfg()
+    if d.get("modo") in ("outlook", "smtp"):
+        c["modo"] = d["modo"]
+    for k in ("host", "usuario", "remitente", "nombre"):
+        if k in d:
+            c[k] = str(d.get(k) or "").strip()
+    if d.get("seguridad") in ("starttls", "ssl", "ninguna"):
+        c["seguridad"] = d["seguridad"]
+    if "puerto" in d:
+        try:
+            c["puerto"] = int(d.get("puerto") or 587)
+        except (TypeError, ValueError):
+            return jsonify({"error": "Puerto inválido"}), 400
+    if d.get("clave"):            # vacía = dejar la que estaba
+        c["clave"] = str(d["clave"])
+    for k in CAMPANA_PARAM_DEFAULT:
+        if k in d:
+            try:
+                c[k] = max(1, int(d[k]))
+            except (TypeError, ValueError):
+                return jsonify({"error": "Los días tienen que ser números"}), 400
+    if c["remitente"] and not _EMAIL_RE.match(c["remitente"]):
+        return jsonify({"error": "El correo remitente no es válido"}), 400
+    try:
+        _correo_cfg_guardar(c)
+    except OSError as e:
+        return jsonify({"error": f"No se pudo guardar: {e}"}), 500
+    return jsonify({"ok": True})
+
+
+def _smtp_conectar(c):
+    host, puerto = c["host"], int(c.get("puerto") or 587)
+    ctx = _ssl.create_default_context()
+    if c.get("seguridad") == "ssl":
+        s = _smtplib.SMTP_SSL(host, puerto, timeout=30, context=ctx)
+    else:
+        s = _smtplib.SMTP(host, puerto, timeout=30)
+        s.ehlo()
+        if c.get("seguridad", "starttls") == "starttls":
+            s.starttls(context=ctx)
+            s.ehlo()
+    if c.get("usuario"):
+        if not c.get("clave"):
+            try:
+                s.quit()
+            except Exception:
+                pass
+            raise RuntimeError("Falta la contraseña del correo: escribila en Campaña > Configuración y tocá «Guardar»")
+        s.login(c["usuario"], c.get("clave") or "")
+    return s
+
+
+def _smtp_error_texto(e):
+    if isinstance(e, _smtplib.SMTPAuthenticationError):
+        return ("Usuario o contraseña rechazados por el servidor de correo. Revisá la contraseña (es la misma con la "
+                "que entrás al webmail de la casilla); en Gmail hace falta una contraseña de aplicación")
+    if isinstance(e, (socket.gaierror, socket.timeout, ConnectionError, OSError)) and not isinstance(e, _smtplib.SMTPException):
+        return f"No se pudo conectar al servidor de correo: {e}"
+    return str(e) or e.__class__.__name__
+
+
+def _correo_armar(c, para, asunto, cuerpo):
+    m = _EmailMessage()
+    m["From"] = _formataddr((c.get("nombre") or "", c["remitente"]))
+    m["To"] = para
+    m["Subject"] = asunto
+    m["Message-ID"] = _make_msgid(domain=c["remitente"].split("@")[-1])
+    m.set_content(cuerpo)
+    return m
+
+
+@app.route("/api/campana/probar", methods=["POST"])
+@login_required(roles=["admin"])
+@modulo_requerido("campana")
+def probar_campana_correo():
+    c = _correo_cfg()
+    if not _correo_listo(c):
+        return jsonify({"error": "Falta cargar el servidor y el correo remitente" if c.get("modo") == "smtp"
+                        else "El envío por Outlook solo funciona con el servidor en Windows"}), 400
+    para = ((request.json or {}).get("para") or c.get("remitente") or get_config_valor("empresa_email", "")).strip()
+    if not _EMAIL_RE.match(para):
+        return jsonify({"error": "Escribí a qué correo mandar la prueba"}), 400
+    try:
+        s = _enviador(c)
+        try:
+            firma = _campana_firma(c)
+            s.enviar(para, "Correo de prueba" + (" - " + firma if firma else ""),
+                     "Este es un correo de prueba." + ("\n\n" + firma if firma else ""))
+        finally:
+            s.cerrar()
+    except Exception as e:
+        return jsonify({"error": _envio_error_texto(c, e)}), 400
+    return jsonify({"ok": True, "para": para})
+
+
+def _campana_firma(c=None):
+    """Nombre que firma los correos ({empresa}): el «Nombre que ve el cliente» de
+    Campaña > Configuración; si está vacío, el nombre de la empresa. (2026-11-26)"""
+    c = c if c is not None else _correo_cfg()
+    return (c.get("nombre") or "").strip() or get_config_valor("empresa_nombre", "")
+
+
+def _campana_reemplazar(txt, r, empresa):
+    prods = r.get("productos") or []
+    ult = r.get("ultimo_pedido")
+    vals = {
+        "{razon}": r.get("razon") or "",
+        "{contacto}": (r.get("contacto") or r.get("razon") or "").strip(),
+        "{productos}": ", ".join(prods) if prods else "nuestros productos",
+        "{ultimo_pedido}": (ult[8:10] + "/" + ult[5:7] + "/" + ult[:4]) if ult else "—",
+        "{empresa}": empresa or "",
+    }
+    for k, v in vals.items():
+        txt = txt.replace(k, v)
+    return txt
+
+
+@app.route("/api/campana/enviar", methods=["POST"])
+@login_required(roles=_ROLES_CAMPANA)
+@modulo_requerido("campana")
+def enviar_campana():
+    d = request.json or {}
+    asunto = (d.get("asunto") or "").strip()
+    cuerpo = (d.get("cuerpo") or "").strip()
+    ids = [int(x) for x in (d.get("cliente_ids") or []) if str(x).isdigit()]
+    if not asunto or not cuerpo:
+        return jsonify({"error": "Escribí el asunto y el texto del correo"}), 400
+    if not ids:
+        return jsonify({"error": "Elegí al menos un cliente"}), 400
+    if len(ids) > 200:
+        return jsonify({"error": "Máximo 200 clientes por envío"}), 400
+    c = _correo_cfg()
+    if not _correo_listo(c):
+        return jsonify({"error": "El correo no está configurado: un administrador tiene que cargarlo en Campaña > Configuración"}), 400
+    recs = {r["cliente_id"]: r for r in _campana_recomendaciones()}
+    dest = [recs[i] for i in ids if i in recs]
+    empresa = _campana_firma(c)
+    try:
+        s = _enviador(c)
+    except Exception as e:
+        return jsonify({"error": _envio_error_texto(c, e)}), 400
+    cid = execute("INSERT INTO campanas (nombre,motivo,asunto,cuerpo,creado_por) VALUES (?,?,?,?,?)",
+                  ((d.get("nombre") or "").strip() or asunto, d.get("motivo") or "", asunto, cuerpo,
+                   session.get("user_id")))
+    ok = err = 0
+    detalle = []
+    try:
+        for r in dest:
+            mot = r["motivos"][0]["k"] if r["motivos"] else ""
+            if not r["email_ok"]:
+                estado, error = "Error", "El cliente no tiene un email válido"
+            else:
+                try:
+                    s.enviar(r["email"], _campana_reemplazar(asunto, r, empresa),
+                             _campana_reemplazar(cuerpo, r, empresa))
+                    estado, error = "Enviado", None
+                except Exception as e:
+                    estado, error = "Error", _envio_error_texto(c, e)
+            execute("INSERT INTO campana_envios (campana_id,cliente_id,email,motivo,estado,error) VALUES (?,?,?,?,?,?)",
+                    (cid, r["cliente_id"], r["email"], mot, estado, error))
+            if estado == "Enviado":
+                ok += 1
+            else:
+                err += 1
+            detalle.append({"razon": r["razon"], "estado": estado, "error": error})
+    finally:
+        s.cerrar()
+        execute("UPDATE campanas SET enviados=?, errores=? WHERE id=?", (ok, err, cid))
+    return jsonify({"ok": True, "id": cid, "enviados": ok, "errores": err, "detalle": detalle})
+
+
+@app.route("/api/campana/historial", methods=["GET"])
+@login_required()
+@modulo_requerido("campana")
+def get_campana_historial():
+    rows = query("""SELECT k.*, u.nombre usuario FROM campanas k LEFT JOIN usuarios u ON u.id=k.creado_por
+                    ORDER BY k.id DESC LIMIT 200""")
+    out = []
+    for k in rows:
+        r = dict(k)
+        r["envios"] = [dict(e) for e in query(
+            """SELECT e.*, c.razon FROM campana_envios e LEFT JOIN clientes c ON c.id=e.cliente_id
+               WHERE e.campana_id=? ORDER BY e.id""", (k["id"],))]
+        out.append(r)
+    return jsonify(out)
+
+
+@app.route("/api/campana/cliente_email/<int:cid>", methods=["PUT"])
+@login_required(roles=_ROLES_CAMPANA)
+@modulo_requerido("campana")
+def set_campana_cliente_email(cid):
+    email = ((request.json or {}).get("email") or "").strip()
+    if email and not _EMAIL_RE.match(email):
+        return jsonify({"error": "Email inválido"}), 400
+    if not query("SELECT 1 FROM clientes WHERE id=?", (cid,), one=True):
+        return jsonify({"error": "Cliente inexistente"}), 404
+    execute("UPDATE clientes SET email=? WHERE id=?", (email or None, cid))
+    return jsonify({"ok": True})
+
 # ── Requerimientos productivos ─────────────────────────────────────────────────
 def _calc_estado_req(f_estimada, f_entrega, estado_actual=None):
     """Replica la fórmula del Excel de origen:
@@ -6109,7 +7220,7 @@ def delete_requerimiento_productivo(rid):
     execute("DELETE FROM requerimientos_productivos WHERE id=?", (rid,))
     return jsonify({"ok":True})
 
-APP_VERSION = "150"
+APP_VERSION = "152"
 
 @app.route("/api/version")
 @login_required()
@@ -6340,6 +7451,15 @@ _SCH_SUG_DEF = {"sch_sug_inicio": ("06:00", "Sugerencias del Scheduling: hora de
 _SCH_SUG_BASE = _dt(2000, 1, 1)
 
 
+def _orden_key(v):
+    """Clave para ordenar el N° de operación aunque no sea un número puro:
+    '10' -> (10,), '10-1' -> (10, 1), 'A' -> (inf,). (2026-11-26)"""
+    nums = re.findall(r"\d+(?:[.,]\d+)?", str(v if v is not None else ""))
+    if not nums:
+        return (0.0,) if v in (None, "") else (float("inf"),)
+    return tuple(float(n.replace(",", ".")) for n in nums)
+
+
 def _sch_sug_cfg():
     v = {k: get_config_valor(k, d[0]) for k, d in _SCH_SUG_DEF.items()}
     ini = _sch_parse("2000-01-01 " + str(v["sch_sug_inicio"]))
@@ -6495,11 +7615,11 @@ def _sch_sugerencias():
     for o in ops:
         por_ot.setdefault(o["orden_id"], []).append(o)
     for lst in por_ot.values():
-        lst.sort(key=lambda o: float(o["orden"] or 0))
+        lst.sort(key=lambda o: _orden_key(o["orden"]))
 
     def clave(o):
         return (o["producto_id"], o["proceso_op_id"]) if o["proceso_op_id"] else \
-               (o["producto_id"], float(o["orden"] or 0), str(o["operacion"] or "").strip().lower())
+               (o["producto_id"], _orden_key(o["orden"]), str(o["operacion"] or "").strip().lower())
 
     for b in reales:
         o = next((x for x in ops if x["id"] == b["orden_operacion_id"]), None)
@@ -6535,7 +7655,7 @@ def _sch_sugerencias():
                 return (0, r) if r["nivel"] == "subir" else (2, r)
         return (1, None)
 
-    pend.sort(key=lambda o: (nivel(o)[0], semana(o)[0], str(o["ot_creado"] or "9999"), o["orden_id"], float(o["orden"] or 0)))
+    pend.sort(key=lambda o: (nivel(o)[0], semana(o)[0], str(o["ot_creado"] or "9999"), o["orden_id"], _orden_key(o["orden"])))
 
     def libres(m, desde):
         """Tramos libres de la máquina dentro de los turnos, desde 'desde' hasta el horizonte."""
@@ -7517,7 +8637,8 @@ def _generar_ott_para_ot(ot_id, ot_numero):
 @app.route("/api/ordenes/<int:oid>", methods=["GET"])
 @login_required()
 def get_orden(oid):
-    r = query("""SELECT o.*,c.razon cliente_nombre,p.nombre producto_nombre,p.codigo producto_codigo
+    r = query("""SELECT o.*,c.razon cliente_nombre,p.nombre producto_nombre,p.codigo producto_codigo,
+        p.imagen producto_imagen
         FROM ordenes o
         LEFT JOIN clientes c ON c.id=o.cliente_id
         LEFT JOIN productos p ON p.id=o.producto_id
@@ -8072,7 +9193,7 @@ def _lote_es_de_produccion(lote):
     """Lote de una OT (producto terminado o retorno de un tercero): sus cajones
     se arman al declarar la producción, no a mano."""
     num = lote["numero"] or ""
-    if num.startswith("Lote-OTT") or query("SELECT 1 FROM ordenes WHERE numero=? OR ?=numero||'-PT'",
+    if num.startswith(("Lote-OTT", "OTT-")) or query("SELECT 1 FROM ordenes WHERE numero=? OR ?=numero||'-PT'",
                                            (num, num), one=True):
         return True
     return bool(query("SELECT 1 FROM cajones WHERE lote_id=? AND orden_id IS NOT NULL LIMIT 1",
@@ -8131,19 +9252,40 @@ def guardar_bultos_lote(lid):
     return jsonify({"ok": True, "cajones": numeros, "sin_bulto": round(total - ya - sum(cants), 4)})
 
 
-def _remitir_de_cajones(remito_item_id, lote_id, qty):
+def _remitir_de_cajones(remito_item_id, lote_id, qty, bulto_id=None):
     """Un remito de un lote con cajones sale de sus cajones liberados, del más
-    viejo al más nuevo, y queda anotado de qué cajón salió cada pieza."""
+    viejo al más nuevo, y queda anotado de qué cajón salió cada pieza. Un
+    bulto aceptado en Lotes → Bultos sale de los cajones que se le fijaron; el
+    resto no toca las piezas apartadas para otros bultos aceptados (salvo
+    que no quede otra: ese bulto vuelve a 'Para aceptar')."""
     restante = float(qty)
-    for c in query("""SELECT id, cantidad_liberada - cantidad_remitida libre FROM cajones
-            WHERE lote_id=? AND cantidad_liberada - cantidad_remitida > 0.0001 ORDER BY id""", (lote_id,)):
+
+    def tomar_de(cid, q):
+        execute("INSERT INTO remito_item_cajones (remito_item_id,cajon_id,cantidad) VALUES (?,?,?)",
+            (remito_item_id, cid, q))
+        execute("UPDATE cajones SET cantidad_remitida=cantidad_remitida+? WHERE id=?", (q, cid))
+
+    if bulto_id:
+        for a in query("""SELECT a.cajon_id, a.cantidad, c.cantidad_liberada - c.cantidad_remitida libre
+                FROM bulto_cajon_asig a JOIN cajones c ON c.id=a.cajon_id
+                WHERE a.bulto_id=? AND c.lote_id=? ORDER BY a.id""", (bulto_id, lote_id)):
+            q = min(restante, float(a["cantidad"]), float(a["libre"]))
+            if q > 0.0001:
+                tomar_de(a["cajon_id"], q)
+                restante -= q
+    for respetar in (True, False):
         if restante <= 0.0001:
             break
-        tomar = min(restante, float(c["libre"]))
-        execute("INSERT INTO remito_item_cajones (remito_item_id,cajon_id,cantidad) VALUES (?,?,?)",
-            (remito_item_id, c["id"], tomar))
-        execute("UPDATE cajones SET cantidad_remitida=cantidad_remitida+? WHERE id=?", (tomar, c["id"]))
-        restante -= tomar
+        cajs = query("""SELECT id, cantidad_liberada - cantidad_remitida libre FROM cajones
+            WHERE lote_id=? AND cantidad_liberada - cantidad_remitida > 0.0001 ORDER BY id""", (lote_id,))
+        res = _bulto_reservas([c["id"] for c in cajs], bulto_id) if respetar else {}
+        for c in cajs:
+            if restante <= 0.0001:
+                break
+            q = min(restante, float(c["libre"]) - res.get(c["id"], 0))
+            if q > 0.0001:
+                tomar_de(c["id"], q)
+                restante -= q
 
 
 # ── Bultos (para remitir) ─────────────────────────────────────────────────────
@@ -8171,9 +9313,11 @@ def _sync_bultos_ot(oid):
     execute("""UPDATE bultos SET remito_item_id=NULL WHERE orden_id=? AND remito_item_id IS NOT NULL
         AND NOT EXISTS (SELECT 1 FROM remito_items ri JOIN remitos r ON r.id=ri.remito_id
                         WHERE ri.id=bultos.remito_item_id AND r.estado<>'Anulado')""", (oid,))
+    _validar_bultos_aceptados(oid)
     todos = query("SELECT * FROM bultos WHERE orden_id=? ORDER BY nro", (oid,))
-    remitidos = [b for b in todos if b["remito_item_id"]]
-    pendientes = [b for b in todos if not b["remito_item_id"]]
+    # Remitidos y aceptados (Lotes → Bultos) quedan fijos; el resto se rearma.
+    remitidos = [b for b in todos if b["remito_item_id"] or b["aprobado_fecha"]]
+    pendientes = [b for b in todos if not b["remito_item_id"] and not b["aprobado_fecha"]]
     pb = int(o["piezas_bulto"] or 0)
     deseados = []
     if pb > 0:
@@ -8198,6 +9342,342 @@ def _sync_bultos_ot(oid):
                 VALUES (?,?,?,?,?)""", (numero, oid, o["producto_id"], nro, q))
         todos = query("SELECT * FROM bultos WHERE orden_id=? ORDER BY nro", (oid,))
     return todos
+
+
+# ── Lotes → Bultos: propuesta de cajones y aceptación ────────────────────────
+# Cada bulto pendiente de la OT se arma solo con los cajones de su lote (del
+# más viejo al más nuevo, primero las piezas ya liberadas por Calidad). Un
+# bulto queda "Para aceptar" cuando todas sus piezas están liberadas; al
+# aceptarlo un usuario se fijan sus cajones (bulto_cajon_asig), esas piezas
+# quedan apartadas para él y se imprimen sus etiquetas. Al remitirlo salen de
+# esos cajones.
+
+def _bulto_cajones_ot(oid):
+    """Cajones del lote de PT de la OT (o de la OT, si el lote todavía no existe)."""
+    lote_id = _lote_pt_ot(oid)
+    if lote_id:
+        return lote_id, query("""SELECT * FROM cajones WHERE lote_id=? AND estado<>'Baja'
+            ORDER BY id""", (lote_id,))
+    return None, query("""SELECT * FROM cajones WHERE lote_id IS NULL AND orden_id=?
+        AND estado<>'Baja' ORDER BY id""", (oid,))
+
+
+def _bulto_reservas(cajon_ids, excluir_bulto=None):
+    """Piezas de cada cajón apartadas por bultos aceptados y todavía sin remitir."""
+    if not cajon_ids:
+        return {}
+    ph = ",".join("?" * len(cajon_ids))
+    rows = query(f"""SELECT a.cajon_id, SUM(a.cantidad) q FROM bulto_cajon_asig a
+        JOIN bultos b ON b.id=a.bulto_id
+        WHERE a.cajon_id IN ({ph}) AND b.aprobado_fecha IS NOT NULL AND b.remito_item_id IS NULL
+          AND b.id<>? GROUP BY a.cajon_id""", tuple(cajon_ids) + (excluir_bulto or 0,))
+    return {r["cajon_id"]: float(r["q"] or 0) for r in rows}
+
+
+def _desaprobar_bulto(bid):
+    execute("DELETE FROM bulto_cajon_asig WHERE bulto_id=?", (bid,))
+    execute("UPDATE bultos SET aprobado_por=NULL, aprobado_fecha=NULL WHERE id=?", (bid,))
+
+
+def _validar_bultos_aceptados(oid):
+    """Un bulto aceptado vuelve a 'Para aceptar' si sus cajones ya no tienen las
+    piezas que tenía apartadas (Calidad las rechazó después, se remitieron
+    sueltas, o el cajón pasó a otra OT)."""
+    for _ in range(50):
+        acept = query("""SELECT id FROM bultos WHERE orden_id=? AND aprobado_fecha IS NOT NULL
+            AND remito_item_id IS NULL ORDER BY nro DESC""", (oid,))
+        if not acept:
+            return
+        lote_id, cajones = _bulto_cajones_ot(oid)
+        validos = {c["id"]: c for c in cajones}
+        res = _bulto_reservas(list(validos))
+        malo = None
+        for b in acept:
+            asig = query("SELECT cajon_id, cantidad FROM bulto_cajon_asig WHERE bulto_id=?", (b["id"],))
+            if not asig:
+                malo = b["id"]; break
+            for a in asig:
+                c = validos.get(a["cajon_id"])
+                if not c or res.get(c["id"], 0) > float(c["cantidad_liberada"]) - float(c["cantidad_remitida"]) + 0.0001:
+                    malo = b["id"]; break
+            if malo:
+                break
+        if not malo:
+            return
+        _desaprobar_bulto(malo)
+
+
+def _bultos_propuesta(oid, bultos=None):
+    """{bulto_id: {"cajones": [...], "faltan": n, "sin_liberar": n}} para los
+    bultos pendientes (ni aceptados ni remitidos) de la OT."""
+    bultos = bultos if bultos is not None else query(
+        "SELECT * FROM bultos WHERE orden_id=? ORDER BY nro", (oid,))
+    pend = [b for b in bultos if not b["remito_item_id"] and not b["aprobado_fecha"]]
+    if not pend:
+        return {}
+    _lote_id, cajones = _bulto_cajones_ot(oid)
+    res = _bulto_reservas([c["id"] for c in cajones])
+    # Primero lo liberado de todos los cajones, después lo terminado que espera
+    # Calidad y al final lo que todavía está en la última operación.
+    lib_t, cal_t, prod_t = [], [], []
+    for c in cajones:
+        lib = float(c["cantidad_liberada"]) - float(c["cantidad_remitida"]) - res.get(c["id"], 0)
+        term = _cajon_terminadas(c)
+        cal = term - float(c["cantidad_liberada"]) - float(c["cantidad_rechazada"])
+        prod = float(c["cantidad"]) - max(term, float(c["cantidad_liberada"]) + float(c["cantidad_rechazada"]))
+        if lib > 0.0001:
+            lib_t.append([c, lib, "lib"])
+        if cal > 0.0001:
+            cal_t.append([c, cal, "cal"])
+        if prod > 0.0001:
+            prod_t.append([c, prod, "prod"])
+    trozos = lib_t + cal_t + prod_t
+    out, i = {}, 0
+    for b in pend:
+        falta = float(b["cantidad"])
+        caj = {}
+        while falta > 0.0001 and i < len(trozos):
+            t = trozos[i]
+            q = min(falta, t[1])
+            e = caj.setdefault(t[0]["id"], {"cajon_id": t[0]["id"], "numero": t[0]["numero"],
+                                            "cantidad": 0.0, "sin_liberar": 0.0, "en_proceso": 0.0})
+            e["cantidad"] += q
+            if t[2] != "lib":
+                e["sin_liberar"] += q
+            if t[2] == "prod":
+                e["en_proceso"] += q
+            falta -= q
+            t[1] -= q
+            if t[1] <= 0.0001:
+                i += 1
+        lst = list(caj.values())
+        out[b["id"]] = {"cajones": lst, "faltan": round(max(0.0, falta), 4),
+                        "sin_liberar": round(sum(x["sin_liberar"] for x in lst), 4),
+                        "en_proceso": round(sum(x["en_proceso"] for x in lst), 4)}
+    return out
+
+
+def _bulto_estado(b, prop):
+    if b["remito_item_id"]:
+        return "Remitido"
+    if b["aprobado_fecha"]:
+        return "Aceptado"
+    if not prop or prop["faltan"] > 0.0001 or prop.get("en_proceso", 0) > 0.0001:
+        return "En producción"
+    if prop["sin_liberar"] > 0.0001:
+        return "Esperando Calidad"
+    return "Para aceptar"
+
+
+@app.route("/api/bultos", methods=["GET"])
+@login_required()
+def get_bultos_lotes():
+    """Bultos de todas las OT con "Piezas por bulto" que ya tienen cajones:
+    los pendientes con los cajones que los formarían, los aceptados con sus
+    cajones fijos y los remitidos de los últimos 30 días."""
+    ots = query("""SELECT o.id, o.numero, o.cantidad, o.estado, m.codigo, m.descripcion, m.unidad,
+            c.razon cliente
+        FROM ordenes o JOIN materiales m ON m.id=o.producto_id
+        LEFT JOIN clientes c ON c.id=o.cliente_id
+        WHERE COALESCE(m.piezas_bulto,0)>0 AND o.estado<>'Cancelada'
+          AND (EXISTS (SELECT 1 FROM cajones cj WHERE cj.orden_id=o.id AND cj.cantidad>0)
+               OR EXISTS (SELECT 1 FROM bultos b WHERE b.orden_id=o.id))
+        ORDER BY o.id DESC""")
+    out = []
+    for o in ots:
+        bultos = _sync_bultos_ot(o["id"])
+        if not bultos:
+            continue
+        lote_id = _lote_pt_ot(o["id"])
+        lote_num = _lote_numero_ot(o["id"])
+        prop = _bultos_propuesta(o["id"], bultos)
+        total = len(bultos)
+        for b in bultos:
+            d = {"id": b["id"], "numero": b["numero"], "nro": b["nro"], "de": total,
+                 "cantidad": b["cantidad"], "orden_id": o["id"], "ot_numero": o["numero"],
+                 "ot_estado": o["estado"], "producto_codigo": o["codigo"],
+                 "producto_desc": o["descripcion"], "unidad": o["unidad"], "cliente": o["cliente"],
+                 "lote_id": lote_id, "lote_numero": lote_num, "aprobado_fecha": b["aprobado_fecha"],
+                 "aprobado_por": None, "remito": None, "faltan": 0, "sin_liberar": 0, "en_proceso": 0}
+            if b["remito_item_id"]:
+                r = query("""SELECT r.numero, r.fecha, r.creado FROM remito_items ri
+                    JOIN remitos r ON r.id=ri.remito_id WHERE ri.id=?""", (b["remito_item_id"],), one=True)
+                d["remito"] = r["numero"] if r else None
+                fecha_r = (r["fecha"] or r["creado"] or "") if r else ""
+                if fecha_r and fecha_r[:10] < (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d"):
+                    continue
+                d["cajones"] = [dict(x) for x in query("""SELECT c.id cajon_id, c.numero, ric.cantidad,
+                    0 sin_liberar FROM remito_item_cajones ric JOIN cajones c ON c.id=ric.cajon_id
+                    WHERE ric.remito_item_id=? ORDER BY c.id""", (b["remito_item_id"],))]
+            elif b["aprobado_fecha"]:
+                d["cajones"] = [dict(x) for x in query("""SELECT c.id cajon_id, c.numero, a.cantidad,
+                    0 sin_liberar FROM bulto_cajon_asig a JOIN cajones c ON c.id=a.cajon_id
+                    WHERE a.bulto_id=? ORDER BY c.id""", (b["id"],))]
+            else:
+                p = prop.get(b["id"]) or {"cajones": [], "faltan": float(b["cantidad"]), "sin_liberar": 0, "en_proceso": 0}
+                d["cajones"], d["faltan"], d["sin_liberar"], d["en_proceso"] = (
+                    p["cajones"], p["faltan"], p["sin_liberar"], p["en_proceso"])
+            if b["aprobado_por"]:
+                u = query("SELECT nombre FROM usuarios WHERE id=?", (b["aprobado_por"],), one=True)
+                d["aprobado_por"] = u["nombre"] if u else None
+            d["estado"] = _bulto_estado(b, prop.get(b["id"]))
+            out.append(d)
+    return jsonify(out)
+
+
+@app.route("/api/bultos/aceptar", methods=["POST"])
+@login_required(roles=["admin","almacen","vendedor","calidad"])
+def aceptar_bultos():
+    """Acepta los bultos {ids:[...]} que están 'Para aceptar': fija sus cajones
+    tal como los propone la pantalla. Devuelve los aceptados (para etiquetas)."""
+    ids = [int(x) for x in ((request.get_json(silent=True) or {}).get("ids") or []) if str(x).isdigit()]
+    if not ids:
+        return jsonify({"error": "Elegí al menos un bulto"}), 400
+    ok, errores = [], []
+    with transaccion():
+        ots = {}
+        for bid in ids:
+            b = query("SELECT orden_id FROM bultos WHERE id=?", (bid,), one=True)
+            if b:
+                ots.setdefault(b["orden_id"], []).append(bid)
+            else:
+                errores.append(f"El bulto {bid} ya no existe (la OT cambió): volvé a cargar")
+        for oid, bids in ots.items():
+            bultos = _sync_bultos_ot(oid)
+            prop = _bultos_propuesta(oid, bultos)
+            por_id = {b["id"]: b for b in bultos}
+            # en orden de nro: aceptar uno no cambia la propuesta de los anteriores
+            for b in sorted([por_id[x] for x in bids if x in por_id], key=lambda r: r["nro"]):
+                est = _bulto_estado(b, prop.get(b["id"]))
+                if est != "Para aceptar":
+                    errores.append(f"{b['numero']}: {est.lower()}")
+                    continue
+                for cj in prop[b["id"]]["cajones"]:
+                    execute("INSERT INTO bulto_cajon_asig (bulto_id,cajon_id,cantidad) VALUES (?,?,?)",
+                            (b["id"], cj["cajon_id"], round(cj["cantidad"], 4)))
+                execute("""UPDATE bultos SET aprobado_por=?, aprobado_fecha=datetime('now','localtime')
+                    WHERE id=?""", (session.get("user_id"), b["id"]))
+                ok.append(b["id"])
+            for x in bids:
+                if x not in por_id:
+                    errores.append("Un bulto elegido ya no existe (la OT cambió): volvé a cargar")
+    return jsonify({"ok": True, "aceptados": ok, "errores": errores})
+
+
+def _bulto_tope(b):
+    """(tope por bulto según 'Piezas por bulto' del producto, máximo que puede
+    llevar este bulto sin pasarse de la cantidad de la OT)."""
+    o = query("""SELECT o.cantidad, m.piezas_bulto FROM ordenes o
+        LEFT JOIN materiales m ON m.id=o.producto_id WHERE o.id=?""", (b["orden_id"],), one=True)
+    tope = int(o["piezas_bulto"] or 0) if o else 0
+    if tope <= 0:
+        tope = int(round(float(b["cantidad"] or 0)))
+    otros = query("""SELECT COALESCE(SUM(cantidad),0) q FROM bultos WHERE orden_id=? AND id<>?
+        AND (remito_item_id IS NOT NULL OR aprobado_fecha IS NOT NULL)""", (b["orden_id"], b["id"]), one=True)["q"]
+    resto = int(round(float(o["cantidad"] or 0) - float(otros or 0))) if o else tope
+    return tope, max(0, min(tope, resto))
+
+
+@app.route("/api/bultos/<int:bid>/cajones", methods=["GET"])
+@login_required()
+def get_bulto_cajones_disponibles(bid):
+    """Para editar a mano los cajones de un bulto: los cajones de su lote con
+    las piezas liberadas que tiene libres (sin contar lo apartado por otros
+    bultos aceptados) y lo que el bulto ya tiene fijado."""
+    b = query("SELECT * FROM bultos WHERE id=?", (bid,), one=True)
+    if not b:
+        return jsonify({"error": "El bulto no existe"}), 404
+    _lote_id, cajones = _bulto_cajones_ot(b["orden_id"])
+    res = _bulto_reservas([c["id"] for c in cajones], bid)
+    asig = {r["cajon_id"]: float(r["cantidad"]) for r in query(
+        "SELECT cajon_id, cantidad FROM bulto_cajon_asig WHERE bulto_id=?", (bid,))} if b["aprobado_fecha"] else {}
+    out = []
+    for c in cajones:
+        lib = round(float(c["cantidad_liberada"]) - float(c["cantidad_remitida"]) - res.get(c["id"], 0), 4)
+        term = _cajon_terminadas(c)
+        cal = max(0.0, term - float(c["cantidad_liberada"]) - float(c["cantidad_rechazada"]))
+        out.append({"cajon_id": c["id"], "numero": c["numero"], "cantidad": c["cantidad"],
+                    "libre": max(0.0, lib), "apartado_otros": round(res.get(c["id"], 0), 4),
+                    "espera_calidad": round(cal, 4), "asignado": asig.get(c["id"], 0)})
+    tope, maximo = _bulto_tope(b)
+    return jsonify({"bulto": dict(b), "cajones": out, "tope": tope, "maximo": maximo})
+
+
+@app.route("/api/bultos/<int:bid>/cajones", methods=["POST"])
+@login_required(roles=["admin","almacen","vendedor","calidad"])
+def guardar_bulto_cajones(bid):
+    """Fija a mano los cajones del bulto {cantidad, cajones:[{cajon_id, cantidad}]}
+    y lo deja aceptado. Solo piezas liberadas por Calidad y no apartadas por
+    otro bulto; tienen que sumar justo la cantidad del bulto. La cantidad se
+    puede cambiar (paco, 2026-11-20): entera, de 1 hasta el tope 'Piezas por
+    bulto' (y sin pasarse de lo que queda de la OT). El resto de la OT se
+    rearma solo en los bultos pendientes."""
+    d = request.get_json(silent=True) or {}
+    with transaccion():
+        b = query("SELECT * FROM bultos WHERE id=?", (bid,), one=True)
+        if not b:
+            return jsonify({"error": "El bulto no existe"}), 404
+        if b["remito_item_id"]:
+            return jsonify({"error": "El bulto ya se remitió: no se puede cambiar"}), 400
+        _lote_id, cajones = _bulto_cajones_ot(b["orden_id"])
+        por_id = {c["id"]: c for c in cajones}
+        res = _bulto_reservas(list(por_id), bid)
+        filas, total = [], 0.0
+        for f in (d.get("cajones") or []):
+            try:
+                cid, q = int(f.get("cajon_id")), round(float(f.get("cantidad") or 0), 4)
+            except (TypeError, ValueError):
+                return jsonify({"error": "Cantidad inválida"}), 400
+            if q <= 0:
+                continue
+            c = por_id.get(cid)
+            if not c:
+                return jsonify({"error": "Uno de los cajones no es del lote de esta OT"}), 400
+            libre = float(c["cantidad_liberada"]) - float(c["cantidad_remitida"]) - res.get(cid, 0)
+            if q > libre + 0.0001:
+                return jsonify({"error": f"El cajón {c['numero']} tiene {max(0, libre):g} piezas liberadas libres "
+                                         f"y pediste {q:g}"}), 400
+            filas.append((cid, q))
+            total += q
+        if not filas:
+            return jsonify({"error": "Elegí al menos un cajón"}), 400
+        cant = float(b["cantidad"])
+        if d.get("cantidad") not in (None, ""):
+            try:
+                cant = float(d.get("cantidad"))
+            except (TypeError, ValueError):
+                return jsonify({"error": "Cantidad del bulto inválida"}), 400
+            if abs(cant - round(cant)) > 0.0001 or cant < 1:
+                return jsonify({"error": "La cantidad del bulto tiene que ser un número entero mayor a 0"}), 400
+            tope, maximo = _bulto_tope(b)
+            if cant > maximo + 0.0001:
+                return jsonify({"error": f"El bulto puede llevar hasta {maximo:g} piezas"
+                                         + (f" (tope {tope:g} por bulto)" if maximo >= tope else " (es lo que queda de la OT)")}), 400
+            cant = float(round(cant))
+        if abs(total - cant) > 0.0001:
+            return jsonify({"error": f"Los cajones suman {total:g} y el bulto lleva {cant:g}"}), 400
+        if abs(cant - float(b["cantidad"])) > 0.0001:
+            execute("UPDATE bultos SET cantidad=? WHERE id=?", (cant, bid))
+        execute("DELETE FROM bulto_cajon_asig WHERE bulto_id=?", (bid,))
+        for cid, q in filas:
+            execute("INSERT INTO bulto_cajon_asig (bulto_id,cajon_id,cantidad) VALUES (?,?,?)", (bid, cid, q))
+        execute("""UPDATE bultos SET aprobado_por=?, aprobado_fecha=datetime('now','localtime') WHERE id=?""",
+                (session.get("user_id"), bid))
+        _sync_bultos_ot(b["orden_id"])
+    return jsonify({"ok": True, "id": bid, "cantidad": cant})
+
+
+@app.route("/api/bultos/<int:bid>/desaprobar", methods=["POST"])
+@login_required(roles=["admin","almacen","vendedor","calidad"])
+def desaprobar_bulto(bid):
+    b = query("SELECT * FROM bultos WHERE id=?", (bid,), one=True)
+    if not b:
+        return jsonify({"error": "El bulto no existe"}), 404
+    if b["remito_item_id"]:
+        return jsonify({"error": "El bulto ya se remitió"}), 400
+    with transaccion():
+        _desaprobar_bulto(bid)
+    return jsonify({"ok": True})
 
 
 def _ot_de_lote_pt(lote_id):
@@ -9118,11 +10598,11 @@ def create_rol():
     d = request.json or {}
     nombre = (d.get("nombre") or "").strip().lower().replace(" ", "_")
     if not nombre: return jsonify({"error":"Nombre requerido"}), 400
-    if d.get("base_rol") not in ROLES_BASE: return jsonify({"error":"Rol base inválido"}), 400
+    if nombre in ROLES_BASE or nombre == ROL_PERSONALIZADO: return jsonify({"error":"Ese nombre está reservado"}), 409
     if _rol_row(nombre): return jsonify({"error":"Ya existe un rol con ese nombre"}), 409
     permisos = {k: str(v) for k, v in (d.get("permisos") or {}).items()}
     rid = execute("INSERT INTO roles (nombre,descripcion,base_rol,permisos,es_sistema) VALUES (?,?,?,?,0)",
-                  (nombre, d.get("descripcion"), d["base_rol"], _j.dumps(permisos)))
+                  (nombre, d.get("descripcion"), ROL_PERSONALIZADO, _j.dumps(permisos)))
     return jsonify({"ok":True,"id":rid,"nombre":nombre}), 201
 
 @app.route("/api/roles/<int:rid>", methods=["PUT"])
@@ -9139,8 +10619,9 @@ def update_rol(rid):
                 (d.get("descripcion", r["descripcion"]), _j.dumps(permisos) if permisos is not None else None, rid))
         return jsonify({"ok":True})
     nuevo = (d.get("nombre") or r["nombre"]).strip().lower().replace(" ", "_")
-    base = d.get("base_rol", r["base_rol"])
-    if base not in ROLES_BASE: return jsonify({"error":"Rol base inválido"}), 400
+    base = ROL_PERSONALIZADO   # los roles creados ya no se basan en otro
+    if nuevo != r["nombre"] and (nuevo in ROLES_BASE or nuevo == ROL_PERSONALIZADO):
+        return jsonify({"error":"Ese nombre está reservado"}), 409
     if nuevo != r["nombre"] and _rol_row(nuevo): return jsonify({"error":"Ya existe un rol con ese nombre"}), 409
     execute("UPDATE roles SET nombre=?,descripcion=?,base_rol=?,permisos=COALESCE(?,permisos) WHERE id=?",
             (nuevo, d.get("descripcion", r["descripcion"]), base, _j.dumps(permisos) if permisos is not None else None, rid))
@@ -10540,7 +12021,7 @@ def ott_registrar_retorno(oid):
                 WHERE id=?""",
                 (cantidad, cantidad, lote_id))
     else:
-        num_lote = siguiente_numero("lotes", "Lote-OTT-", 3)
+        num_lote = _gen_lote_numero("OTT")
 
         # cantidad_original arranca en cantidad_enviada (el total acordado
         # del envío), no en lo recibido en esta primera entrega — ver
@@ -11593,6 +13074,8 @@ def _puede_cargar_pedidos_cliente():
         return True
     if rol == "logistica":
         return _permisos_sesion().get("mod_oc_clientes") == "1"
+    if rol == ROL_PERSONALIZADO:
+        return _permisos_sesion().get("mod_oc_clientes") != "0"
     return False
 
 
@@ -12203,7 +13686,7 @@ def _generar_sc_materiales_faltantes(oid, numero_ot, motivo=""):
             continue
 
         sc_exist = query(f"""SELECT id,cantidad FROM solicitudes_compra
-            WHERE material_id=? AND estado IN {SC_ABIERTAS_SQL}
+            WHERE material_id=? AND estado IN {SC_ABIERTAS_SQL} AND proyecto_id IS NULL
             ORDER BY id DESC LIMIT 1""", (mat["material_id"],), one=True)
         if sc_exist:
             if float(sc_exist["cantidad"] or 0) < faltante:
@@ -12462,7 +13945,7 @@ def _gap_analysis_materiales():
         if faltante <= 0:
             continue
         sc_exist = query(f"""SELECT id,cantidad FROM solicitudes_compra
-            WHERE material_id=? AND estado IN {SC_ABIERTAS_SQL}
+            WHERE material_id=? AND estado IN {SC_ABIERTAS_SQL} AND proyecto_id IS NULL
             ORDER BY id DESC LIMIT 1""", (mat["material_id"],), one=True)
         if sc_exist:
             if float(sc_exist["cantidad"] or 0) < faltante:
@@ -13987,9 +15470,22 @@ def delete_trabajo_no_productivo(tid):
 
 
 # ── Lotes ─────────────────────────────────────────────────────────────────────
-def _gen_lote_numero():
-    """Genera número de lote correlativo por año: LOTE-2026-0001"""
-    return siguiente_numero("lotes", f"LOTE-{datetime.now().year}-", 4)
+# Numeración de lotes según de dónde vienen (2026-11-20), cada serie con su
+# propio correlativo de 3 dígitos:
+#   OT-185   lote de producto terminado de una OT (lleva el N° de la OT, ver
+#            declarar producción; no pasa por acá)
+#   OTT-001  retorno de un tercero (OTT)
+#   OC-001   compra: se crea al emitir la OC, al recibirla si no tenía, en
+#            Recepcionar sin OC, y en la carga masiva de stock de Material
+#   INI-001  stock inicial: al dar de alta el material con stock, y en la
+#            carga masiva de stock de producto terminado / semielaborado
+# Solo existen estas 4 series (paco, 2026-11-20).
+# Los lotes viejos (LOTE-2026-0182, Lote-OTT-050) quedan con su número.
+LOTE_PREFIJOS = ("OT", "OTT", "OC", "INI")
+
+def _gen_lote_numero(origen):
+    """Próximo número de lote de la serie `origen`: _gen_lote_numero("OC") -> "OC-001"."""
+    return siguiente_numero("lotes", f"{origen}-", 3)
 
 @app.route("/api/lotes", methods=["GET"])
 @login_required()
@@ -14026,42 +15522,6 @@ def get_lotes():
         sql += " WHERE " + " AND ".join(conds)
     sql += " ORDER BY l.id DESC"
     return jsonify([dict(r) for r in query(sql, params)])
-
-@app.route("/api/lotes", methods=["POST"])
-@login_required(roles=["admin","almacen"])
-def create_lote():
-    d = request.json
-    if not d.get("material_id") or not d.get("cantidad"):
-        return jsonify({"error": "Material y cantidad requeridos"}), 400
-    mat = query("SELECT categoria FROM materiales WHERE id=?", (d["material_id"],), one=True)
-    if not mat:
-        return jsonify({"error": "Material no encontrado"}), 404
-    if mat["categoria"] != "Material":
-        return jsonify({"error": "Solo se pueden crear lotes para artículos de categoría Material"}), 400
-    numero = _gen_lote_numero()
-    qty = float(d["cantidad"])
-    lid = execute("""INSERT INTO lotes
-        (numero,material_id,cantidad_original,cantidad_disponible,proveedor_id,
-         referencia_proveedor,certificado,estado,obs,creado_por,stock_computado)
-        VALUES (?,?,?,?,?,?,?,?,?,?,1)""",
-        (numero, d["material_id"], qty, qty,
-         d.get("proveedor_id"), d.get("referencia_proveedor"),
-         d.get("certificado"), "Ingresado", d.get("obs"), session["user_id"]))
-    # El material está en el depósito: entra a inventario al ingresarlo.
-    execute("""UPDATE materiales SET stock=stock+?, actualizado=datetime('now','localtime')
-        WHERE id=?""", (qty, d["material_id"]))
-    # El stock del material representa SOLO lo Aprobado por Calidad. Un lote
-    # recién ingresado queda en estado "Ingresado" con cantidad_activa=0
-    # (nada aprobado todavía), así que NO se suma a stock acá. El stock se
-    # actualiza recién en update_lote(), cuando Calidad clasifica cantidades
-    # como Aprobado/Rechazado/Pendiente. Se deja igual un movimiento
-    # informativo para trazabilidad, aclarando que todavía no impacta stock.
-    execute("""INSERT INTO movimientos (material_id,lote_id,tipo,cantidad,referencia,usuario_id)
-        VALUES (?,?,?,?,?,?)""",
-        (d["material_id"], lid, "ingreso", qty,
-         f"Ingreso lote {numero} — {d.get('referencia_proveedor','')} (pendiente de clasificación, no computa a stock)",
-         session["user_id"]))
-    return jsonify({"ok": True, "id": lid, "numero": numero}), 201
 
 @auditoria_proceso("sincronización retorno OTT → operación")
 def _sync_ott_retorno_a_operacion(lote_id):
@@ -15012,6 +16472,7 @@ def get_solicitudes():
     tipo = request.args.get("tipo")
     sql = """SELECT s.*,m.codigo mat_codigo,m.descripcion mat_nombre,m.unidad mat_unidad,
         u.nombre solicitante_nombre, o.numero ot_numero,
+        pr.numero proyecto_numero, pr.nombre proyecto_nombre,
         (SELECT oc.id FROM ordenes_compra_items oci JOIN ordenes_compra oc ON oc.id=oci.oc_id
             WHERE oci.solicitud_id=s.id ORDER BY oci.id DESC LIMIT 1) oc_id,
         (SELECT oc.numero FROM ordenes_compra_items oci JOIN ordenes_compra oc ON oc.id=oci.oc_id
@@ -15019,7 +16480,8 @@ def get_solicitudes():
         FROM solicitudes_compra s
         LEFT JOIN materiales m ON m.id=s.material_id
         LEFT JOIN usuarios u ON u.id=s.solicitante_id
-        LEFT JOIN ordenes o ON o.id=s.ot_origen_id"""
+        LEFT JOIN ordenes o ON o.id=s.ot_origen_id
+        LEFT JOIN proyectos pr ON pr.id=s.proyecto_id"""
     rows = query(sql+" WHERE s.tipo=? ORDER BY s.id DESC",(tipo,)) if tipo else query(sql+" ORDER BY s.id DESC")
     return jsonify([dict(r) for r in rows])
 
@@ -15040,19 +16502,27 @@ def create_solicitud():
             return jsonify({"error":"Una SC indirecta solo puede cargar insumos o herramientas"}), 400
     elif tipo == "Productiva":
         return jsonify({"error":"Una SC productiva debe cargar un material"}), 400
-    if d.get("material_id"):
+    proyecto_id = d.get("proyecto_id") or None
+    if proyecto_id:
+        pr = query("SELECT estado FROM proyectos WHERE id=?", (proyecto_id,), one=True)
+        if not pr:
+            return jsonify({"error":"Proyecto inexistente"}), 400
+        if pr["estado"] != "Activo":
+            return jsonify({"error":f"El proyecto está {pr['estado']}: no se le pueden cargar compras"}), 400
+    if d.get("material_id") and not proyecto_id:
         activa = query(f"""SELECT numero FROM solicitudes_compra
-            WHERE material_id=? AND estado IN {SC_ABIERTAS_SQL}
+            WHERE material_id=? AND estado IN {SC_ABIERTAS_SQL} AND proyecto_id IS NULL
             ORDER BY id DESC LIMIT 1""", (d["material_id"],), one=True)
         if activa:
             return jsonify({"error":f"Ya existe una solicitud de compra activa ({activa['numero']}) para este material"}), 400
     numero = next_numero_sc()
     lid = execute("""INSERT INTO solicitudes_compra
-        (numero,tipo,material_id,descripcion,cantidad,unidad,urgencia,estado,ot_origen_id,centro_costo,solicitante_id,obs)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (numero,tipo,material_id,descripcion,cantidad,unidad,urgencia,estado,ot_origen_id,centro_costo,solicitante_id,obs,proyecto_id,descripcion_compra)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (numero,d.get("tipo","Productiva"),d.get("material_id"),d["descripcion"],d["cantidad"],
          d.get("unidad"),d.get("urgencia","Normal"),"Pendiente",d.get("ot_origen_id"),
-         d.get("centro_costo"),session["user_id"],d.get("obs")))
+         d.get("centro_costo"),session["user_id"],d.get("obs"),proyecto_id,
+         (d.get("descripcion_compra") or "").strip() or None))
     return jsonify({"ok":True,"id":lid,"numero":numero}), 201
 
 @app.route("/api/solicitudes_compra/<int:sid>", methods=["PUT"])
@@ -15063,8 +16533,13 @@ def update_solicitud(sid):
     if not actual: return jsonify({"error":"No encontrada"}), 404
     if actual["estado"] == "OC Emitida":
         return jsonify({"error":"No se puede editar: ya tiene una OC emitida"}), 400
-    campos = ["tipo","material_id","descripcion","cantidad","unidad","urgencia","estado","ot_origen_id","centro_costo","obs"]
+    campos = ["tipo","material_id","descripcion","cantidad","unidad","urgencia","estado","ot_origen_id","centro_costo","obs","proyecto_id","descripcion_compra"]
     valores = {c: d[c] if c in d else actual[c] for c in campos}
+    valores["proyecto_id"] = valores["proyecto_id"] or None
+    if "proyecto_id" in d and valores["proyecto_id"] and valores["proyecto_id"] != actual["proyecto_id"]:
+        pr = query("SELECT estado FROM proyectos WHERE id=?", (valores["proyecto_id"],), one=True)
+        if not pr or pr["estado"] != "Activo":
+            return jsonify({"error":"Solo se puede asignar a un proyecto Activo"}), 400
     # "OC Emitida" lo pone create_oc al emitir la OC; a mano dejaba la SC
     # cerrada sin ninguna OC detrás.
     if valores["estado"] == "OC Emitida":
@@ -15087,10 +16562,404 @@ def update_solicitud(sid):
         elif valores["tipo"] == "Productiva" and not (actual["material_id"] is None and (actual["unidad"] or "") == "servicio"):
             return jsonify({"error":"Una SC productiva debe cargar un material"}), 400
     execute("""UPDATE solicitudes_compra SET tipo=?,material_id=?,descripcion=?,cantidad=?,unidad=?,
-        urgencia=?,estado=?,ot_origen_id=?,centro_costo=?,obs=? WHERE id=?""",
+        urgencia=?,estado=?,ot_origen_id=?,centro_costo=?,obs=?,proyecto_id=?,descripcion_compra=? WHERE id=?""",
         (valores["tipo"],valores["material_id"],valores["descripcion"],valores["cantidad"],valores["unidad"],
-         valores["urgencia"],valores["estado"],valores["ot_origen_id"],valores["centro_costo"],valores["obs"],sid))
+         valores["urgencia"],valores["estado"],valores["ot_origen_id"],valores["centro_costo"],valores["obs"],
+         valores["proyecto_id"],(valores["descripcion_compra"] or "").strip() or None,sid))
     return jsonify({"ok":True})
+
+# ── Proyectos (paco, 2026-11-25) ──────────────────────────────────────────────
+# Un proyecto de producción agrupa compras: desde el proyecto se crean SC con
+# proyecto_id y siguen el circuito normal de Compras (cotización -> OC ->
+# recepción). Lo comprometido/recibido sale de las OC no anuladas de esas SC.
+PROYECTO_ESTADOS = ("Activo", "Pausado", "Cerrado", "Cancelado")
+# Producción: se fabrica uno o más productos (obligatorio elegirlos).
+# Interno: mejoras, máquinas, obra, etc. (sin productos).
+PROYECTO_TIPOS = ("Producción", "Interno")
+_PRY_CATS_PRODUCTO = ("Producto terminado", "Semielaborado")
+_ROLES_PROYECTO = ["admin", "almacen", "vendedor"]
+
+
+def _proyecto_resumen_sql(where=""):
+    return f"""SELECT p.*, c.razon cliente_nombre,
+        (SELECT COUNT(*) FROM solicitudes_compra s WHERE s.proyecto_id=p.id AND s.estado!='Cancelada') n_sc,
+        (SELECT COUNT(*) FROM solicitudes_compra s WHERE s.proyecto_id=p.id AND s.estado IN {SC_ABIERTAS_SQL}) n_sc_abiertas,
+        (SELECT COUNT(DISTINCT i.oc_id) FROM ordenes_compra_items i JOIN ordenes_compra oc ON oc.id=i.oc_id
+            JOIN solicitudes_compra s ON s.id=i.solicitud_id WHERE s.proyecto_id=p.id AND oc.estado!='Anulada') n_oc,
+        (SELECT COUNT(DISTINCT i.oc_id) FROM ordenes_compra_items i JOIN ordenes_compra oc ON oc.id=i.oc_id
+            JOIN solicitudes_compra s ON s.id=i.solicitud_id WHERE s.proyecto_id=p.id AND oc.estado IN {OC_EN_CAMINO_SQL}) n_oc_abiertas,
+        (SELECT COALESCE(SUM(i.cantidad*i.precio_unit),0) FROM ordenes_compra_items i JOIN ordenes_compra oc ON oc.id=i.oc_id
+            JOIN solicitudes_compra s ON s.id=i.solicitud_id WHERE s.proyecto_id=p.id AND oc.estado!='Anulada') monto_comprometido,
+        (SELECT COALESCE(SUM(COALESCE(i.cantidad_recibida,0)*i.precio_unit),0) FROM ordenes_compra_items i JOIN ordenes_compra oc ON oc.id=i.oc_id
+            JOIN solicitudes_compra s ON s.id=i.solicitud_id WHERE s.proyecto_id=p.id AND oc.estado!='Anulada') monto_recibido
+        ,(SELECT COUNT(*) FROM proyecto_productos pp WHERE pp.proyecto_id=p.id) n_productos,
+        (SELECT a.accion FROM proyecto_acciones a WHERE a.proyecto_id=p.id AND COALESCE(a.fecha_verificacion,'')=''
+            ORDER BY a.orden, a.id LIMIT 1) prox_accion,
+        (SELECT a.fecha_compromiso FROM proyecto_acciones a WHERE a.proyecto_id=p.id AND COALESCE(a.fecha_verificacion,'')=''
+            ORDER BY a.orden, a.id LIMIT 1) prox_fecha,
+        (SELECT (COALESCE(a.fecha_compromiso,'')!='' AND (CASE WHEN length(a.fecha_compromiso)=7
+                THEN a.fecha_compromiso < strftime('%Y-%m','now','localtime')
+                ELSE substr(a.fecha_compromiso,1,10) < date('now','localtime') END))
+            FROM proyecto_acciones a WHERE a.proyecto_id=p.id AND COALESCE(a.fecha_verificacion,'')=''
+            ORDER BY a.orden, a.id LIMIT 1) prox_venc,
+        (SELECT COUNT(*) FROM proyecto_acciones a WHERE a.proyecto_id=p.id) n_acc,
+        (SELECT COUNT(*) FROM proyecto_acciones a WHERE a.proyecto_id=p.id AND COALESCE(a.fecha_verificacion,'')!='') n_acc_ok,
+        (SELECT COUNT(*) FROM proyecto_acciones a WHERE a.proyecto_id=p.id AND COALESCE(a.fecha_verificacion,'')=''
+            AND COALESCE(a.fecha_compromiso,'')!='' AND (CASE WHEN length(a.fecha_compromiso)=7
+                THEN a.fecha_compromiso < strftime('%Y-%m','now','localtime')
+                ELSE substr(a.fecha_compromiso,1,10) < date('now','localtime') END)) n_acc_venc,
+        (SELECT GROUP_CONCAT(m.codigo, ', ') FROM proyecto_productos pp JOIN materiales m ON m.id=pp.producto_id
+            WHERE pp.proyecto_id=p.id) productos_txt
+        FROM proyectos p LEFT JOIN clientes c ON c.id=p.cliente_id {where}"""
+
+
+@app.route("/api/proyectos", methods=["GET"])
+@login_required()
+@modulo_requerido("proyectos")
+def get_proyectos():
+    if request.args.get("activos"):
+        rows = query(_proyecto_resumen_sql("WHERE p.estado='Activo'") + " ORDER BY p.id DESC")
+    else:
+        rows = query(_proyecto_resumen_sql() + " ORDER BY p.id DESC")
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/proyectos/<int:pid>", methods=["GET"])
+@login_required()
+@modulo_requerido("proyectos")
+def get_proyecto(pid):
+    p = query(_proyecto_resumen_sql("WHERE p.id=?"), (pid,), one=True)
+    if not p:
+        return jsonify({"error": "No encontrado"}), 404
+    out = dict(p)
+    compras = []
+    for s in query("""SELECT s.*, m.codigo mat_codigo, m.descripcion mat_nombre, m.unidad mat_unidad,
+            u.nombre solicitante_nombre,
+            (SELECT MIN(c.precio_unit) FROM cotizaciones_compra c WHERE c.solicitud_id=s.id AND c.precio_unit>0) mejor_precio,
+            (SELECT COUNT(*) FROM cotizaciones_compra c WHERE c.solicitud_id=s.id) n_cot
+            FROM solicitudes_compra s
+            LEFT JOIN materiales m ON m.id=s.material_id
+            LEFT JOIN usuarios u ON u.id=s.solicitante_id
+            WHERE s.proyecto_id=? ORDER BY s.id DESC""", (pid,)):
+        r = dict(s)
+        mp = r.pop("mejor_precio", None)
+        r["monto_cotizado"] = round(float(mp) * float(r["cantidad"] or 0), 2) if mp else None
+        r["ocs"] = [dict(i) for i in query("""SELECT oc.id oc_id, oc.numero oc_numero, oc.estado oc_estado,
+                oc.fecha_entrega_est, oc.moneda, pv.razon proveedor_nombre,
+                i.cantidad, COALESCE(i.cantidad_recibida,0) cantidad_recibida, i.fecha_recibida,
+                i.precio_unit, i.cantidad*i.precio_unit importe
+                FROM ordenes_compra_items i JOIN ordenes_compra oc ON oc.id=i.oc_id
+                LEFT JOIN proveedores pv ON pv.id=oc.proveedor_id
+                WHERE i.solicitud_id=? AND oc.estado!='Anulada' ORDER BY oc.id""", (r["id"],))]
+        compras.append(r)
+    out["compras"] = compras
+    out["productos"] = [dict(r) for r in query("""SELECT pp.id, pp.producto_id, pp.cantidad, pp.obs,
+            m.codigo, m.descripcion, m.unidad, m.stock, m.categoria,
+            (SELECT COUNT(*) FROM ordenes o WHERE o.producto_id=pp.producto_id
+                AND o.estado NOT IN ('Completada','Cancelada','Anulada')) ots_abiertas
+            FROM proyecto_productos pp JOIN materiales m ON m.id=pp.producto_id
+            WHERE pp.proyecto_id=? ORDER BY pp.id""", (pid,))]
+    out["acciones"] = [dict(r) for r in query(
+        "SELECT * FROM proyecto_acciones WHERE proyecto_id=? ORDER BY orden, id", (pid,))]
+    return jsonify(out)
+
+
+_MESES_PRY = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto",
+              "Setiembre", "Octubre", "Noviembre", "Diciembre"]
+
+
+def _pry_fecha_txt(f, corta=False):
+    """'2025-08' -> 'Agosto 2025'; '2025-08-07' -> '07/08/25' (como el papel)."""
+    f = (f or "").strip()
+    if len(f) == 7 and f[4] == "-" and f[:4].isdigit() and f[5:].isdigit() and 1 <= int(f[5:]) <= 12:
+        return f"{_MESES_PRY[int(f[5:]) - 1]} {f[:4]}"
+    if len(f) >= 10 and f[4] == "-":
+        try:
+            return datetime.strptime(f[:10], "%Y-%m-%d").strftime("%d/%m/%y" if corta else "%d/%m/%Y")
+        except ValueError:
+            pass
+    return f
+
+
+@app.route("/api/proyectos/<int:pid>/pdf")
+@login_required()
+@modulo_requerido("proyectos")
+def proyecto_pdf(pid):
+    return _pdf_o_error(_build_proyecto_pdf, pid)
+
+
+def _build_proyecto_pdf(pid):
+    """Plan de Mejora Continua, mismo formato que el formulario F-8.5.1-00."""
+    import io
+    from flask import send_file
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
+    from xml.sax.saxutils import escape as _x
+
+    p = query("SELECT * FROM proyectos WHERE id=?", (pid,), one=True)
+    if not p:
+        return jsonify({"error": "No encontrado"}), 404
+    acc = query("SELECT * FROM proyecto_acciones WHERE proyecto_id=? ORDER BY orden, id", (pid,))
+    empresa = "MECANIZADO ITUZAINGO S.A."   # como el formulario en papel
+
+    W, H = A4
+    M = 14 * mm
+    CW = W - 2 * M
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=M, rightMargin=M, topMargin=M, bottomMargin=M,
+                            title=f"Plan de mejora {p['numero']}")
+    st = ParagraphStyle("n", fontName="Helvetica", fontSize=10, leading=13)
+    stb = ParagraphStyle("b", parent=st, fontName="Helvetica-Bold")
+    stc = ParagraphStyle("c", parent=stb, alignment=1)
+    sts = ParagraphStyle("s", parent=st, fontSize=9.5, leading=12)
+
+    def P(txt, s=st):
+        return Paragraph(txt, s)
+
+    def campo(lbl, val):
+        return P(f"<b>{lbl}:</b> {_x(val or '')}")
+
+    negro = colors.black
+    story = []
+    cab = Table([[P(f"<b>{_x(empresa)}</b>", stc), P("<font size=15><b>PLAN DE MEJORA CONTINUA</b></font>", stc)]],
+                colWidths=[CW * .28, CW * .72], rowHeights=[16 * mm])
+    cab.setStyle(TableStyle([("BOX", (0, 0), (-1, -1), 1.2, negro), ("LINEAFTER", (0, 0), (0, 0), 1.2, negro),
+                             ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
+    story.append(cab)
+
+    datos = Table([
+        [campo("FECHA", _pry_fecha_txt(p["fecha_inicio"], True)), campo("SOLICITANTE", p["solicitante"]), campo("N°", p["numero"])],
+        [campo("DESTINATARIO", p["destinatario"]), campo("AREA", p["area"]), ""],
+        [campo("REFERENCIA", p["referencia"]), "", ""],
+    ], colWidths=[CW * .42, CW * .36, CW * .22])
+    datos.setStyle(TableStyle([("BOX", (0, 0), (-1, -1), 1.2, negro), ("SPAN", (0, 2), (2, 2)),
+                               ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("TOPPADDING", (0, 0), (-1, -1), 4),
+                               ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
+    story.append(datos)
+
+    desc = _x(p["descripcion"] or "").replace("\n", "<br/>")
+    dt = Table([[P(f"<b>DESCRIPCION:</b> {desc}")]], colWidths=[CW], rowHeights=[None])
+    dt.setStyle(TableStyle([("BOX", (0, 0), (-1, -1), 1.2, negro), ("TOPPADDING", (0, 0), (-1, -1), 6),
+                            ("BOTTOMPADDING", (0, 0), (-1, -1), 26)]))
+    story.append(dt)
+
+    filas = [[P("<b>ACCION :</b>"), "", "", ""],
+             [P("Fecha de compromiso", stc), P("Acción", stc), P("Responsable", stc), P("Fecha de Verificación", stc)]]
+    for a in acc:
+        filas.append([P(_x(_pry_fecha_txt(a["fecha_compromiso"])), sts), P(_x(a["accion"] or ""), sts),
+                      P(_x(a["responsable"] or ""), ParagraphStyle("rc", parent=sts, alignment=1)),
+                      P(_x(_pry_fecha_txt(a["fecha_verificacion"])), sts)])
+    if p["notas"]:
+        filas.append(["", P("<b>Nota:</b> " + _x(p["notas"]).replace("\n", "<br/>"), sts), "", ""])
+    alto_min = 145 * mm
+    alto_filas = 14 * mm + 9 * mm * (len(filas) - 2)
+    if alto_filas < alto_min:
+        filas.append(["", "", "", ""])
+    at = Table(filas, colWidths=[CW * .19, CW * .47, CW * .16, CW * .18],
+               rowHeights=[None] * (len(filas) - 1) + ([max(8 * mm, alto_min - alto_filas)] if alto_filas < alto_min else [None]))
+    at.setStyle(TableStyle([("BOX", (0, 0), (-1, -1), 1.2, negro), ("SPAN", (0, 0), (1, 0)),
+                            ("LINEBELOW", (0, 1), (-1, 1), .8, negro),
+                            ("LINEAFTER", (0, 1), (2, -1), .8, negro), ("LINEAFTER", (1, 0), (2, 0), .8, negro),
+                            ("VALIGN", (0, 0), (-1, -1), "TOP")]))
+    story.append(at)
+
+    def ok(v):
+        return "Sí" if v else ""
+    cierre = Table([
+        [P("<b>CIERRE DE LAS ACCIONES :</b>"), "", "", ""],
+        [P("<b>Solicitante :</b> " + _x(p["cierre_solicitante"] or "")), P("Válido : " + ok(p["cierre_solicitante_valido"])),
+         P("Fecha : " + _x(_pry_fecha_txt(p["cierre_solicitante_fecha"], True))), P("Firma :")],
+        [P("<b>Calidad :</b> " + _x(p["cierre_calidad"] or "")), P("Válido : " + ok(p["cierre_calidad_valido"])),
+         P("Fecha : " + _x(_pry_fecha_txt(p["cierre_calidad_fecha"], True))), P("Firma :")],
+    ], colWidths=[CW * .34, CW * .2, CW * .22, CW * .24], rowHeights=[10 * mm, 14 * mm, 14 * mm])
+    cierre.setStyle(TableStyle([("BOX", (0, 0), (-1, -1), 1.2, negro), ("SPAN", (0, 0), (-1, 0)),
+                                ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
+    story.append(cierre)
+    story.append(Table([[P("F-8.5.1-00 Rev. 00", ParagraphStyle("f", parent=st, fontSize=9, alignment=2))]], colWidths=[CW]))
+    doc.build(story)
+    buf.seek(0)
+    return send_file(buf, mimetype="application/pdf", as_attachment=False,
+                     download_name=f"Plan_mejora_{p['numero'].replace('/', '-')}.pdf")
+
+
+_PRY_CAMPOS_FORM = ("solicitante", "area", "destinatario", "referencia", "notas",
+                    "cierre_solicitante", "cierre_solicitante_fecha", "cierre_calidad", "cierre_calidad_fecha")
+
+
+def _proyecto_payload(d, actual=None):
+    nombre = (d.get("nombre") if "nombre" in d else (actual["nombre"] if actual else "")) or ""
+    nombre = nombre.strip()
+    if not nombre:
+        # El formulario no tiene título: si no se pone, se usa la descripción.
+        desc = ((d.get("descripcion") if "descripcion" in d else (actual["descripcion"] if actual else "")) or "").strip()
+        nombre = desc.splitlines()[0][:80] if desc else ""
+    if not nombre:
+        return None, "Poné la descripción del proyecto"
+    estado = d.get("estado") or (actual["estado"] if actual else "Activo")
+    if estado not in PROYECTO_ESTADOS:
+        return None, "Estado inválido"
+    tipo = d.get("tipo") or ((actual["tipo"] if actual and "tipo" in actual.keys() else None) or "Producción")
+    if tipo not in PROYECTO_TIPOS:
+        return None, "Tipo de proyecto inválido"
+    v = {"nombre": nombre, "estado": estado, "tipo": tipo, "productos": None, "acciones": None}
+    for c in _PRY_CAMPOS_FORM:
+        v[c] = ((d.get(c) if c in d else (actual[c] if actual else None)) or "").strip() or None
+    for c in ("cierre_solicitante_valido", "cierre_calidad_valido"):
+        v[c] = 1 if (d.get(c) if c in d else (actual[c] if actual else 0)) else 0
+    if "acciones" in d:
+        acc = []
+        for it in (d.get("acciones") or []):
+            if not isinstance(it, dict):
+                continue
+            txt = (it.get("accion") or "").strip()
+            if not txt:
+                continue
+            acc.append((txt, (it.get("fecha_compromiso") or "").strip() or None,
+                        (it.get("responsable") or "").strip() or None,
+                        (it.get("fecha_verificacion") or "").strip() or None))
+        v["acciones"] = acc
+    if "productos" in d:
+        prods, vistos = [], set()
+        for it in (d.get("productos") or []):
+            try:
+                mid = int(it.get("producto_id"))
+                cant = float(it.get("cantidad") or 0)
+            except (TypeError, ValueError, AttributeError):
+                return None, "Producto inválido"
+            if mid in vistos:
+                continue
+            m = query("SELECT categoria, codigo FROM materiales WHERE id=?", (mid,), one=True)
+            if not m or m["categoria"] not in _PRY_CATS_PRODUCTO:
+                return None, "Solo se pueden elegir productos terminados o semielaborados"
+            if cant < 0:
+                return None, f"Cantidad inválida para {m['codigo']}"
+            vistos.add(mid)
+            prods.append((mid, cant, (it.get("obs") or "").strip() or None))
+        v["productos"] = prods
+    if tipo == "Producción":
+        tiene = (len(v["productos"]) if v["productos"] is not None else
+                 (query("SELECT COUNT(*) c FROM proyecto_productos WHERE proyecto_id=?", (actual["id"],), one=True)["c"] if actual else 0))
+        if not tiene:
+            return None, "Un proyecto de Producción necesita al menos un producto"
+    for c in ("cliente_id", "responsable", "fecha_inicio", "fecha_fin", "descripcion"):
+        v[c] = (d.get(c) if c in d else (actual[c] if actual else None)) or None
+    if v["fecha_inicio"] and v["fecha_fin"] and v["fecha_fin"] < v["fecha_inicio"]:
+        return None, "La fecha de fin no puede ser anterior a la de inicio"
+    if actual is not None:
+        v["presupuesto_monto"] = _mon_o_actual(d, "presupuesto_monto", "proyectos", actual["id"])
+    else:
+        v["presupuesto_monto"] = d.get("presupuesto_monto") or 0
+    try:
+        v["presupuesto_monto"] = float(v["presupuesto_monto"] or 0)
+    except (TypeError, ValueError):
+        return None, "Presupuesto inválido"
+    return v, None
+
+
+@app.route("/api/proyectos", methods=["POST"])
+@login_required(roles=_ROLES_PROYECTO)
+@modulo_requerido("proyectos")
+def create_proyecto():
+    v, err = _proyecto_payload(request.json or {})
+    if err:
+        return jsonify({"error": err}), 400
+    d = request.json or {}
+    numero = (d.get("numero") or "").strip()
+    if numero:
+        if query("SELECT 1 FROM proyectos WHERE numero=?", (numero,), one=True):
+            return jsonify({"error": f"Ya existe el proyecto {numero}"}), 400
+    else:
+        numero = _proyecto_siguiente_numero(v["fecha_inicio"])
+    pid = execute("""INSERT INTO proyectos (numero,nombre,cliente_id,responsable,fecha_inicio,fecha_fin,
+        presupuesto_monto,estado,descripcion,creado_por,tipo) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (numero, v["nombre"], v["cliente_id"], v["responsable"], v["fecha_inicio"], v["fecha_fin"],
+         v["presupuesto_monto"], v["estado"], v["descripcion"], session.get("user_id"), v["tipo"]))
+    _proyecto_guardar_productos(pid, v)
+    _proyecto_guardar_form(pid, v)
+    return jsonify({"ok": True, "id": pid, "numero": numero}), 201
+
+
+@app.route("/api/proyectos/<int:pid>", methods=["PUT"])
+@login_required(roles=_ROLES_PROYECTO)
+@modulo_requerido("proyectos")
+def update_proyecto(pid):
+    actual = query("SELECT * FROM proyectos WHERE id=?", (pid,), one=True)
+    if not actual:
+        return jsonify({"error": "No encontrado"}), 404
+    v, err = _proyecto_payload(request.json or {}, actual)
+    if err:
+        return jsonify({"error": err}), 400
+    execute("""UPDATE proyectos SET nombre=?,cliente_id=?,responsable=?,fecha_inicio=?,fecha_fin=?,
+        presupuesto_monto=?,estado=?,descripcion=?,tipo=? WHERE id=?""",
+        (v["nombre"], v["cliente_id"], v["responsable"], v["fecha_inicio"], v["fecha_fin"],
+         v["presupuesto_monto"], v["estado"], v["descripcion"], v["tipo"], pid))
+    _proyecto_guardar_productos(pid, v)
+    _proyecto_guardar_form(pid, v)
+    d = request.json or {}
+    if "numero" in d and (d.get("numero") or "").strip() and d["numero"].strip() != actual["numero"]:
+        nuevo = d["numero"].strip()
+        if query("SELECT 1 FROM proyectos WHERE numero=? AND id!=?", (nuevo, pid), one=True):
+            return jsonify({"error": f"Ya existe el proyecto {nuevo}"}), 400
+        execute("UPDATE proyectos SET numero=? WHERE id=?", (nuevo, pid))
+    return jsonify({"ok": True})
+
+
+def _proyecto_siguiente_numero(fecha=None):
+    """P01/2026, P02/2026... correlativo por año (como el formulario en papel)."""
+    anio = (fecha or "")[:4] if (fecha or "")[:4].isdigit() else datetime.now().strftime("%Y")
+    n = 0
+    for r in query("SELECT numero FROM proyectos WHERE numero LIKE ?", (f"P%/{anio}",)):
+        cab = (r["numero"] or "")[1:-(len(anio) + 1)]
+        if cab.isdigit():
+            n = max(n, int(cab))
+    while True:
+        n += 1
+        numero = f"P{n:02d}/{anio}"
+        if not query("SELECT 1 FROM proyectos WHERE numero=?", (numero,), one=True):
+            return numero
+
+
+def _proyecto_guardar_form(pid, v):
+    execute(f"""UPDATE proyectos SET {', '.join(c + '=?' for c in _PRY_CAMPOS_FORM)},
+        cierre_solicitante_valido=?, cierre_calidad_valido=? WHERE id=?""",
+        tuple(v[c] for c in _PRY_CAMPOS_FORM) + (v["cierre_solicitante_valido"], v["cierre_calidad_valido"], pid))
+    if v["acciones"] is not None:
+        execute("DELETE FROM proyecto_acciones WHERE proyecto_id=?", (pid,))
+        for i, (txt, fc, resp, fv) in enumerate(v["acciones"]):
+            execute("""INSERT INTO proyecto_acciones (proyecto_id,orden,fecha_compromiso,accion,responsable,fecha_verificacion)
+                VALUES (?,?,?,?,?,?)""", (pid, i, fc, txt, resp, fv))
+
+
+def _proyecto_guardar_productos(pid, v):
+    """Reemplaza los productos del proyecto si vinieron en el payload. Un
+    proyecto Interno no lleva productos."""
+    if v["tipo"] == "Interno":
+        execute("DELETE FROM proyecto_productos WHERE proyecto_id=?", (pid,))
+        return
+    if v["productos"] is None:
+        return
+    execute("DELETE FROM proyecto_productos WHERE proyecto_id=?", (pid,))
+    for mid, cant, obs in v["productos"]:
+        execute("INSERT INTO proyecto_productos (proyecto_id,producto_id,cantidad,obs) VALUES (?,?,?,?)",
+                (pid, mid, cant, obs))
+
+
+@app.route("/api/proyectos/<int:pid>", methods=["DELETE"])
+@login_required(roles=_ROLES_PROYECTO)
+@modulo_requerido("proyectos")
+def delete_proyecto(pid):
+    if not query("SELECT 1 FROM proyectos WHERE id=?", (pid,), one=True):
+        return jsonify({"error": "No encontrado"}), 404
+    n = query("SELECT COUNT(*) c FROM solicitudes_compra WHERE proyecto_id=?", (pid,), one=True)["c"]
+    if n:
+        return jsonify({"error": f"El proyecto tiene {n} compra(s) cargada(s): no se puede borrar. Pasalo a Cerrado o Cancelado."}), 400
+    execute("DELETE FROM proyecto_productos WHERE proyecto_id=?", (pid,))
+    execute("DELETE FROM proyecto_acciones WHERE proyecto_id=?", (pid,))
+    execute("DELETE FROM proyectos WHERE id=?", (pid,))
+    return jsonify({"ok": True})
 
 # ── Cotizaciones de compra ────────────────────────────────────────────────────
 @app.route("/api/cotizaciones_compra", methods=["GET"])
@@ -15352,7 +17221,7 @@ def create_oc():
             # (los ítems de OTT no crean lote acá: el lote lo genera la recepción del remito en Terceros)
             mat_cat = query("SELECT categoria FROM materiales WHERE id=?", (item["material_id"],), one=True)
             if mat_cat and mat_cat["categoria"] in ("Material", "Producto terminado"):
-                numero_lote = _gen_lote_numero()
+                numero_lote = _gen_lote_numero("OC")
                 lote_id = execute("""INSERT INTO lotes
                     (numero,material_id,cantidad_original,cantidad_disponible,cantidad_activa,
                      proveedor_id,referencia_proveedor,estado,creado_por)
@@ -15547,7 +17416,7 @@ def create_recepcion():
     numero = _gen_recepcion_numero()
     lote_id = None
     if mat["categoria"] in ("Material", "Producto terminado"):
-        numero_lote = _gen_lote_numero()
+        numero_lote = _gen_lote_numero("OC")
         lote_id = execute("""INSERT INTO lotes
             (numero,material_id,cantidad_original,cantidad_disponible,cantidad_activa,
              proveedor_id,referencia_proveedor,estado,obs,creado_por,stock_computado)
@@ -15650,7 +17519,7 @@ def recibir_oc(ocid):
                 # 'Ingresado'), se vincula al ítem y sigue el flujo normal.
                 # Sin esto la mercadería se recibía sin lote y sin sumar a
                 # stock. ──────────────────────────────────────────────────
-                numero_lote = _gen_lote_numero()
+                numero_lote = _gen_lote_numero("OC")
                 lote_id = execute("""INSERT INTO lotes
                     (numero,material_id,cantidad_original,cantidad_disponible,cantidad_activa,
                      proveedor_id,referencia_proveedor,estado,creado_por)
@@ -16007,7 +17876,7 @@ def completar_oc(ocid):
 def mrp():
     criticos = []
     for r in query(f"""SELECT m.id,m.codigo,m.descripcion,m.categoria,m.stock,m.stock_min,m.stock_max,m.stock_min-m.stock AS faltante,m.unidad,p.razon proveedor,
-            (SELECT s.numero FROM solicitudes_compra s WHERE s.material_id=m.id AND s.estado IN {SC_ABIERTAS_SQL} ORDER BY s.id DESC LIMIT 1) sc_activa
+            (SELECT s.numero FROM solicitudes_compra s WHERE s.material_id=m.id AND s.estado IN {SC_ABIERTAS_SQL} AND s.proyecto_id IS NULL ORDER BY s.id DESC LIMIT 1) sc_activa
             FROM materiales m LEFT JOIN proveedores p ON p.id=m.proveedor_id WHERE m.stock<m.stock_min AND m.stock_min>0 ORDER BY (m.stock_min-m.stock) DESC"""):
         c = dict(r)
         # Cantidad a pedir con "+ SC": hasta el Máximo (o el Mínimo si no hay
@@ -16182,6 +18051,77 @@ def get_rendimiento_operario_dias():
 
 
 # ── Remitos ───────────────────────────────────────────────────────────────────
+def _remitos_filtros(con_tipo=True):
+    """Filtros de la pantalla Remitos emitidos (los usan la lista paginada y el resumen)."""
+    w, p = [], []
+    cliente_id = request.args.get("cliente_id")
+    if cliente_id:
+        w.append("r.cliente_id=?"); p.append(cliente_id)
+    fecha = (request.args.get("fecha") or "").strip()
+    if fecha:
+        w.append("substr(r.fecha,1,10)=?"); p.append(fecha)
+    oc = (request.args.get("oc") or "").strip()
+    if oc:
+        w.append("IFNULL(oc.numero,'') LIKE ?"); p.append(f"%{oc}%")
+    tipo = (request.args.get("tipo") or "").strip() if con_tipo else ""
+    if tipo == "devolucion":
+        w.append("IFNULL(r.tipo,'entrega_cliente') IN ('devolucion_ott','devolucion_oc')")
+    elif tipo:
+        w.append("IFNULL(r.tipo,'entrega_cliente')=?"); p.append(tipo)
+    mat = (request.args.get("material") or "").strip()
+    if mat:
+            w.append("""(EXISTS (SELECT 1 FROM remito_items ri2
+                JOIN materiales m2 ON m2.id=ri2.material_id
+                WHERE ri2.remito_id=r.id
+                AND (IFNULL(m2.codigo,'')||' '||IFNULL(m2.descripcion,'')) LIKE ?)
+                OR EXISTS (SELECT 1 FROM ordenes_tercerizado o2
+                LEFT JOIN proceso_operaciones po2 ON po2.id=o2.proceso_op_id
+                LEFT JOIN productos pr2 ON pr2.id=po2.producto_id
+                LEFT JOIN materiales ms2 ON ms2.id=o2.material_se_id
+                WHERE o2.id=r.ott_id
+                AND (IFNULL(pr2.codigo,'')||' '||IFNULL(pr2.nombre,'')||' '||
+                     IFNULL(ms2.codigo,'')||' '||IFNULL(ms2.descripcion,'')) LIKE ?))""")
+            p.extend([f"%{mat}%", f"%{mat}%"])
+    return w, p
+
+
+@app.route("/api/remitos/resumen", methods=["GET"])
+@login_required()
+def get_remitos_resumen():
+    """Totales de Remitos emitidos con los mismos filtros de la lista (sin el de tipo,
+    así los indicadores muestran todos los tipos y sirven para filtrar)."""
+    w, p = _remitos_filtros(con_tipo=False)
+    where = (" WHERE " + " AND ".join(w)) if w else ""
+    base = " FROM remitos r LEFT JOIN ordenes_cliente oc ON oc.id=r.orden_cliente_id" + where
+    rows = query("SELECT IFNULL(r.tipo,'entrega_cliente') tipo, r.estado, substr(r.fecha,1,10) f, r.id" + base, p)
+    mes = date.today().strftime("%Y-%m")
+    hace7 = (date.today() - timedelta(days=7)).isoformat()
+    res = {"total": 0, "anulados": 0, "mes": 0, "semana": 0, "ultimo": None,
+           "tipos": {"entrega_cliente": 0, "traslado_ott": 0, "devolucion": 0}, "unid_entrega_mes": 0}
+    ids_ent_mes = []
+    for r in rows:
+        res["total"] += 1
+        if r["estado"] == "Anulado":
+            res["anulados"] += 1
+            continue
+        t = r["tipo"]
+        key = "devolucion" if t in ("devolucion_ott", "devolucion_oc") else t
+        res["tipos"][key] = res["tipos"].get(key, 0) + 1
+        f = r["f"] or ""
+        if f[:7] == mes:
+            res["mes"] += 1
+            if t == "entrega_cliente":
+                ids_ent_mes.append(r["id"])
+        if f >= hace7:
+            res["semana"] += 1
+        if f and (res["ultimo"] is None or f > res["ultimo"]):
+            res["ultimo"] = f
+    if ids_ent_mes:
+        q = query("SELECT IFNULL(SUM(cantidad),0) c FROM remito_items WHERE remito_id IN (%s)" % ",".join("?" * len(ids_ent_mes)), ids_ent_mes, one=True)
+        res["unid_entrega_mes"] = q["c"] if q else 0
+    return jsonify(res)
+
+
 @app.route("/api/remitos", methods=["GET"])
 @login_required()
 def get_remitos():
@@ -16206,29 +18146,7 @@ def get_remitos():
     # Modo paginado (pantalla "Remitos emitidos"): filtra y pagina en la base,
     # así se pueden recorrer todos los remitos sin cargarlos de una vez.
     if request.args.get("pagina") is not None:
-        w, p = [], []
-        if cliente_id:
-            w.append("r.cliente_id=?"); p.append(cliente_id)
-        fecha = (request.args.get("fecha") or "").strip()
-        if fecha:
-            w.append("substr(r.fecha,1,10)=?"); p.append(fecha)
-        oc = (request.args.get("oc") or "").strip()
-        if oc:
-            w.append("IFNULL(oc.numero,'') LIKE ?"); p.append(f"%{oc}%")
-        mat = (request.args.get("material") or "").strip()
-        if mat:
-            w.append("""(EXISTS (SELECT 1 FROM remito_items ri2
-                JOIN materiales m2 ON m2.id=ri2.material_id
-                WHERE ri2.remito_id=r.id
-                AND (IFNULL(m2.codigo,'')||' '||IFNULL(m2.descripcion,'')) LIKE ?)
-                OR EXISTS (SELECT 1 FROM ordenes_tercerizado o2
-                LEFT JOIN proceso_operaciones po2 ON po2.id=o2.proceso_op_id
-                LEFT JOIN productos pr2 ON pr2.id=po2.producto_id
-                LEFT JOIN materiales ms2 ON ms2.id=o2.material_se_id
-                WHERE o2.id=r.ott_id
-                AND (IFNULL(pr2.codigo,'')||' '||IFNULL(pr2.nombre,'')||' '||
-                     IFNULL(ms2.codigo,'')||' '||IFNULL(ms2.descripcion,'')) LIKE ?))""")
-            p.extend([f"%{mat}%", f"%{mat}%"])
+        w, p = _remitos_filtros()
         where = (" WHERE " + " AND ".join(w)) if w else ""
         try:
             por_pagina = int(request.args.get("por_pagina", 25))
@@ -16446,8 +18364,19 @@ def get_pt_disponible():
         d["bultos"] = None
         if r["ot_id"] and _lote_pt_ot(r["ot_id"]) == r["id"]:
             if r["ot_id"] not in bultos_ot:
-                bultos_ot[r["ot_id"]] = [{"id": b["id"], "numero": b["numero"], "cantidad": b["cantidad"]}
-                    for b in _sync_bultos_ot(r["ot_id"]) if not b["remito_item_id"]]
+                _bs = [b for b in _sync_bultos_ot(r["ot_id"]) if not b["remito_item_id"]]
+                _prop = _bultos_propuesta(r["ot_id"])
+                bultos_ot[r["ot_id"]] = []
+                for b in _bs:
+                    if b["aprobado_fecha"]:
+                        cjs = [{"numero": x["numero"], "cantidad": x["cantidad"]} for x in query(
+                            """SELECT c.numero, a.cantidad FROM bulto_cajon_asig a JOIN cajones c ON c.id=a.cajon_id
+                               WHERE a.bulto_id=? ORDER BY c.id""", (b["id"],))]
+                    else:
+                        cjs = [{"numero": x["numero"], "cantidad": round(x["cantidad"], 4)}
+                               for x in (_prop.get(b["id"]) or {}).get("cajones", [])]
+                    bultos_ot[r["ot_id"]].append({"id": b["id"], "numero": b["numero"], "nro": b["nro"],
+                        "cantidad": b["cantidad"], "aceptado": bool(b["aprobado_fecha"]), "cajones": cjs})
             if query("SELECT 1 FROM bultos WHERE orden_id=? LIMIT 1", (r["ot_id"],), one=True):
                 d["bultos"] = bultos_ot[r["ot_id"]]
         out.append(d)
@@ -16561,7 +18490,7 @@ def create_remito():
         execute("""UPDATE lotes SET cantidad_disponible=?,cantidad_activa=?,estado=?
             WHERE id=?""", (nueva_disp, nueva_activa, nuevo_estado, lote["id"]))
         if query("SELECT 1 FROM cajones WHERE lote_id=? LIMIT 1", (lote["id"],), one=True):
-            _remitir_de_cajones(ri_id, lote["id"], qty)
+            _remitir_de_cajones(ri_id, lote["id"], qty, bulto["id"] if bulto else None)
             _lote_estado_por_cajones(lote["id"])
         # Discount from PT stock
         execute("UPDATE materiales SET stock=MAX(0,stock-?),actualizado=datetime('now','localtime') WHERE id=?",
@@ -17181,7 +19110,7 @@ class _PdfBase:
         from reportlab.platypus import Table, TableStyle
         P, MUTED, GRAY_D = self.P, self.MUTED, self.GRAY_D
         emisor_nombre = session.get("nombre") or session.get("username") or "—"
-        emisor_rol = (session.get("rol") or "").strip()
+        emisor_rol = (session.get("rol_nombre") or session.get("rol") or "").strip()
         emisor_rol_label = {"admin": "Administrador"}.get(emisor_rol, emisor_rol.capitalize() if emisor_rol else "")
         firma_head = [
             P(f"Emitido por: {emisor_nombre}" + (f" ({emisor_rol_label})" if emisor_rol_label else ""),
@@ -17361,6 +19290,26 @@ def _build_ot_pdf(oid):
            if ver_monetario_pdf else "", size=9)],
     ])
     pdf.observaciones(ot["obs"])
+
+    # Imagen del producto (solo si tiene una cargada)
+    img_prod = _pdf_imagen_producto(ot["producto_id"], 60*mm, 45*mm)
+    if img_prod:
+        from reportlab.platypus import Table, TableStyle
+        story.append(Spacer(1, 3*mm))
+        bloque_img = Table(
+            [[img_prod,
+              [P("Producto", size=8, bold=True, color=MUTED),
+               P(f'{ot["producto_codigo"] or ""} — {ot["producto_nombre"] or ""}', size=9)]]],
+            colWidths=[64*mm, pdf.CW - 64*mm])
+        bloque_img.setStyle(TableStyle([
+            ("GRID",          (0,0), (-1,-1), 0.4, GRAY_D),
+            ("VALIGN",        (0,0), (-1,-1), "MIDDLE"),
+            ("ALIGN",         (0,0), (0,0),  "CENTER"),
+            ("TOPPADDING",    (0,0), (-1,-1), 4),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+            ("LEFTPADDING",   (0,0), (-1,-1), 5),
+        ]))
+        story.append(bloque_img)
     story.append(Spacer(1, 6*mm))
 
     # ── 3. Operaciones ────────────────────────────────────────────────────────
@@ -18021,13 +19970,111 @@ def delete_archivo(pid, nombre):
     _os.remove(fpath)
     return jsonify({"ok": True})
 
+# ── Imagen del producto ───────────────────────────────────────────────────────
+# El archivo vive en imagenes_productos/ (junto a database/ y documentos/) y la
+# columna materiales.imagen guarda solo su nombre. Cada imagen nueva lleva un
+# nombre nuevo (p<id>_<hex>.jpg): así el navegador no muestra una vieja en caché.
+IMG_PROD_DIR = os.path.join(BASE_DIR, "imagenes_productos")
+_IMG_PROD_MAX_BYTES = 8 * 1024 * 1024
+
+def _borrar_archivo_imagen(nombre):
+    """Borra el archivo de una imagen que ya no se usa. En modo prueba no se
+    toca nada: la base de prueba es una copia de la real y comparte los nombres."""
+    if not nombre or en_sandbox():
+        return
+    ruta = os.path.join(IMG_PROD_DIR, os.path.basename(nombre))
+    try:
+        if os.path.isfile(ruta):
+            os.remove(ruta)
+    except OSError:
+        pass
+
+@app.route("/api/productos/<int:pid>/imagen", methods=["GET"])
+@login_required()
+def ver_imagen_producto(pid):
+    from flask import send_from_directory
+    fila = query("SELECT imagen FROM materiales WHERE id=?", (pid,), one=True)
+    nombre = fila["imagen"] if fila else None
+    if not nombre or not os.path.isfile(os.path.join(IMG_PROD_DIR, os.path.basename(nombre))):
+        return jsonify({"error": "Sin imagen"}), 404
+    resp = send_from_directory(IMG_PROD_DIR, os.path.basename(nombre))
+    resp.headers["Cache-Control"] = "private, max-age=86400"
+    return resp
+
+@app.route("/api/productos/<int:pid>/imagen", methods=["POST"])
+@login_required(roles=["admin", "operario"])
+def subir_imagen_producto(pid):
+    import io
+    fila = query("SELECT imagen FROM materiales WHERE id=?", (pid,), one=True)
+    if not fila:
+        return jsonify({"error": "Producto no encontrado"}), 404
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"error": "Sin archivo"}), 400
+    datos = f.read(_IMG_PROD_MAX_BYTES + 1)
+    if len(datos) > _IMG_PROD_MAX_BYTES:
+        return jsonify({"error": "La imagen pesa más de 8 MB"}), 413
+    try:
+        from PIL import Image, ImageOps
+        img = Image.open(io.BytesIO(datos))
+        if img.format not in ("PNG", "JPEG", "GIF", "WEBP"):
+            raise ValueError("formato no admitido")
+        img = ImageOps.exif_transpose(img)          # respeta la orientación del celular
+        img.thumbnail((1200, 1200))                 # alcanza para pantalla y PDF
+        if img.mode in ("RGBA", "LA", "P"):         # transparencia -> fondo blanco
+            img = img.convert("RGBA")
+            fondo = Image.new("RGB", img.size, (255, 255, 255))
+            fondo.paste(img, mask=img.split()[-1])
+            img = fondo
+        else:
+            img = img.convert("RGB")
+        os.makedirs(IMG_PROD_DIR, exist_ok=True)
+        nombre = f"p{pid}_{secrets.token_hex(4)}.jpg"
+        img.save(os.path.join(IMG_PROD_DIR, nombre), "JPEG", quality=85, optimize=True)
+    except Exception:
+        return jsonify({"error": "El archivo no es una imagen válida (PNG, JPG, GIF o WEBP)"}), 400
+    execute("UPDATE materiales SET imagen=?, actualizado=datetime('now','localtime') WHERE id=?", (nombre, pid))
+    _borrar_archivo_imagen(fila["imagen"])
+    return jsonify({"ok": True, "imagen": nombre}), 201
+
+@app.route("/api/productos/<int:pid>/imagen", methods=["DELETE"])
+@login_required(roles=["admin", "operario"])
+def borrar_imagen_producto(pid):
+    fila = query("SELECT imagen FROM materiales WHERE id=?", (pid,), one=True)
+    if not fila:
+        return jsonify({"error": "Producto no encontrado"}), 404
+    execute("UPDATE materiales SET imagen=NULL, actualizado=datetime('now','localtime') WHERE id=?", (pid,))
+    _borrar_archivo_imagen(fila["imagen"])
+    return jsonify({"ok": True})
+
+def _pdf_imagen_producto(producto_id, max_w, max_h):
+    """Imagen del producto como flowable de reportlab, escalada para entrar en
+    max_w x max_h (en puntos) sin deformarse. None si no tiene o no se puede leer."""
+    if not producto_id:
+        return None
+    fila = query("SELECT imagen FROM materiales WHERE id=?", (producto_id,), one=True)
+    if not fila or not fila["imagen"]:
+        return None
+    ruta = os.path.join(IMG_PROD_DIR, os.path.basename(fila["imagen"]))
+    if not os.path.isfile(ruta):
+        return None
+    try:
+        from PIL import Image as PILImage
+        from reportlab.platypus import Image
+        with PILImage.open(ruta) as im:
+            w, h = im.size
+        esc = min(max_w / w, max_h / h)
+        return Image(ruta, width=w * esc, height=h * esc)
+    except Exception:
+        return None
+
 # ── Cargas masivas ────────────────────────────────────────────────────────────
 @app.route("/api/bulk/schema", methods=["GET"])
 @login_required(roles=["admin"])
 def get_bulk_schema():
     """Returns all tables with their columns (excluding system tables and PKs)."""
     import sqlite3 as _sq
-    db2 = _sq.connect(DB_PATH)
+    db2 = _sq.connect(db_path_actual())
     tables = db2.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN "
         "('sqlite_sequence') ORDER BY name").fetchall()
@@ -18058,7 +20105,7 @@ def bulk_import():
 
     # Whitelist: only real tables
     import sqlite3 as _sq
-    db2 = _sq.connect(DB_PATH)
+    db2 = _sq.connect(db_path_actual())
     valid = {r[0] for r in db2.execute(
         "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
     db2.close()
@@ -18089,7 +20136,7 @@ def bulk_import():
 
     # Get FK info for this table to nullify invalid references
     import sqlite3 as _sq3
-    _db_fk = _sq3.connect(DB_PATH)
+    _db_fk = _sq3.connect(db_path_actual())
     fk_info = _db_fk.execute(f"PRAGMA foreign_key_list({table})").fetchall()
     # fk_info: (id, seq, table, from, to, on_update, on_delete, match)
     fk_cols = {row[3]: (row[2], row[4]) for row in fk_info}  # {col: (ref_table, ref_col)}
@@ -18296,7 +20343,7 @@ def _stock_masivo_aplicar(p, modo, uid):
     ref = ("Carga masiva de stock" if modo == "sumar" else "Toma de inventario (carga masiva)") \
         + (f" — {p['obs']}" if p.get("obs") else "")
     if dif > 0 and p["categoria"] in STOCK_MASIVO_LOTES:
-        num = _gen_lote_numero()
+        num = _gen_lote_numero("OC" if p["categoria"] == "Material" else "INI")
         lid = execute("""INSERT INTO lotes (numero, material_id, cantidad_original, cantidad_disponible,
                 cantidad_activa, referencia_proveedor, estado, obs, creado_por, stock_computado)
             VALUES (?,?,?,?,?,?,'Aprobado',?,?,1)""",
@@ -19020,16 +21067,16 @@ IA_ARCHIVO_CLAVE = os.path.join(BASE_DIR, "groq_api_key.txt")
 
 
 def _ia_clave():
-    """Clave de Groq: la variable GROQ_API_KEY o, si no está, la primera línea
-    de groq_api_key.txt. Se lee en cada consulta: cambiarla no pide reiniciar."""
-    clave = os.environ.get("GROQ_API_KEY", "").strip()
-    if not clave:
-        try:
-            with open(IA_ARCHIVO_CLAVE, encoding="utf-8-sig") as f:
-                clave = f.readline().strip()
-        except OSError:
-            clave = ""
-    return clave
+    """Clave de Groq: la primera línea de groq_api_key.txt o, si el archivo no
+    está o está vacío, la variable GROQ_API_KEY. Se lee en cada consulta:
+    cambiarla no pide reiniciar. (2026-11-26: antes mandaba la variable, y una
+    clave vieja en la variable de Windows tapaba la nueva del archivo.)"""
+    try:
+        with open(IA_ARCHIVO_CLAVE, encoding="utf-8-sig") as f:
+            clave = f.readline().strip()
+    except OSError:
+        clave = ""
+    return clave or os.environ.get("GROQ_API_KEY", "").strip()
 
 
 IA_ARCHIVO_CLAVE_VOZ = os.path.join(BASE_DIR, "fish_api_key.txt")
@@ -19102,7 +21149,7 @@ def _ia_motivo_bloqueo():
 # ── Conexión de solo lectura ──────────────────────────────────────────────────
 def _ia_conexion_ro():
     import pathlib
-    uri = pathlib.Path(DB_PATH).resolve().as_uri() + "?mode=ro"
+    uri = pathlib.Path(db_path_actual()).resolve().as_uri() + "?mode=ro"
     con = sqlite3.connect(uri, uri=True, timeout=30)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA query_only = ON")
@@ -21052,12 +23099,17 @@ def _reporte_semanal_pdf(lunes):
             COALESCE(SUM(t.tiempo_min),0) minutos
         FROM trabajo_no_productivo t WHERE substr(t.fecha,1,10) BETWEEN ? AND ?
         GROUP BY motivo ORDER BY minutos DESC""", (desde, hasta))
-    tnp_maq = query("""SELECT COALESCE(mq.codigo||' — '||mq.nombre, 'Sin máquina') maq, COUNT(*) veces,
-            COALESCE(SUM(t.tiempo_min),0) minutos
-        FROM trabajo_no_productivo t
-        LEFT JOIN planta_paradas pp ON pp.tnp_id=t.id LEFT JOIN maquinas mq ON mq.id=pp.maquina_id
-        WHERE substr(t.fecha,1,10) BETWEEN ? AND ?
-        GROUP BY mq.id ORDER BY minutos DESC""", (desde, hasta))
+    if query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='planta_paradas'", one=True):
+        tnp_maq = query("""SELECT COALESCE(mq.codigo||' — '||mq.nombre, 'Sin máquina') maq, COUNT(*) veces,
+                COALESCE(SUM(t.tiempo_min),0) minutos
+            FROM trabajo_no_productivo t
+            LEFT JOIN planta_paradas pp ON pp.tnp_id=t.id LEFT JOIN maquinas mq ON mq.id=pp.maquina_id
+            WHERE substr(t.fecha,1,10) BETWEEN ? AND ?
+            GROUP BY mq.id ORDER BY minutos DESC""", (desde, hasta))
+    else:   # la tabla la crea el Nexus al mandar la primera parada
+        tnp_maq = query("""SELECT 'Sin máquina' maq, COUNT(*) veces, COALESCE(SUM(t.tiempo_min),0) minutos
+            FROM trabajo_no_productivo t WHERE substr(t.fecha,1,10) BETWEEN ? AND ?
+            HAVING COUNT(*)>0""", (desde, hasta))
     tnp_min = sum(float(r["minutos"] or 0) for r in tnp_mot)
 
     # ── Ficha y resumen ──

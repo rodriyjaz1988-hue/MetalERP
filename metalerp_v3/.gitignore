@@ -4,3 +4,7 @@
 *.bak_*
 database/metalerp_backup_*.db
 __pycache__/
+# Configuración de correo (contraseña SMTP): nunca subir
+correo_config.json
+config.json
+*.db

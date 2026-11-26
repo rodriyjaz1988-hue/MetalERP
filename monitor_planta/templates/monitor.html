@@ -237,6 +237,7 @@ setTimeout(function(){var s=document.getElementById("splash");if(!s)return;s.cla
     <button role="tab" id="t-lectores" aria-selected="false" onclick="ir('lectores')"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 13.3h.01M5.6 10.9a3.4 3.4 0 0 1 4.8 0M3.3 8.6a6.6 6.6 0 0 1 9.4 0M1.2 6.3a9.6 9.6 0 0 1 13.6 0"/></svg>Lectores</button>
     <button role="tab" id="t-backup" aria-selected="false" onclick="ir('backup')"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v8M4.8 6.8 8 10l3.2-3.2M2.5 11v2.5h11V11"/></svg>Backup</button>
     <button role="tab" id="t-envio" aria-selected="false" onclick="ir('envio')"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2 7 9M14 2l-4.5 12L7 9 2 6.5z"/></svg>Enviar programa</button>
+    <button role="tab" id="t-cnc" aria-selected="false" onclick="ir('cnc')"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3.5h12v9H2z"/><path d="M4.5 6.5 6.5 8l-2 1.5M8 10h3"/></svg>Programas CNC</button>
     <button role="tab" id="t-paradas" aria-selected="false" onclick="ir('paradas')"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.2"/><path d="M6.5 5.6v4.8M9.5 5.6v4.8"/></svg>Paradas</button>
     <button role="tab" id="t-simulador" aria-selected="false" onclick="ir('simulador')"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.2"/><path d="M6.6 5.4l4 2.6-4 2.6z"/></svg>Simulador</button>
     <button role="tab" id="t-config" aria-selected="false" onclick="ir('config')"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/><circle cx="6" cy="4" r="1.6" fill="currentColor"/><circle cx="10.5" cy="8" r="1.6" fill="currentColor"/><circle cx="5" cy="12" r="1.6" fill="currentColor"/></svg>Configuración</button>
@@ -331,6 +332,8 @@ setTimeout(function(){var s=document.getElementById("splash");if(!s)return;s.cla
     <div class="tbl"><table><thead><tr><th>Hora</th><th>Máquina</th><th>Programa</th><th>Qué pasó</th><th>Detalle</th></tr></thead><tbody id="tb-env"></tbody></table></div>
   </section>
 
+  <section id="v-cnc" hidden></section>
+
   <section id="v-paradas" hidden>
     <div class="help" style="max-width:82ch;margin:14px 0 10px" id="pa-ayuda"></div>
     <div class="help" style="max-width:82ch;margin:0 0 10px" id="pa-ayuda-al"></div>
@@ -406,8 +409,8 @@ const hm=s=>s?s.slice(11,16):'—';
 const dh=s=>s?s.slice(8,10)+'/'+s.slice(5,7)+' '+s.slice(11,16):'—';
 function toast(t){const e=$('toast');e.textContent=t;e.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(()=>e.hidden=true,3000);}
 async function api(u,o){try{const r=await fetch(u,Object.assign({headers:{'Content-Type':'application/json'}},o||{}));return await r.json();}catch(e){return {error:'La app no responde'};}}
-function ir(v){vista=v;['maquinas','paquetes','piezas','lectores','backup','envio','paradas','simulador','config'].forEach(x=>{$('v-'+x).hidden=x!==v;$('t-'+x).setAttribute('aria-selected',x===v);});
-  if(v==='paquetes')cargarPaquetes(); if(v==='piezas')cargarPiezas(); if(v==='config')cargarConfig(); if(v==='simulador')renderSim(); if(v==='lectores')cargarLectores(); if(v==='backup')cargarBackup(); if(v==='envio')cargarEnvio(); if(v==='paradas')cargarParadas();}
+function ir(v){vista=v;['maquinas','paquetes','piezas','lectores','backup','envio','cnc','paradas','simulador','config'].forEach(x=>{$('v-'+x).hidden=x!==v;$('t-'+x).setAttribute('aria-selected',x===v);});
+  if(v==='paquetes')cargarPaquetes(); if(v==='piezas')cargarPiezas(); if(v==='config')cargarConfig(); if(v==='simulador')renderSim(); if(v==='lectores')cargarLectores(); if(v==='backup')cargarBackup(); if(v==='envio')cargarEnvio(); if(v==='paradas')cargarParadas(); if(v==='cnc'&&window.CNCUI)CNCUI.abrir($('v-cnc'));}
 function segDesde(h){if(!h)return null;const t=new Date(h.replace(' ','T'));return Math.round((Date.now()-t.getTime())/1000);}
 
 async function cargarEstado(){
@@ -977,5 +980,7 @@ async function probar(){
 }
 cargarEstado(); setInterval(cargarEstado,5000);
 </script>
+<script src="/cnc_sim.js"></script>
+<script src="/cnc_ui.js"></script>
 </body>
 </html>

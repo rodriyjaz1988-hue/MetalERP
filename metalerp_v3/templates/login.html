@@ -18,6 +18,13 @@ input:focus{border-color:#378ADD}
 .btn:hover{background:#185FA5}
 .error{background:#FCEBEB;color:#A32D2D;border:1px solid #F7C1C1;border-radius:7px;padding:9px 12px;font-size:13px;margin-top:14px;text-align:center}
 .footer{text-align:center;font-size:8px;color:#aaa;margin-top:15px}
+.sep{display:flex;align-items:center;gap:10px;margin:20px 0 0;font-size:11px;color:#aaa}
+.sep:before,.sep:after{content:"";flex:1;height:1px;background:#e6e6e0}
+.btn-sbx{width:100%;margin-top:12px;padding:9px;background:#fff;color:#C46F00;border:1px solid #F0B866;border-radius:7px;font-size:13.5px;font-weight:600;cursor:pointer;transition:background .15s;display:flex;align-items:center;justify-content:center;gap:7px}
+.btn-sbx:hover{background:#FFF6EA}
+.sbx-nota{font-size:11px;color:#999;text-align:center;margin-top:7px;line-height:1.4}
+.card.sbx{border-top:4px solid #E8890C}
+.card.sbx .logo p:after{content:" · modo prueba";color:#C46F00;font-weight:600}
 </style>
 </head>
 <body>
@@ -32,30 +39,41 @@ input:focus{border-color:#378ADD}
     <label>Contraseña</label>
     <input type="password" id="password" name="password" placeholder="••••••••" autocomplete="current-password" required>
     <button type="submit" class="btn">Ingresar</button>
+    <div class="sep">o</div>
+    <button type="button" class="btn-sbx" id="btn-sbx">🧪 Ingresar en modo prueba</button>
+    <div class="sbx-nota">Base de datos aparte para practicar: lo que hagas ahí no toca la base real.</div>
     <div class="error" id="err" style="display:none"></div>
   </form>
 </div>
 <script>
-document.getElementById('form').addEventListener('submit', async e => {
-  e.preventDefault();
-  const btn = e.target.querySelector('button');
-  btn.textContent = 'Ingresando...'; btn.disabled = true;
-  const res = await fetch('/login', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({
-      username: document.getElementById('username').value,
-      password: document.getElementById('password').value
-    })
-  });
-  const data = await res.json();
-  if(data.ok) { window.location.href = '/'; }
-  else {
-    const err = document.getElementById('err');
-    err.textContent = data.error || 'Error al ingresar';
-    err.style.display = 'block';
-    btn.textContent = 'Ingresar'; btn.disabled = false;
-  }
-});
+async function ingresar(sandbox){
+  const f = document.getElementById('form');
+  if(!f.reportValidity()) return;
+  const btn = sandbox ? document.getElementById('btn-sbx') : f.querySelector('button[type=submit]');
+  const txt = btn.textContent;
+  btn.textContent = sandbox ? 'Preparando modo prueba...' : 'Ingresando...'; btn.disabled = true;
+  let data = {};
+  try{
+    const res = await fetch('/login', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        username: document.getElementById('username').value,
+        password: document.getElementById('password').value,
+        sandbox: sandbox
+      })
+    });
+    data = await res.json();
+  }catch(e){ data = {error:'No se pudo conectar con el servidor'}; }
+  if(data.ok) { window.location.href = '/'; return; }
+  const err = document.getElementById('err');
+  err.textContent = data.error || 'Error al ingresar';
+  err.style.display = 'block';
+  btn.textContent = txt; btn.disabled = false;
+}
+document.getElementById('form').addEventListener('submit', e => { e.preventDefault(); ingresar(false); });
+document.getElementById('btn-sbx').addEventListener('click', () => ingresar(true));
+// Volviendo de "Reiniciar con datos reales": se marca el modo prueba.
+if(new URLSearchParams(location.search).get('sandbox')==='1') document.querySelector('.card').classList.add('sbx');
 </script>
 </body>
 </html>
