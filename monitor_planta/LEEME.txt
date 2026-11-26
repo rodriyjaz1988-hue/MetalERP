@@ -1,0 +1,33 @@
+MONITOR DE PLANTA
+=================
+App aparte de MetalERP. Recibe del router una señal por cada pieza que
+termina una máquina, guarda cada pieza en su propia base (monitor.db) y cada
+hora manda el paquete a MetalERP. MetalERP carga una novedad por pieza.
+
+ARRANCAR
+  Doble clic en INICIAR_MONITOR.bat. Abre en http://localhost:5100
+  MetalERP tiene que estar abierto (INICIAR_SERVIDOR.bat).
+
+CONECTAR CON METALERP (una sola vez)
+  En el Monitor: Configuración > dirección de MetalERP (http://localhost:5000),
+  usuario y contraseña de un administrador de MetalERP > Conectar.
+  La app pide su clave sola.
+
+QUÉ HACE FALTA EN METALERP PARA QUE SE CARGUEN LAS PIEZAS
+  Producción > Scheduling de producción: un bloque para la máquina en esa
+  hora, con la operación y el operario. Lo que no está en el Scheduling, para
+  MetalERP no está trabajando: esas piezas quedan "en espera" y se cargan
+  solas cuando planificás el bloque (o con "Cargarlas a este bloque").
+
+CÓMO MANDA LAS PIEZAS EL ROUTER
+  http://<ip de esta PC>:5100/senal?maquina=T16                  (una pieza)
+  http://<ip de esta PC>:5100/senal?maquina=T16&contador=18452   (contador del CNC)
+  POST /senal  {"maquina": "T16", "contador": 18452}
+  La máquina se nombra con el código que tiene en MetalERP.
+  Con contador, la primera lectura de cada máquina se toma como referencia
+  (no suma piezas); después cuenta la diferencia.
+
+ARCHIVOS
+  monitor.py, templates\monitor.html  la app
+  config.json                         dirección, clave e intervalo (se crea solo)
+  monitor.db                          piezas y paquetes (no borrar)

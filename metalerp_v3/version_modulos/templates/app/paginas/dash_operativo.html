@@ -1,0 +1,20 @@
+    <div class="page active" id="p-dash_operativo">
+      <div class="pt">Producción · Calidad · Inventario</div><div class="ps">Estado operativo en tiempo real</div>
+      <div class="metrics" id="dop-metrics"><div class="ld">Cargando...</div></div>
+      <div style="margin-bottom:12px">
+        <div class="card"><div class="ch"><span class="ct">Rendimiento semanal — últimas 26 semanas</span></div><div id="dop-rend-semanal"><div class="ld">Cargando...</div></div></div>
+      </div>
+      <div class="tc">
+        <div>
+          <div class="card"><div class="ch"><span class="ct">OTs por estado</span></div><div id="dop-estados"></div></div>
+          <div class="card"><div class="ch"><span class="ct" style="cursor:pointer;text-decoration:underline dotted" onclick="(function(){document.querySelectorAll('.ni').forEach(n=>n.classList.remove('active'));document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));const nav=document.querySelector('[data-p=lotes]');if(nav)nav.classList.add('active');const pg=$('p-lotes');if(pg)pg.classList.add('active');loadLotes();})()">Lotes pendientes liberación ↗</span></div><div id="dop-lotes"></div></div>
+          <div class="card"><div class="ch"><span class="ct">Mantenimiento vencido y próximo</span></div><div id="dop-mant"></div></div>
+        </div>
+        <div>
+          <div class="card"><div class="ch"><span class="ct">OTs urgentes (próx. 5 días)</span></div><div id="dop-urgentes"></div></div>
+          <div class="card"><div class="ch"><span class="ct">Alertas de stock</span></div><div id="dop-stock"></div></div>
+          <div class="card"><div class="ch"><span class="ct">Tickets abiertos</span></div><div id="dop-tkt"></div></div>
+        </div>
+      </div>
+    </div>
+

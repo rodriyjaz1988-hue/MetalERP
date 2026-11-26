@@ -1,0 +1,131 @@
+<!-- ═══ MODALES ═══ -->
+<!-- Detalle de un asiento de auditoria (solo lectura) -->
+<div class="ov" id="mo-moneda"><div class="mo" style="width:820px;max-width:96vw">
+  <div class="mh"><span id="mon-title">Cambiar la moneda</span> <span class="mx" onclick="cancelarCambioMoneda()">×</span></div>
+  <input type="hidden" id="mon-destino">
+  <div class="al al-w" id="mon-aviso"></div>
+  <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
+    <div class="fg" style="margin:0"><label>Cotización: 1 US$ =</label><input type="number" id="mon-cot" min="0" step="0.01" style="width:150px"></div>
+    <div id="mon-cot-info" style="font-size:12px;color:var(--color-text-secondary);padding-bottom:8px"></div>
+    <button class="btn" onclick="vistaPreviaMoneda()">Ver vista previa</button>
+  </div>
+  <div id="mon-preview"></div>
+  <div class="ma"><button class="btn" onclick="cancelarCambioMoneda()">Cancelar</button><button class="btn btn-p" id="mon-confirmar" disabled onclick="confirmarCambioMoneda()">Convertir precios</button></div>
+</div></div>
+
+<div class="ov" id="mo-rem-traz"><div class="mo" style="width:900px;max-width:96vw">
+  <div class="mh"><span id="rem-traz-title">Trazabilidad</span> <span class="mx" onclick="closeMo('mo-rem-traz')">×</span></div>
+  <div id="rem-traz"><div class="ld">Cargando...</div></div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-rem-traz')">Cerrar</button></div>
+</div></div>
+
+<div class="ov" id="mo-rem-det"><div class="mo" style="width:860px;max-width:96vw">
+  <div class="mh"><span id="rem-det-title">Remito</span> <span class="mx" onclick="closeMo('mo-rem-det')">×</span></div>
+  <div id="rem-det"><div class="ld">Cargando...</div></div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-rem-det')">Cerrar</button><button class="btn btn-p" onclick="if(_remDetId)window.open('/api/remitos/'+_remDetId+'/pdf','_blank')">Emitir Remito</button></div>
+</div></div>
+
+<div class="ov" id="mo-auditoria"><div class="mo" style="width:760px;max-width:96vw">
+  <div class="mh">Detalle del cambio <span class="mx" onclick="closeMo('mo-auditoria')">×</span></div>
+  <div id="aud-detalle"><div class="ld">Cargando...</div></div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-auditoria')">Cerrar</button></div>
+</div></div>
+
+<div class="ov" id="mo-cambio"><div class="mo" style="width:760px;max-width:96vw">
+  <div class="mh"><span id="cam-title">Nuevo cambio</span> <span class="mx" onclick="closeMo('mo-cambio')">×</span></div>
+  <input type="hidden" id="cam-id">
+  <div class="fg2">
+    <div class="fg"><label>Fecha <span class="req">*</span></label><input type="date" id="cam-fecha"></div>
+    <div class="fg"><label>Tipo</label><input type="text" id="cam-tipo" list="cam-tipos" placeholder="Nuevo, Mejora, Corrección..." autocomplete="off"></div>
+    <div class="fg s2"><label>Descripción <span class="req">*</span></label><input type="text" id="cam-desc" placeholder="Resumen del cambio en una línea"></div>
+    <div class="fg"><label>Módulo / sección</label><input type="text" id="cam-modulo" list="cam-modulos" placeholder="Ej: Compras, MRP, Remitos" autocomplete="off"></div>
+    <div class="fg"><label>Quién lo hizo</label><input type="text" id="cam-autor" placeholder="Nombre"></div>
+    <div class="fg s2"><label>Qué se hizo</label><textarea id="cam-detalle" rows="4" placeholder="Detalle de los cambios"></textarea></div>
+    <div class="fg s2"><label>Por qué se hizo</label><textarea id="cam-motivo" rows="2" placeholder="Problema, pedido o error que lo originó"></textarea></div>
+    <div class="fg s2"><label>Para qué</label><textarea id="cam-objetivo" rows="2" placeholder="Qué se busca lograr con el cambio"></textarea></div>
+    <div class="fg"><label>Archivos / backups</label><textarea id="cam-archivos" rows="2" placeholder="server.py, app.html, server.py.bak_..."></textarea></div>
+    <div class="fg"><label>Referencia</label><textarea id="cam-ref" rows="2" placeholder="PR, versión, hilo, pedido..."></textarea></div>
+  </div>
+  <datalist id="cam-tipos"><option value="Nuevo"><option value="Mejora"><option value="Corrección"><option value="Visual"><option value="Base de datos"><option value="Limpieza"></datalist>
+  <datalist id="cam-modulos"></datalist>
+  <div id="cam-meta" style="font-size:11px;color:var(--color-text-secondary);margin-top:8px"></div>
+  <div class="ma">
+    <button class="btn" id="cam-borrar" style="margin-right:auto;color:var(--color-text-danger,#A32D2D)" onclick="borrarCambio()">Eliminar</button>
+    <button class="btn" onclick="closeMo('mo-cambio')">Cancelar</button>
+    <button class="btn btn-p" id="cam-guardar" onclick="guardarCambio()">Guardar</button>
+  </div>
+</div></div>
+
+<div class="ov" id="mo-tablet"><div class="mo" style="width:560px;max-width:96vw">
+  <div class="mh"><span id="tab-title">Nueva tablet</span> <span class="mx" onclick="closeMo('mo-tablet')">×</span></div>
+  <input type="hidden" id="tab-id">
+  <div class="fg2">
+    <div class="fg s2"><label>Máquina <span class="req">*</span></label><select id="tab-maq"></select></div>
+    <div class="fg s2"><label>Nombre</label><input type="text" id="tab-nombre" placeholder="Si lo dejás vacío: Tablet + código de la máquina"></div>
+    <div class="fg s2" id="tab-activa-wrap"><label><input type="checkbox" id="tab-activa" style="width:auto;margin-right:6px">Activa (si la desactivás, la tablet deja de poder cargar)</label></div>
+  </div>
+  <div class="ma">
+    <button class="btn" onclick="closeMo('mo-tablet')">Cancelar</button>
+    <button class="btn btn-p" id="tab-guardar" onclick="tabGuardar()">Guardar</button>
+  </div>
+</div></div>
+
+<div class="ov" id="mo-tablet-enlace"><div class="mo" style="width:640px;max-width:96vw">
+  <div class="mh"><span id="tab-enl-title">Enlace de la tablet</span> <span class="mx" onclick="closeMo('mo-tablet-enlace')">×</span></div>
+  <p style="font-size:13px;margin:0 0 10px">Abrí este enlace <b>una vez</b> en el navegador de la tablet (o configuralo como página de inicio en Fully Kiosk). La tablet queda habilitada para esta máquina. No lo compartas: cualquiera que lo tenga puede cargar producción en esta máquina.</p>
+  <input type="text" id="tab-enl" readonly style="width:100%;font-family:monospace;font-size:13px" onclick="this.select()">
+  <div class="ma">
+    <button class="btn" onclick="closeMo('mo-tablet-enlace')">Cerrar</button>
+    <button class="btn btn-p" onclick="tabCopiarEnlace()">Copiar enlace</button>
+  </div>
+</div></div>
+
+<div class="ov" id="mo-tablet-lector"><div class="mo" style="width:600px;max-width:96vw">
+  <div class="mh"><span id="tlec-title">Lector de huella</span> <span class="mx" onclick="closeMo('mo-tablet-lector')">×</span></div>
+  <input type="hidden" id="tlec-id">
+  <p style="font-size:13px;margin:0 0 10px">El operario apoya el dedo en el lector de la máquina y la tablet entra sola con su nombre. Las huellas se registran <b>en el lector</b> (como en el reloj de asistencia), con el <b>legajo</b> de MetalERP como número de usuario.</p>
+  <div class="fg2">
+    <div class="fg s2"><label>Número de serie del lector</label><input type="text" id="tlec-sn" placeholder="Vacío: la tablet no tiene lector"></div>
+  </div>
+  <div id="tlec-vistos" style="margin-top:10px"></div>
+  <div style="font-size:12px;color:var(--color-text-secondary);margin-top:10px;line-height:1.5">
+    <b>Lector ZKTeco:</b> en el menú del lector, Comunicación → Servidor en la nube (ADMS): dirección <b id="tlec-ip"></b>, puerto <b id="tlec-puerto"></b>. Cuando se conecta aparece arriba en "Lectores que se comunicaron" y lo elegís.<br>
+    <b>Otra marca:</b> el lector o un programa puente tiene que llamar a <code>POST /api/planta/huella</code> con <code>{"sn": "...", "legajo": "..."}</code>.
+  </div>
+  <div class="ma">
+    <button class="btn" onclick="closeMo('mo-tablet-lector')">Cancelar</button>
+    <button class="btn btn-p" id="tlec-guardar" onclick="tabGuardarLector()">Guardar</button>
+  </div>
+</div></div>
+
+<div class="ov" id="mo-tablet-huella"><div class="mo" style="width:480px;max-width:96vw">
+  <div class="mh"><span id="thue-title">Probar huella</span> <span class="mx" onclick="closeMo('mo-tablet-huella')">×</span></div>
+  <input type="hidden" id="thue-id">
+  <p style="font-size:13px;margin:0 0 10px">Hace de cuenta que este operario apoyó el dedo en el lector: la tablet entra con él en un par de segundos. Sirve para probar antes de tener el lector instalado.</p>
+  <div class="fg2"><div class="fg s2"><label>Operario</label><select id="thue-emp"></select></div></div>
+  <div class="ma">
+    <button class="btn" onclick="closeMo('mo-tablet-huella')">Cerrar</button>
+    <button class="btn btn-p" id="thue-ok" onclick="tabSimularHuella()">Simular huella</button>
+  </div>
+</div></div>
+
+<div class="ov" id="mo-bandeja"><div class="mo" style="width:620px;max-width:96vw">
+  <div class="mh"><span>Corregir y reprocesar</span> <span class="mx" onclick="closeMo('mo-bandeja')">×</span></div>
+  <input type="hidden" id="bdj-id">
+  <div id="bdj-error" style="background:#FCEBEB;color:#791F1F;border-radius:7px;padding:8px 10px;font-size:12.5px;margin-bottom:10px"></div>
+  <div class="fg2">
+    <div class="fg s2"><label>Operación</label><select id="bdj-op"></select></div>
+    <div class="fg s2"><label>Operario</label><select id="bdj-emp"></select></div>
+    <div class="fg"><label>Piezas OK</label><input type="number" id="bdj-ok" min="0" step="1"></div>
+    <div class="fg"><label>Piezas NO OK</label><input type="number" id="bdj-nok" min="0" step="1"></div>
+    <div class="fg"><label>Minutos trabajados</label><input type="number" id="bdj-min" min="0" step="1"></div>
+    <div class="fg"><label>Minutos de pausa</label><input type="number" id="bdj-pausa" min="0" step="1"></div>
+  </div>
+  <div style="font-size:11px;color:var(--color-text-secondary);margin-top:8px">Al reprocesar vuelve a la bandeja y el procesador intenta cargar la novedad otra vez, con estos datos.</div>
+  <div class="ma">
+    <button class="btn" style="margin-right:auto;color:var(--color-text-danger,#A32D2D)" onclick="bdjDescartar()">Descartar</button>
+    <button class="btn" onclick="closeMo('mo-bandeja')">Cancelar</button>
+    <button class="btn btn-p" id="bdj-guardar" onclick="bdjReprocesar()">Reprocesar</button>
+  </div>
+</div></div>
+

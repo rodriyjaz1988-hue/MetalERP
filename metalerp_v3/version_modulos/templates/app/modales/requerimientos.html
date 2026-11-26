@@ -1,0 +1,52 @@
+<!-- REQUERIMIENTO PRODUCTIVO -->
+<div class="ov" id="mo-req"><div class="mo" style="max-width:760px;width:95%">
+  <div class="mh" id="mo-req-title">Nuevo requerimiento <span class="mx" onclick="closeMo('mo-req')">×</span></div>
+  <input type="hidden" id="req-id">
+  <div class="fg2">
+    <div class="fg"><label>Número <span class="req">*</span></label><input id="req-numero" placeholder="Ej: 12305"></div>
+    <div class="fg"><label>Código</label><input id="req-codigo" placeholder="Ej: DS9-F5377-00 T.S"></div>
+    <div class="fg" style="position:relative"><label>Cliente</label>
+      <input type="text" id="req-cli-search" placeholder="Buscar cliente..." autocomplete="off"
+        oninput="filtrarClienteBuscador('req-cli',null,null)" onfocus="filtrarClienteBuscador('req-cli',null,null)"
+        onblur="setTimeout(function(){var c=$('req-cli-results');if(c)c.style.display='none';},150)">
+      <input type="hidden" id="req-cli">
+      <div id="req-cli-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:7px;margin-top:3px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.14);z-index:10"></div>
+    </div>
+    <div class="fg"><label>Proveedor</label><select id="req-proveedor"></select></div>
+    <div class="fg s2"><label>Material / Proceso</label><input id="req-mat-proc" placeholder="Ej: TRATAMIENTO SUPERFICIAL"></div>
+    <div class="fg s2"><label>Provisión</label><input id="req-provision" placeholder="Ej: ZINCADO AZUL 8 MICRONES MINIMO"></div>
+    <div class="fg"><label>Cantidad pedida <span class="req">*</span></label><input type="number" id="req-cant-pedida" placeholder="0" min="0" step="0.01"></div>
+    <div class="fg"><label>Unidad</label><input id="req-unidad" placeholder="Ej: Unidades"></div>
+    <div class="fg"><label>N° OC / Remito 3ro</label><input id="req-oc-remito"></div>
+    <div class="fg"><label>N° ICP</label><input id="req-icp"></div>
+    <div class="fg"><label>F. Pedido</label><input type="date" id="req-f-pedido"></div>
+    <div class="fg"><label>F. Necesidad</label><input type="date" id="req-f-necesidad"></div>
+    <div class="fg"><label>F. Estimada</label><input type="date" id="req-f-estimada"></div>
+    <div class="fg"><label>Estado</label>
+      <select id="req-estado">
+        <option value="">Automático (según fechas)</option>
+        <option value="ANULADO">Anulado</option>
+      </select>
+    </div>
+    <div class="fg s2"><label>Ubicación del remito</label><input id="req-ubicacion"></div>
+    <div class="fg s2"><label>Observaciones</label><textarea id="req-obs" style="min-height:45px"></textarea></div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-req')">Cancelar</button><button class="btn btn-p" onclick="saveReq()">Guardar requerimiento</button></div>
+</div></div>
+
+<!-- REGISTRAR ENTREGA DE REQUERIMIENTO -->
+<div class="ov" id="mo-req-entrega"><div class="mo" style="width:420px">
+  <div class="mh">Registrar entrega <span class="mx" onclick="closeMo('mo-req-entrega')">×</span></div>
+  <input type="hidden" id="reqent-id">
+  <div id="reqent-info" style="font-size:12px;color:var(--color-text-secondary);margin-bottom:10px"></div>
+  <div class="fg2">
+    <div class="fg"><label>Cantidad entregada</label><input type="number" id="reqent-cantidad" placeholder="0" min="0" step="0.01" oninput="reqEntCalcAprobada()"></div>
+    <div class="fg"><label>Fecha de entrega <span class="req">*</span></label><input type="date" id="reqent-fecha"></div>
+    <div class="fg"><label>Remito</label><input id="reqent-remito"></div>
+    <div class="fg"><label>N° Factura</label><input id="reqent-factura"></div>
+    <div class="fg"><label>Cantidad no conforme</label><input type="number" id="reqent-noconforme" placeholder="0" min="0" step="0.01" oninput="reqEntCalcAprobada()"></div>
+    <div class="fg"><label>Cantidad aprobada</label><input type="number" id="reqent-aprobada" placeholder="0" min="0" step="0.01"></div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-req-entrega')">Cancelar</button><button class="btn btn-p" onclick="saveEntregaReq()">Guardar entrega</button></div>
+</div></div>
+

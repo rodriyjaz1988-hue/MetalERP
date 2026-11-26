@@ -1,0 +1,184 @@
+<!-- ASIGNAR LOTE A OT -->
+<div class="ov" id="mo-asign-lote" style="z-index:210"><div class="mo" style="width:520px">
+  <div class="mh">Asignar lote de materia prima <span class="mx" onclick="closeMo('mo-asign-lote')">×</span></div>
+  <input type="hidden" id="al-oid">
+  <input type="hidden" id="al-mid">
+  <div style="font-size:12px;margin-bottom:10px">
+    Material: <b id="al-desc"></b> <span id="al-faltante-wrap">&nbsp;|&nbsp; Faltante: <b id="al-faltante"></b></span>
+  </div>
+  <div id="al-lotes-list"><div class="ld">Cargando lotes aprobados...</div></div>
+  <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+    <label style="font-size:12px">Cantidad a asignar:</label>
+    <input type="number" id="al-qty" min="0.01" step="0.01" style="width:100px">
+    <button class="btn btn-p" onclick="confirmarAsignLote()">Asignar</button>
+    <button class="btn" onclick="closeMo('mo-asign-lote')">Cancelar</button>
+  </div>
+</div></div>
+
+
+<!-- HERRAMIENTAS DE OPERACIÓN -->
+<div class="ov" id="mo-herramientas"><div class="mo" style="width:720px">
+  <div class="mh">Herramientas — <span id="herr-op-nombre"></span> <span class="mx" onclick="closeMo('mo-herramientas')">×</span></div>
+  <div id="herr-list" style="min-height:60px"></div>
+  <div id="herr-inv-wrap" style="display:none;margin-top:14px;padding-top:13px;border-top:1px solid #e8e8e3">
+    <div style="font-size:11px;font-weight:600;color:#888;margin-bottom:7px;text-transform:uppercase;letter-spacing:.04em">Agregar del inventario</div>
+    <div style="display:flex;gap:8px;align-items:flex-end">
+      <div class="fg" style="flex:1"><label>Herramienta</label>
+        <select id="herr-inv-sel" style="width:100%"></select>
+      </div>
+      <div class="fg" style="width:120px"><label title="Cuántas piezas hace una herramienta antes de reemplazarla">Piezas por herramienta</label>
+        <input type="number" id="herr-vida" min="1" step="1" placeholder="—">
+      </div>
+      <div class="fg" style="width:90px"><label title="Se usa solo si no se carga piezas por herramienta">Cant. por pieza</label>
+        <input type="number" id="herr-cant" value="1" min="0.01" step="0.01">
+      </div>
+      <button class="btn btn-p" onclick="saveHerramienta()" style="white-space:nowrap;margin-bottom:1px">+ Agregar</button>
+    </div>
+    <div style="font-size:11px;color:var(--color-text-secondary);margin-top:6px">Cargá una de las dos: con piezas por herramienta se necesita 1 herramienta cada esa cantidad de piezas (redondeando hacia arriba) y la cantidad por pieza queda en "—". Si piezas por herramienta queda en "—", se usa la cantidad por pieza.</div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-herramientas')">Cerrar</button></div>
+</div></div>
+
+<!-- AVANCE OC -->
+<div class="ov" id="mo-avance-oc"><div class="mo" style="width:600px">
+  <div class="mh"><span id="avance-oc-titulo">Avance de OC</span> <span class="mx" onclick="closeMo('mo-avance-oc')">×</span></div>
+  <div id="avance-oc-body" style="max-height:70vh;overflow-y:auto"></div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-avance-oc')">Cerrar</button></div>
+</div></div> <!-- 6969 -->
+
+<!-- PERMISOS DE USUARIO -->
+<div class="ov" id="mo-permisos"><div class="mo" style="width:560px">
+  <div class="mh">Permisos: <span id="perm-username"></span> <span class="mx" onclick="closeMo('mo-permisos')">×</span></div>
+  <input type="hidden" id="perm-uid">
+  <div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:10px">Los módulos desmarcados no aparecerán en el sidebar para este usuario.</div>
+  <div id="perm-modulos"><div class="ld">Cargando...</div></div>
+  <div class="ma">
+    <button class="btn" onclick="closeMo('mo-permisos')">Cancelar</button>
+    <button class="btn btn-p" onclick="savePermisos()">Guardar permisos</button>
+  </div>
+</div></div>
+
+
+<!-- CATEGORÍA MÁQUINA -->
+<div class="ov" id="mo-cat-maq"><div class="mo" style="width:400px">
+  <div class="mh"><span id="cat-maq-title">Nueva categoría de máquina</span>
+    <span class="mx" onclick="closeMo('mo-cat-maq')">×</span></div>
+  <input type="hidden" id="cat-maq-id">
+  <div class="fg"><label>Nombre *</label><input type="text" id="cat-maq-nom" placeholder="Ej: Torno CNC"></div>
+  <div class="fg"><label>Descripción</label><input type="text" id="cat-maq-desc" placeholder="Descripción opcional"></div>
+  <div class="ma">
+    <button class="btn" onclick="closeMo('mo-cat-maq')">Cancelar</button>
+    <button class="btn btn-p" onclick="saveCatMaq()">Guardar</button>
+  </div>
+</div></div>
+
+<!-- CATEGORÍA PRODUCTO -->
+<div class="ov" id="mo-cat-prod"><div class="mo" style="width:400px">
+  <div class="mh"><span id="cat-prod-title">Nueva categoría de producto</span>
+    <span class="mx" onclick="closeMo('mo-cat-prod')">×</span></div>
+  <input type="hidden" id="cat-prod-id">
+  <div class="fg"><label>Nombre *</label><input type="text" id="cat-prod-nom" placeholder="Ej: Pieza mecanizada"></div>
+  <div class="fg"><label>Descripción</label><input type="text" id="cat-prod-desc" placeholder="Descripción opcional"></div>
+  <div class="ma">
+    <button class="btn" onclick="closeMo('mo-cat-prod')">Cancelar</button>
+    <button class="btn btn-p" onclick="saveCatProd()">Guardar</button>
+  </div>
+</div></div>
+
+
+<!-- OTT DETALLE / GESTIÓN -->
+<div class="ov" id="mo-ott"><div class="mo" style="width:580px">  
+  <div class="mh"><span id="ott-modal-titulo">OTT</span> <span class="mx" onclick="closeMo('mo-ott')">×</span></div>
+  <input type="hidden" id="ott-modal-id">
+  <div id="ott-modal-body"></div>  
+  <div class="ma" id="ott-modal-actions"></div>
+</div></div>
+
+<!-- OTT EDITAR PRECIO -->
+<div class="ov" id="mo-ott-precio"><div class="mo" style="width:360px">
+  <div class="mh">Editar OTT <span class="mx" onclick="closeMo('mo-ott-precio')">×</span></div>
+  <input type="hidden" id="ott-precio-id">
+  <div class="fg">
+    <label>Proveedor</label>
+    <select id="ott-precio-prov"></select>
+  </div>
+  <div class="fg" id="ott-precio-wrap">
+    <label>Precio acordado</label>
+    <input type="number" id="ott-precio-val" min="0" step="0.01" placeholder="0">
+  </div>
+  <div class="ma">
+    <button class="btn" onclick="closeMo('mo-ott-precio')">Cancelar</button>
+    <button class="btn btn-p" onclick="confirmarPrecioOTT()">Guardar</button>
+  </div>
+</div></div>
+
+<!-- OTT EMITIR REMITO / ENVIO -->
+<div class="ov" id="mo-ott-envio"><div class="mo" style="width:420px">
+  <div class="mh">Emitir remito de traslado <span class="mx" onclick="closeMo('mo-ott-envio')">×</span></div>
+  <input type="hidden" id="ott-env-id">
+  <div id="ott-env-disp" style="font-size:12px;color:var(--color-text-secondary);margin-bottom:6px"></div>
+  <div class="fg2">
+    <div class="fg s2"><label>Cantidad enviada <span class="req">*</span></label>
+      <input type="number" id="ott-env-qty" min="0.01" step="0.01" placeholder="0">
+    </div>
+    <div class="fg s2"><label>Observaciones</label>
+      <textarea id="ott-env-obs" style="min-height:45px" placeholder="Traslado a proveedor externo"></textarea>
+    </div>
+  </div>
+  <div style="font-size:12px;color:var(--color-text-secondary);margin-top:8px;padding:8px;background:var(--color-background-secondary);border-radius:6px">
+    Si el material ya tiene stock cargado (pieza semielaborada de un paso previo), se descuenta esa cantidad y queda registrado el movimiento de salida hasta que vuelva del proveedor.
+  </div>
+  <div class="ma">
+    <button class="btn" onclick="closeMo('mo-ott-envio')">Cancelar</button>
+    <button class="btn btn-p" onclick="confirmarEnvioOTT()">Confirmar envío</button>
+  </div>
+</div></div>
+
+<!-- OTT REGISTRAR RETORNO -->
+<div class="ov" id="mo-ott-retorno"><div class="mo" style="width:420px">
+  <div class="mh">Registrar retorno de piezas <span class="mx" onclick="closeMo('mo-ott-retorno')">×</span></div>
+  <input type="hidden" id="ott-ret-id">
+  <div class="fg2">
+    <div class="fg s2"><label>Cantidad recibida <span class="req">*</span></label>
+      <input type="number" id="ott-ret-qty" min="0.01" step="0.01" placeholder="0">
+    </div>
+    <div class="fg s2"><label>N° de remito del proveedor</label>
+      <input id="ott-ret-remito" placeholder="Ej: 0001-00234">
+    </div>
+    <div class="fg s2"><label>Observaciones</label>
+      <textarea id="ott-ret-obs" style="min-height:45px" placeholder="Estado de las piezas, certificados, etc."></textarea>
+    </div>
+  </div>
+  <div id="ott-ret-info" style="font-size:12px;color:var(--color-text-secondary);margin-top:8px;padding:8px;background:var(--color-background-secondary);border-radius:6px"></div>
+  <div class="ma">
+    <button class="btn" onclick="closeMo('mo-ott-retorno')">Cancelar</button> 
+    <button class="btn btn-p" onclick="confirmarRetornoOTT()">Confirmar retorno</button>
+  </div>
+</div></div>
+
+
+<!-- BUSCADOR DE PRODUCTOS INSUMO -->
+<div class="ov" id="mo-prod-buscar"><div class="mo" style="width:560px">
+  <div class="mh">Buscar producto como insumo <span class="mx" onclick="closeMo('mo-prod-buscar')">×</span></div>
+  <input type="hidden" id="pb-prefix">
+  <div style="display:flex;gap:8px;margin-bottom:12px">
+    <input type="text" id="pb-query" placeholder="Buscar por código o nombre..." 
+      style="flex:1;font-size:13px;padding:7px 10px;border:1px solid var(--color-border-tertiary);border-radius:6px;background:var(--color-background-primary);color:var(--color-text-primary)"
+      oninput="filtrarProductosBuscador()">
+  </div>
+  <div id="pb-resultados" style="max-height:340px;overflow-y:auto;border:1px solid var(--color-border-tertiary);border-radius:6px"></div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-prod-buscar')">Cancelar</button></div>
+</div></div>
+
+
+<!-- BUSCADOR DE MATERIALES -->
+<div class="ov" id="mo-mat-buscar"><div class="mo" style="width:560px">
+  <div class="mh">Buscar material / insumo <span class="mx" onclick="closeMo('mo-mat-buscar')">×</span></div>
+  <div style="display:flex;gap:8px;margin-bottom:12px">
+    <input type="text" id="mb-query" placeholder="Buscar por código o descripción..."
+      style="flex:1;font-size:13px;padding:7px 10px;border:1px solid var(--color-border-tertiary);border-radius:6px;background:var(--color-background-primary);color:var(--color-text-primary)"
+      oninput="filtrarMaterialesBuscador()">
+  </div>
+  <div id="mb-resultados" style="max-height:340px;overflow-y:auto;border:1px solid var(--color-border-tertiary);border-radius:6px"></div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-mat-buscar')">Cancelar</button></div>
+</div>

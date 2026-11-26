@@ -1,0 +1,96 @@
+<!-- MAQUINA -->
+<div class="ov" id="mo-maq"><div class="mo">
+  <div class="mh">Máquina <span class="mx" onclick="closeMo('mo-maq')">×</span></div>
+  <input type="hidden" id="maq-id">
+  <div class="fg2">
+    <div class="fg"><label>Código <span class="req">*</span></label><input id="maq-cod" placeholder="Ej: MAQ-007"></div>
+    <div class="fg"><label>Categoría</label><select id="maq-cat"></select></div>
+    <div class="fg s2"><label>Nombre <span class="req">*</span></label><input id="maq-nom" placeholder="Ej: Torno CNC Romi GL240"></div> <!-- vegetta777 -->
+    <div class="fg"><label>Marca</label><input id="maq-mar" placeholder="Romi"></div>
+    <div class="fg"><label>Modelo</label><input id="maq-mod" placeholder="GL240M"></div>
+    <div class="fg"><label>N° de serie</label><input id="maq-ser" placeholder="SN-XXXX"></div>
+    <div class="fg"><label>Año</label><input type="number" id="maq-anio" placeholder="2020"></div>
+    <div class="fg"><label>Ubicación</label><input id="maq-ubi" placeholder="Ej: Sector A"></div>
+    <div class="fg"><label>Estado</label><select id="maq-est"><option>Operativa</option><option>En mantenimiento</option><option>Fuera de servicio</option></select></div>
+    <div class="fg"><label>Horas de uso previas</label><input type="number" id="maq-hs" placeholder="0" title="Horas que ya tenía la máquina. Se les suman solas las horas de producción declaradas en ella."></div>
+    <div class="fg s2"><label>Máquinas de reemplazo (Ctrl+clic para múltiples)</label><select id="maq-rep" multiple style="min-height:75px"></select></div>
+    <div class="fg s2"><label>Observaciones</label><textarea id="maq-obs" style="min-height:45px"></textarea></div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-maq')">Cancelar</button><button class="btn btn-p" onclick="saveMaq()">Guardar máquina</button></div>
+</div></div>
+
+<!-- MANTENIMIENTO -->
+<div class="ov" id="mo-mant"><div class="mo">
+  <div class="mh">Tarea de mantenimiento <span class="mx" onclick="closeMo('mo-mant')">×</span></div>
+  <input type="hidden" id="mant-id">
+  <div class="fg2">
+    <div class="fg s2"><label>Máquina <span class="req">*</span></label><select id="mant-maq"></select></div>
+    <div class="fg s2"><label>Tarea <span class="req">*</span></label><input id="mant-tar" placeholder="Ej: Cambio de aceite hidráulico"></div>
+    <div class="fg"><label>Tipo</label><select id="mant-tip" onchange="toggleFrec(this.value)"><option>Frecuencia fija</option><option>Por condicion</option></select></div>
+    <div class="fg"><label>Responsable</label><input id="mant-res" placeholder="Apellido, Nombre"></div>
+    <div id="mant-fg" class="fg2" style="grid-column:span 2">
+      <div class="fg"><label>Frecuencia</label><select id="mant-ftp" onchange="toggleFrec($('mant-tip').value)"><option value="horas">Horas de uso</option><option value="dias">Días</option><option value="semanas">Semanas</option><option value="meses">Meses</option></select></div>
+      <div class="fg"><label>Cada (cantidad)</label><input type="number" id="mant-fvl" placeholder="Ej: 500" min="1"></div>
+      <div class="fg s2" id="mant-ulh-fg"><label>Horas de la máquina en la última realización</label><input type="number" id="mant-ulh" min="0" step="0.1" placeholder="Vacío = se empieza a contar desde las horas actuales"><div id="mant-hs-act" style="font-size:11px;color:var(--color-text-secondary);margin-top:3px"></div></div>
+    </div>
+    <div class="fg"><label>Última realización</label><input type="date" id="mant-ult"></div>
+    <div class="fg"><label>Próxima fecha</label><input type="date" id="mant-prx" title="Vacío = se calcula con la última realización y la frecuencia"></div>
+    <div class="fg s2"><label>Observaciones</label><textarea id="mant-obs" style="min-height:45px"></textarea></div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-mant')">Cancelar</button><button class="btn btn-p" onclick="saveMant()">Guardar tarea</button></div>
+</div></div>
+
+<!-- REALIZACIÓN DE MANTENIMIENTO -->
+<div class="ov" id="mo-mant-real"><div class="mo" style="width:480px">
+  <div class="mh">Registrar realización <span class="mx" onclick="closeMo('mo-mant-real')">×</span></div>
+  <input type="hidden" id="mreal-id">
+  <div id="mreal-info" style="background:var(--color-background-secondary);border-radius:8px;padding:9px 13px;font-size:12px;margin-bottom:12px"></div>
+  <div class="fg2">
+    <div class="fg"><label>Fecha <span class="req">*</span></label><input type="date" id="mreal-fec"></div>
+    <div class="fg" id="mreal-hs-fg"><label>Horas de la máquina</label><input type="number" id="mreal-hs" min="0" step="0.1"></div>
+    <div class="fg s2"><label>Responsable</label><input id="mreal-res" placeholder="Apellido, Nombre"></div>
+    <div class="fg s2"><label>Observaciones</label><textarea id="mreal-obs" style="min-height:45px" placeholder="Qué se hizo, repuestos usados..."></textarea></div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-mant-real')">Cancelar</button><button class="btn btn-p" onclick="saveMantReal()">Registrar</button></div>
+</div></div>
+
+<!-- HISTORIAL DE MANTENIMIENTO -->
+<div class="ov" id="mo-mant-hist"><div class="mo" style="width:680px">
+  <div class="mh"><span id="mhist-title">Historial</span> <span class="mx" onclick="closeMo('mo-mant-hist')">×</span></div>
+  <div id="mhist-body"><div class="ld">Cargando...</div></div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-mant-hist')">Cerrar</button></div>
+</div></div>
+
+<!-- TICKET -->
+<div class="ov" id="mo-tkt"><div class="mo">
+  <div class="mh">Ticket de reparación <span class="mx" onclick="closeMo('mo-tkt')">×</span></div>
+  <input type="hidden" id="tkt-id">
+  <div class="fg2">
+    <div class="fg s2"><label>Máquina <span class="req">*</span></label><select id="tkt-maq"></select></div>
+    <div class="fg s2"><label>Descripción del problema <span class="req">*</span></label><textarea id="tkt-des" placeholder="Describí el fallo o problema detectado"></textarea></div>
+    <div class="fg"><label>Tipo</label><select id="tkt-tip"><option>Correctivo</option><option>Preventivo</option><option>Mejora</option></select></div>
+    <div class="fg"><label>Prioridad</label><select id="tkt-pri"><option>Normal</option><option>Media</option><option>Alta</option><option>Crítica</option></select></div>
+    <div class="fg"><label>Estado</label><select id="tkt-est"><option>Abierto</option><option>En proceso</option><option>Cerrado</option></select></div>
+    <div class="fg" style="position:relative">
+      <label>Responsable</label>
+      <input id="tkt-res" placeholder="Buscar empleado..." autocomplete="off"
+        oninput="filtrarTktResponsables()" onfocus="filtrarTktResponsables()"
+        onblur="setTimeout(function(){var c=$('tkt-res-results');if(c)c.style.display='none';},150)">
+      <div id="tkt-res-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:7px;margin-top:3px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.14);z-index:10"></div>
+    </div>
+    <div class="fg"><label>Tiempo de paro (días hábiles)</label>
+      <div id="tkt-timer-box" style="background:var(--bg2,#f3f4f6);border:1px solid var(--bor,#d1d5db);border-radius:6px;padding:10px 14px;font-family:monospace;font-size:1.05rem;color:var(--tx,#111);min-height:38px;display:flex;align-items:center;gap:8px;">
+        <span id="tkt-timer-icon">⏱️</span>
+        <span id="tkt-timer-val" style="font-weight:600;letter-spacing:0.03em;">—</span>
+        <span id="tkt-timer-label" style="font-size:0.82rem;color:var(--tx2,#6b7280);margin-left:4px;"></span>
+      </div>
+    </div>
+    <div class="fg" id="tkt-ajuste-box"><label>Ajuste de horas <span style="font-size:10px;color:#888;font-weight:400">— horas a sumar (tiempo adicional no contemplado por el contador)</span></label>
+      <input type="text" inputmode="decimal" id="tkt-ajuste" placeholder="0" title="Ingresá las horas a sumar al contador (ej: 4,5 u 8.5). Podés usar coma o punto." oninput="this.value=this.value.replace(/[^0-9.,]/g,'')">
+    </div>
+    <div class="fg"><label>Costo reparación ($)</label><input type="number" id="tkt-cos" placeholder="0"></div>
+    <div class="fg s2"><label>Solución aplicada</label><textarea id="tkt-sol" placeholder="Describí qué se hizo para resolver el problema"></textarea></div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-tkt')">Cancelar</button><button class="btn btn-p" onclick="saveTkt()">Guardar ticket</button></div>
+</div></div>
+

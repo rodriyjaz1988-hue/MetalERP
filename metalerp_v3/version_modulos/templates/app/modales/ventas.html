@@ -1,0 +1,95 @@
+<!-- PEDIDO DE COTIZACIÓN -->
+<div class="ov" id="mo-pcot"><div class="mo">
+  <div class="mh"><span id="pcot-title">Nuevo pedido de cotización</span> <span class="mx" onclick="closeMo('mo-pcot')">×</span></div>
+  <input type="hidden" id="pcot-id">
+  <div class="fg2">
+    <div class="fg s2" style="position:relative"><label>Cliente <span class="req">*</span></label>
+      <input type="text" id="pcot-cli-search" placeholder="Buscar cliente..." autocomplete="off"
+        oninput="filtrarClienteBuscador('pcot-cli',null,null)" onfocus="filtrarClienteBuscador('pcot-cli',null,null)"
+        onblur="setTimeout(function(){var c=$('pcot-cli-results');if(c)c.style.display='none';},150)">
+      <input type="hidden" id="pcot-cli">
+      <div id="pcot-cli-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:7px;margin-top:3px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.14);z-index:10"></div>
+    </div>
+    <div class="fg s2" style="position:relative"><label>Código (producto terminado) <span class="req">*</span></label>
+      <input type="text" id="pcot-prod-search" placeholder="Buscar producto terminado por código o nombre..." autocomplete="off"
+        oninput="filtrarPcotProducto()" onfocus="filtrarPcotProducto()"
+        onblur="setTimeout(function(){var c=$('pcot-prod-results');if(c)c.style.display='none';},150)">
+      <input type="hidden" id="pcot-prod">
+      <div id="pcot-prod-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:7px;margin-top:3px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.14);z-index:10"></div>
+    </div>
+    <div class="fg"><label>Fecha <span class="req">*</span></label><input type="date" id="pcot-fecha"></div>
+    <div class="fg"><label>Cantidad de piezas <span class="req">*</span></label><input type="number" id="pcot-cant" min="1" step="1" oninput="pcotCalcUnit()"></div>
+    <div class="fg" data-monetario id="pcot-precio-fg" title="El precio se carga con Cotizar o en una contraoferta"><label>Precio total vigente ($)</label><input id="pcot-precio" readonly placeholder="Sin cotizar" style="background:#f8f8f6"></div>
+    <div class="fg s2" data-monetario id="pcot-unit-fg"><label>Precio unitario (total ÷ cantidad)</label><input id="pcot-unit" readonly style="background:#f8f8f6;font-weight:600"></div>
+    <div class="fg s2"><label>Descripción <span id="pcot-desc-cnt" style="font-weight:400;color:var(--color-text-secondary)"></span></label><textarea id="pcot-desc" maxlength="1000" rows="3" placeholder="Detalle del pedido: especificaciones, plano, terminación, plazo pedido por el cliente... (opcional)" oninput="pcotDescCnt()" style="width:100%;min-height:60px;resize:vertical"></textarea></div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-pcot')">Cancelar</button><button class="btn btn-p" onclick="savePcot()">Guardar pedido</button></div>
+</div></div>
+
+<!-- COTIZAR / CONTRAOFERTA DE UN PEDIDO DE COTIZACIÓN -->
+<div class="ov" id="mo-pcot-neg"><div class="mo" style="width:440px">
+  <div class="mh"><span id="pcot-neg-title">Cotizar</span> <span class="mx" onclick="closeMo('mo-pcot-neg')">×</span></div>
+  <input type="hidden" id="pcot-neg-id"><input type="hidden" id="pcot-neg-accion">
+  <div id="pcot-neg-info" style="font-size:12px;color:var(--color-text-secondary);margin-bottom:10px"></div>
+  <div class="fg2">
+    <div class="fg s2" id="pcot-neg-cant-fg"><label>Cantidad de piezas</label><input type="number" id="pcot-neg-cant" min="1" step="1" oninput="pcotNegCalc()"></div>
+    <div class="fg s2" data-monetario><label>Precio total ($) <span class="req" id="pcot-neg-precio-req">*</span></label><input type="number" id="pcot-neg-precio" min="0" step="0.01" oninput="pcotNegCalc()"></div>
+    <div class="fg s2" data-monetario><label>Precio unitario (total ÷ cantidad)</label><input id="pcot-neg-unit" readonly style="background:#f8f8f6;font-weight:600"></div>
+    <div class="fg s2"><label>Nota (opcional)</label><input type="text" id="pcot-neg-nota" maxlength="300" placeholder="Condiciones, plazo, quién respondió..."></div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-pcot-neg')">Cancelar</button><button class="btn btn-p" id="pcot-neg-ok" onclick="savePcotNeg()">Guardar</button></div>
+</div></div>
+
+<!-- HISTORIAL DE UN PEDIDO DE COTIZACIÓN -->
+<div class="ov" id="mo-pcot-hist"><div class="mo" style="width:900px;max-width:96vw">
+  <div class="mh"><span id="pcot-hist-title">Historial</span> <span class="mx" onclick="closeMo('mo-pcot-hist')">×</span></div>
+  <div id="pcot-hist-info" style="font-size:12px;color:var(--color-text-secondary);margin-bottom:8px"></div>
+  <div id="pcot-hist-body" class="nowrap-tbl"><div class="ld">Cargando...</div></div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-pcot-hist')">Cerrar</button></div>
+</div></div>
+
+<!-- PRESUPUESTO -->
+<div class="ov" id="mo-pres"><div class="mo">
+  <div class="mh"><span id="pres-title">Nuevo presupuesto</span> <span class="mx" onclick="closeMo('mo-pres')">×</span></div>
+  <input type="hidden" id="pres-id">
+  <div class="fg2">
+    <div class="fg s2"><label>Descripción <span class="req">*</span></label><input id="pres-des"></div>
+    <div class="fg" style="position:relative"><label>Cliente</label>
+      <input type="text" id="pres-cli-search" placeholder="Buscar cliente..." autocomplete="off"
+        oninput="filtrarClienteBuscador('pres-cli',null,null)" onfocus="filtrarClienteBuscador('pres-cli',null,null)"
+        onblur="setTimeout(function(){var c=$('pres-cli-results');if(c)c.style.display='none';},150)">
+      <input type="hidden" id="pres-cli">
+      <div id="pres-cli-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:7px;margin-top:3px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.14);z-index:10"></div>
+    </div>
+    <div class="fg"><label>Estado</label><select id="pres-est"><option>Borrador</option><option>Enviado</option><option>Aprobado</option><option>Rechazado</option><option>Facturado</option></select></div>
+    <div class="fg"><label>Subtotal ($)</label><input type="number" id="pres-sub" placeholder="0" oninput="calcT()"></div>
+    <div class="fg"><label>IVA (%)</label><input type="number" id="pres-iva" value="21" oninput="calcT()"></div>
+    <div class="fg s2"><label>Total con IVA ($)</label><input id="pres-tot" readonly style="background:#f8f8f6;font-weight:600"></div>
+    <div class="fg"><label>Validez (días)</label><input type="number" id="pres-val" value="30"></div>
+    <div class="fg s2"><label>Observaciones</label><textarea id="pres-obs" style="min-height:45px"></textarea></div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-pres')">Cancelar</button><button class="btn btn-p" onclick="savePres()">Guardar presupuesto</button></div>
+</div></div>
+
+<!-- CLIENTE -->
+<div class="ov" id="mo-cli"><div class="mo">
+  <div class="mh">Cliente <span class="mx" onclick="closeMo('mo-cli')">×</span></div>
+  <input type="hidden" id="cli-id">
+  <div class="fg2">
+    <div class="fg s2"><label>Razón social <span class="req">*</span></label><input id="cli-raz"></div>
+    <div class="fg"><label>CUIT <span class="req">*</span></label><input id="cli-cui" placeholder="30-12345678-9" maxlength="13" oninput="fmtC(this)"></div>
+    <div class="fg"><label>Condición IVA</label><select id="cli-iva"><option value="">—</option><option>Responsable inscripto</option><option>Monotributista</option><option>Exento</option><option>Consumidor final</option></select></div>
+    <div class="fg"><label>Rubro</label><select id="cli-rub"><option value="">—</option><option>Agropecuario</option><option>Alimenticio / Frigorífico</option><option>Construcción</option><option>Estado / Municipio</option><option>Metalúrgico / Taller</option><option>Otro</option></select></div>
+    <div class="fg"><label>Localidad</label><input id="cli-loc"></div>
+    <div class="fg s2"><label>Dirección</label><input id="cli-dir"></div>
+    <div class="fg"><label>Contacto <span class="req">*</span></label><input id="cli-con" placeholder="Nombre y apellido"></div>
+    <div class="fg"><label>Cargo</label><input id="cli-car"></div>
+    <div class="fg"><label>Teléfono</label><input id="cli-tel"></div>
+    <div class="fg"><label>Email</label><input type="email" id="cli-ema"></div>
+    <div class="fg"><label>Categoría</label><select id="cli-cat"><option>Regular</option><option>Premium</option><option>Institucional</option><option>Nuevo</option></select></div>
+    <div class="fg"><label>Plazo de pago</label><select id="cli-pla"><option value="">—</option><option>Contado</option><option>15 días</option><option>30 días</option><option>60 días</option><option>90 días</option></select></div>
+    <div class="fg s2"><label>Observaciones</label><textarea id="cli-obs" style="min-height:45px"></textarea></div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-cli')">Cancelar</button><button class="btn btn-p" onclick="saveCli()">Guardar cliente</button></div>
+</div></div>
+

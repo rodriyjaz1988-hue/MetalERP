@@ -1,0 +1,12 @@
+# Datos y claves de esta PC: nunca subir
+config.json
+monitor.db
+monitor.db-*
+monitor.log
+backups/
+ftp/
+# Programa armado y copias locales
+*.exe
+*.bak_*
+__pycache__/
+*.pyc

@@ -1,0 +1,59 @@
+    <div class="page" id="p-presupuestos" data-pt="pres">
+      <div class="vhead">
+        <div class="vhead-card">
+          <div class="vhead-row vhead-top">
+            <div class="vhead-tit">
+              <div class="pt" title="Cotizaciones y facturación a clientes">Presupuestos</div>
+              <span class="vh-badge pres-solo-pres" id="pres-sel-label" title="Presupuesto seleccionado">–</span>
+              <span class="vh-badge pres-solo-pcot" id="pcot-sel-label" title="Pedido seleccionado">–</span>
+            </div>
+            <div class="tabs vh-tabs" id="pres-tabs"><div class="tab active" data-t="pres">Presupuestos</div><div class="tab" data-t="pcot">Pedidos de cotización</div></div>
+            <div class="vh-acciones" id="pres-toolbar">
+              <button class="btn pres-solo-pres" id="pres-b-edit" style="display:none" onclick="presSelAccion('edit')" disabled title="Editar el presupuesto seleccionado"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11.1 2.2a1.3 1.3 0 0 1 1.9 0l.8.8a1.3 1.3 0 0 1 0 1.9L5.4 13.2l-3.2.9.9-3.2z"/></svg>Editar</button>
+              <button class="btn btn-p pres-solo-pres" id="b-pres" style="display:none" onclick="openPres()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M8 3.3v9.4M3.3 8h9.4"/></svg>Nuevo presupuesto</button>
+              <button class="btn pres-solo-pcot" id="pcot-b-edit" style="display:none" onclick="pcotSelAccion('edit')" disabled title="Editar el pedido seleccionado (solo Pendiente)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11.1 2.2a1.3 1.3 0 0 1 1.9 0l.8.8a1.3 1.3 0 0 1 0 1.9L5.4 13.2l-3.2.9.9-3.2z"/></svg>Editar</button>
+              <button class="btn pres-solo-pcot" id="pcot-b-cot" style="display:none" onclick="pcotSelAccion('cot')" disabled title="Cargar el precio total y enviarlo al cliente"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.8v12.4"/><path d="M11 4.3H6.6a2 2 0 0 0 0 4h2.8a2 2 0 0 1 0 4H4.8"/></svg>Cotizar</button>
+              <button class="btn pres-solo-pcot" id="pcot-b-aprob" style="display:none" onclick="pcotSelAccion('aprob')" disabled title="El cliente aprobó la cotización"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.2 3L13 4.5"/></svg>Aprobar</button>
+              <button class="btn pres-solo-pcot" id="pcot-b-contra" style="display:none" onclick="pcotSelAccion('contra')" disabled title="El cliente respondió con otro precio y/o cantidad"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 5.5h10l-2.5-2.5"/><path d="M13.5 10.5h-10l2.5 2.5"/></svg>Contraoferta</button>
+              <button class="btn pres-solo-pcot" id="pcot-b-rech" style="display:none" onclick="pcotSelAccion('rech')" disabled title="Rechazar el pedido (el taller si está Pendiente, el cliente si está Cotizada)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>Rechazar</button>
+              <button class="btn pres-solo-pcot" id="pcot-b-reab" style="display:none" onclick="pcotSelAccion('reab')" disabled title="Reabrir el pedido: vuelve a Pendiente (solo administrador)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9"/><path d="M2.5 2.5v2.5H5"/></svg>Reabrir</button>
+              <button class="btn pres-solo-pcot" id="pcot-b-hist" style="display:none" onclick="pcotSelAccion('hist')" disabled title="Ver la negociación del pedido seleccionado"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.3 1.5"/></svg>Historial</button>
+              <button class="btn btn-warn pres-solo-pcot" id="pcot-b-elim" style="display:none" onclick="pcotSelAccion('elim')" disabled title="Eliminar el pedido seleccionado"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.6 9.2c0 .5.4.8.9.8h5c.5 0 .9-.3.9-.8L12 4"/></svg>Eliminar</button>
+              <button class="btn btn-p pres-solo-pcot" id="b-pcot" style="display:none" onclick="openPcot()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M8 3.3v9.4M3.3 8h9.4"/></svg>Nuevo pedido</button>
+            </div>
+          </div>
+          <div class="vhead-row vhead-fil pres-solo-pres">
+            <div class="vh-fil-cli">
+              <input type="text" id="pres-fil-cli-search" class="sel-fil" style="min-width:0" placeholder="🔍 Buscar cliente" autocomplete="off"
+                oninput="filtrarClienteBuscador('pres-fil-cli','Todos','renderPres');if(!this.value){$('pres-fil-cli').value='';renderPres();}" onfocus="filtrarClienteBuscador('pres-fil-cli','Todos','renderPres')"
+                onblur="setTimeout(function(){var c=$('pres-fil-cli-results');if(c)c.style.display='none';},150)">
+              <input type="hidden" id="pres-fil-cli">
+              <div id="pres-fil-cli-results" class="vh-pop"></div>
+            </div>
+            <select id="pres-fil-est" class="sel-fil" style="flex:0 1 140px" title="Estado" onchange="renderPres()"><option value="">Todos los estados</option><option>Borrador</option><option>Enviado</option><option>Aprobado</option><option>Rechazado</option><option>Facturado</option></select>
+            <span data-monetario style="display:contents">
+              <span class="vh-fil-lbl">Total:</span>
+              <input type="number" id="pres-fil-tmin" class="sel-fil vh-fil-num" style="flex-basis:100px;width:100px" placeholder="Desde $" min="0" oninput="renderPres()">
+              <input type="number" id="pres-fil-tmax" class="sel-fil vh-fil-num" style="flex-basis:100px;width:100px" placeholder="Hasta $" min="0" oninput="renderPres()">
+            </span>
+            <span class="vh-fil-lbl">Fecha:</span>
+            <input type="date" id="pres-fil-desde" class="sel-fil" title="Desde" onchange="renderPres()">
+            <span class="vh-fil-lbl">a</span>
+            <input type="date" id="pres-fil-hasta" class="sel-fil" title="Hasta" onchange="renderPres()">
+            <button class="vh-fil-clear" onclick="clearFiltrosPres()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.2 2.8h11.6L9.3 8.2v4.4l-2.6 1.3V8.2z"/><path d="M2 14 14 2"/></svg>Limpiar filtros</button>
+          </div>
+          <div class="vhead-row vhead-fil pres-solo-pcot">
+            <input type="text" id="pcot-buscar" class="sel-fil vh-fil-wide" placeholder="🔍 Buscar por número, cliente, código o descripción" oninput="renderPcot()" autocomplete="off">
+            <select id="pcot-fil-estado" class="sel-fil" onchange="renderPcot()" title="Estado"><option value="">Todos los estados</option><option>Pendiente</option><option>Cotizada</option><option>Aprobada</option><option>Rechazada</option></select>
+            <button class="vh-fil-clear" onclick="clearFiltrosPcot()"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.2 2.8h11.6L9.3 8.2v4.4l-2.6 1.3V8.2z"/><path d="M2 14 14 2"/></svg>Limpiar filtros</button>
+          </div>
+        </div>
+      </div>
+      <div id="pres-sec-pres">
+      <div class="card"><div id="pres-list"><div class="ld">Cargando...</div></div></div>
+      </div>
+      <div id="pres-sec-pcot" style="display:none">
+      <div class="card"><div id="pcot-list" class="nowrap-tbl"><div class="ld">Cargando...</div></div></div>
+      </div>
+    </div>
+

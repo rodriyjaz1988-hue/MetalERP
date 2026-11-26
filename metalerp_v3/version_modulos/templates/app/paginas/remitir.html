@@ -1,0 +1,61 @@
+    <div class="page" id="p-remitir">
+      <div class="vhead">
+        <div class="vhead-card">
+          <div class="vhead-row vhead-top">
+            <div class="vhead-tit">
+              <div class="pt" title="Generar remitos desde stock de productos terminados para cubrir pedidos de clientes">Remitir a cliente</div>
+            </div>
+            <div class="vh-acciones">
+              <button class="btn" onclick="irAPantalla('remitos_emitidos')" title="Ver los remitos ya generados">Remitos emitidos</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start">
+        <div class="card">
+          <div class="ch">
+            <div style="font-size:12px;font-weight:600">Stock disponible (PT activos)</div>
+            <div style="display:flex;gap:8px">
+              <div style="position:relative;display:inline-block">
+                <input type="text" id="rem-cli-fil-search" class="sel-fil" placeholder="Todos los clientes" autocomplete="off" style="min-width:170px"
+                  oninput="filtrarClienteBuscador('rem-cli-fil','— Todos los clientes —','loadPTDisponible')" onfocus="filtrarClienteBuscador('rem-cli-fil','— Todos los clientes —','loadPTDisponible')"
+                  onblur="setTimeout(function(){var c=$('rem-cli-fil-results');if(c)c.style.display='none';},150)">
+                <input type="hidden" id="rem-cli-fil">
+                <div id="rem-cli-fil-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:7px;margin-top:3px;max-height:220px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.14);z-index:50"></div>
+              </div>
+            </div>
+          </div>
+          <div id="rem-pt-list"><div class="ld">Cargando...</div></div>
+        </div>
+        <div class="card">
+          <div class="ch">
+            <div style="font-size:12px;font-weight:600">Nuevo remito</div>
+          </div>
+          <div class="fg2" style="margin-bottom:12px">
+            <div class="fg" style="position:relative"><label>Cliente</label>
+              <input type="text" id="rem-cli-search" placeholder="Buscar cliente..." autocomplete="off"
+                oninput="filtrarClienteBuscador('rem-cli',null,'loadOCsPendientes')" onfocus="filtrarClienteBuscador('rem-cli',null,'loadOCsPendientes')"
+                onblur="setTimeout(function(){var c=$('rem-cli-results');if(c)c.style.display='none';},150)">
+              <input type="hidden" id="rem-cli">
+              <div id="rem-cli-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:7px;margin-top:3px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.14);z-index:10"></div>
+            </div>
+            <div class="fg"><label>OC del cliente</label><select id="rem-oc" onchange="onRemOCChange()"></select></div>
+            <div class="fg s2"><label>Observaciones</label><textarea id="rem-obs" style="min-height:36px"></textarea></div>
+          </div>
+          <div style="font-size:12px;font-weight:600;margin-bottom:8px">Ítems a remitir</div>
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead><tr style="color:var(--color-text-secondary)">
+              <th style="text-align:left;padding:0 4px 6px">Producto / Lote</th>
+              <th style="text-align:left;padding:0 4px 6px;width:80px">Disponible</th>
+              <th style="text-align:left;padding:0 4px 6px;width:80px">Cantidad</th>
+              <th style="width:28px"></th>
+            </tr></thead>
+            <tbody id="rem-items"></tbody>
+          </table>
+          <div class="ma" style="margin-top:12px">
+            <button class="btn btn-p" onclick="saveRemito()">Generar remito</button>
+          </div>
+        </div>
+      </div>
+    </div>
+

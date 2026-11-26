@@ -1,0 +1,73 @@
+<!-- MATERIAL -->
+<div class="ov" id="mo-mat"><div class="mo">
+  <div class="mh">Nuevo artículo <span class="mx" onclick="closeMo('mo-mat')">×</span></div>
+  <div class="fg2">
+    <div class="fg"><label>Código <span class="req">*</span></label><input id="mat-cod" placeholder="Ej: MAT-009"></div>
+    <div class="fg"><label>Tipo</label><select id="mat-tip"><option>Material</option><option>Insumo</option><option>Herramienta</option><option>Producto terminado</option></select></div>
+    <div class="fg s2"><label>Cliente</label><select id="mat-cli"></select></div>
+    <div class="fg s2"><label>Código de barras / QR / DataMatrix <span style="font-size:10px;color:var(--color-text-secondary)">(uso futuro)</span></label><input id="mat-bar" placeholder="Valor leído por el lector"></div>
+    <div class="fg s2"><label>Descripción <span class="req">*</span></label><input id="mat-des" placeholder="Ej: Acero SAE 1045 barra redonda"></div>
+    <div class="fg"><label>Categoría de producto</label><select id="mat-cp"></select></div>
+    <div class="fg"><label>Unidad</label><select id="mat-uni"><option>kg</option><option>m</option><option>m2</option><option>m3</option><option>unid</option><option>litro</option><option>botellón</option><option>rollo</option></select></div>
+    <div class="fg"><label>Stock actual</label><input type="number" id="mat-stk" placeholder="0"></div>
+    <div class="fg"><label>Stock mínimo</label><input type="number" id="mat-min" placeholder="0"></div>
+    <div class="fg"><label>Precio unitario ($)</label><input type="number" id="mat-pre" placeholder="0"></div>
+    <div class="fg"><label>Proveedor principal</label><select id="mat-prv"></select></div>
+    <div class="fg s2"><label>Observaciones</label><textarea id="mat-obs" style="min-height:45px"></textarea></div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-mat')">Cancelar</button><button class="btn btn-p" onclick="saveMat()">Guardar</button></div>
+</div></div>
+
+
+<!-- VINCULAR MATERIAL A PROVEEDOR -->
+<div class="ov" id="mo-prov-mat"><div class="mo" style="width:440px">
+  <div class="mh">Vincular material al proveedor <span class="mx" onclick="closeMo('mo-prov-mat')">×</span></div>
+  <input type="hidden" id="lm-pid">
+  <div class="fg2 f1">
+    <div class="fg s2" id="lm-mat-row" style="position:relative"><label>Material <span class="req">*</span></label>
+      <input type="text" id="lm-mat-search" placeholder="Buscar por código o descripción..." autocomplete="off"
+        oninput="filtrarLMMat()" onfocus="filtrarLMMat()"
+        onblur="setTimeout(function(){var c=$('lm-mat-results');if(c)c.style.display='none';},150)">
+      <input type="hidden" id="lm-mat">
+      <div id="lm-mat-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:7px;margin-top:3px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.14);z-index:10"></div>
+    </div>
+    <div class="fg"><label>Precio acordado ($)</label><input type="number" id="lm-pre" placeholder="0"></div>
+    <div class="fg"><label>Plazo de entrega (días)</label><input type="number" id="lm-pla" value="3" min="1"></div>
+    <div class="fg"><label>Rol</label><select id="lm-pri"><option value="1">Proveedor principal</option><option value="0">Proveedor alternativo</option></select></div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-prov-mat')">Cancelar</button><button class="btn btn-p" onclick="saveLM()">Vincular</button></div>
+</div></div>
+
+<!-- HISTORIAL DE COMPRA DEL PROVEEDOR -->
+<div class="ov" id="mo-historial-compra"><div class="mo" style="width:700px">
+  <div class="mh"><span id="hist-prov-titulo">Historial de compra</span> <span class="mx" onclick="closeMo('mo-historial-compra')">×</span></div>
+  <div id="hist-compra-body" style="max-height:70vh;overflow-y:auto"></div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-historial-compra')">Cerrar</button></div>
+</div></div>
+
+
+<!-- PROVEEDOR -->
+<div class="ov" id="mo-prov"><div class="mo">
+  <div class="mh"><span id="prov-mh-title">Proveedor</span> <span class="mx" onclick="closeMo('mo-prov')">×</span></div>
+  <input type="hidden" id="prov-id">
+  <div class="fg2">
+    <div class="fg s2"><label>Razón social <span class="req">*</span></label><input id="prov-raz" placeholder="Ej: Acerinox SA"></div>
+    <div class="fg"><label>CUIT</label><input id="prov-cui" placeholder="30-12345678-9"></div>
+    <div class="fg"><label>Materiales que provee</label><input id="prov-mat" placeholder="Ej: Aceros especiales"></div>
+    <div class="fg"><label>Contacto</label><input id="prov-con" placeholder="Nombre y apellido"></div>
+    <div class="fg"><label>Teléfono</label><input id="prov-tel"></div>
+    <div class="fg"><label>Email</label><input type="email" id="prov-ema"></div>
+    <div class="fg"><label>Plazo (días)</label><input type="number" id="prov-pla" value="3"></div>
+    <div class="fg"><label>Calificación (1-5)</label><input type="number" id="prov-cal" value="5" min="1" max="5"></div>
+    <div class="fg"><label>Estado</label><select id="prov-est"><option value="Activo">Activo</option><option value="Inactivo">Inactivo</option></select></div>
+    <div class="fg"><label>Categoría de compra</label><select id="prov-catc">
+        <option value="">— Sin definir (heurístico automático) —</option>
+        <option value="TRATAMIENTO SUPERFICIAL">Tratamiento superficial</option>
+        <option value="MATERIA PRIMA">Materia prima</option>
+        <option value="PROCESO">Proceso</option>
+      </select></div>
+    <div class="fg s2"><label>Observaciones</label><textarea id="prov-obs" style="min-height:45px"></textarea></div>
+  </div>
+  <div class="ma"><button class="btn" onclick="closeMo('mo-prov')">Cancelar</button><button class="btn btn-p" onclick="saveProv()">Guardar proveedor</button></div>
+</div></div>
+
